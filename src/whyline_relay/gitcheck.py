@@ -6,6 +6,12 @@ import re
 import subprocess
 from pathlib import Path
 
+RELAY_IGNORE = (
+    ".whyline/relay/logs/",
+    ".whyline/relay/state.json*",
+    ".whyline/relay/STOP",
+)
+
 
 class GitError(RuntimeError):
     """A git command failed or git is unavailable."""
@@ -68,3 +74,25 @@ def commit_verified(root: Path, base_commit: str, task_id: str) -> bool:
     if head == base_commit:
         return False
     return _names_task(commit_message(root, head), task_id)
+
+
+def ensure_relay_ignored(root: Path) -> None:
+    """Keep the relay's own logs, state and stop file out of `git status` and commits.
+
+    Written to .git/info/exclude, which is local and never committed, so this
+    neither dirties the tree nor adds a file to a task's commit. Without it the
+    reviewer's `git add -A` sweeps the agent logs into the commit. Idempotent.
+    """
+    target = Path(_git(root, "rev-parse", "--git-path", "info/exclude"))
+    if not target.is_absolute():
+        target = root / target
+    existing = target.read_text(encoding="utf-8") if target.exists() else ""
+    present = existing.splitlines()
+    missing = [pattern for pattern in RELAY_IGNORE if pattern not in present]
+    if not missing:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        if existing and not existing.endswith("\n"):
+            handle.write("\n")
+        handle.write("\n".join(missing) + "\n")

@@ -95,3 +95,27 @@ def test_commit_verified_matches_the_whole_task_id(
         ["git", "commit", "-m", message], cwd=repo, check=True, capture_output=True
     )
     assert gitcheck.commit_verified(repo, base, task_id) is expected
+
+
+def test_relay_files_are_ignored_and_ignoring_is_idempotent(repo: Path):
+    relay = repo / ".whyline" / "relay"
+    (relay / "logs").mkdir(parents=True)
+    (relay / "logs" / "WL-1-1-codex.log").write_text("x")
+    (relay / "state.json").write_text("{}")
+    (relay / "STOP").write_text("")
+    (relay / "config.toml").write_text("max_rounds = 3\n")
+    assert "logs" in _status(repo)
+    gitcheck.ensure_relay_ignored(repo)
+    gitcheck.ensure_relay_ignored(repo)
+    status = _status(repo)
+    assert "logs" not in status and "state.json" not in status and "STOP" not in status
+    assert "config.toml" in status
+    exclude = (repo / ".git" / "info" / "exclude").read_text().splitlines()
+    assert exclude.count(".whyline/relay/logs/") == 1
+
+
+def _status(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout

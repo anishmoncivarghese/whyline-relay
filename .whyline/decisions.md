@@ -199,3 +199,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/routing.py, tests/test_routing.py, src/whyline_relay/cli.py
 
 <!-- whyline-event: f5996c6618f04cc3bec5e7adecc91d69 -->
+
+## 2026-09-20 — Drive M2 from task-scoped handoffs and resume at the recorded decision point
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-8
+
+**Because:** the relay must reject handoffs for another task, route valid resumed review or approval states without rerunning Codex, and keep its runtime logs out of reviewer commits while preserving handoffs as the sole authority
+
+**Rejected:**
+
+- Restart every resumed task with Codex — it repeats completed work and contradicts same-decision-point recovery
+- Route any fresh handoff regardless of task id — a confused or stale event could send the wrong work to Claude
+- Gitignore all of .whyline/relay — config and prompt templates are intended to remain reviewable and committable
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py, tests/test_loop_single.py
+
+<!-- whyline-event: fbaba918b7e8476ea7363128981dce35 -->
+
+## 2026-09-20 — RELAY-8 review: approve (milestone M2)
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-8
+
+**Because:** loop.py, test_loop_single.py, fake_agent.py, cli.py and test_gitcheck.py are byte-identical to the pre-reviewed plan blocks; gitcheck.py differs only in placing the RELAY_IGNORE constant at the top of the module instead of just above the function, which is behaviour-neutral. Suite passes 82/82 with codex and claude tripwire shims never firing. Ran the real whyline-relay CLI end to end in a throwaway repo with the real whyline and fake agents: relay/plan was created, real whyline claim and sync worked, the handoff routed, the commit verified and the box ticked, and the relay's own logs stayed out of the task commit. HEAD unmoved so Codex did not commit. Fake-agent coverage does not prove the real codex and claude CLIs: the owner-watched M2 run is still required before Task 9
+
+**Rejected:**
+
+- Require Codex to move RELAY_IGNORE below the imports as the plan wrote it — cosmetic, no behaviour difference
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py, src/whyline_relay/cli.py, tests/fake_agent.py
+
+<!-- whyline-event: 9359f7ab7d9a43dfaeb8573f6227c680 -->

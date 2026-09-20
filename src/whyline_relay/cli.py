@@ -7,7 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from whyline_relay import agents, config, plan, prompts, whylinecmd
+from whyline_relay import agents, config, gitcheck, loop, plan, prompts, whylinecmd
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--plan", default=None, help="Plan file (default: from config)")
     start.add_argument("--dry-run", action="store_true")
     start.add_argument("--only", default=None, metavar="TASK_ID")
+    start.add_argument("--branch", default=None)
     return parser
 
 
@@ -64,8 +65,19 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(rendered)
         return EXIT_OK
 
-    print("Only --dry-run is implemented so far.", file=sys.stderr)
-    return EXIT_ERROR
+    try:
+        gitcheck.ensure_branch(root, args.branch or f"{settings.branch_prefix}{plan_path.stem}")
+        base = gitcheck.head_commit(root)
+        outcome = loop.run_task(root, settings, task, base_commit=base)
+    except loop.Paused as paused:
+        print(f"\nPaused: {paused.reason}", file=sys.stderr)
+        if paused.log_path is not None:
+            print(f"Log: {paused.log_path}", file=sys.stderr)
+        print("Resume with: whyline-relay resume", file=sys.stderr)
+        return EXIT_PAUSED
+    plan_path.write_text(plan.tick(content, outcome.task_id), encoding="utf-8")
+    print(f"\n{outcome.task_id} approved and committed in {outcome.rounds} round(s).")
+    return EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:

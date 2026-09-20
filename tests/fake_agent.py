@@ -1,6 +1,7 @@
 """A fake agent. Prints, optionally writes a handoff, optionally hangs."""
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ def main() -> int:
     mode = sys.argv[1]
     root = Path(sys.argv[2])
     prompt = sys.argv[-1]
+    match = re.search(r"^## Task (\S+)", prompt, re.M)
+    task_id = match.group(1) if match else "WL-1"
     print(f"fake-agent {mode} received {len(prompt)} chars of prompt")
     if mode == "hang":
         time.sleep(600)
@@ -27,6 +30,7 @@ def main() -> int:
         "changes": ("codex", "changes-requested"),
         "blocked": ("claude", "blocked"),
         "weird": ("claude", "banana"),
+        "wrongtask": ("claude", "ready-for-review"),
     }[mode]
     target = root / ".whyline"
     target.mkdir(parents=True, exist_ok=True)
@@ -40,7 +44,7 @@ def main() -> int:
                 "id": f"event{counter}",
                 "counter": counter,
                 "type": "Handoff",
-                "task": sys.argv[3] if len(sys.argv) > 4 else "WL-1",
+                "task": "OTHER-1" if mode == "wrongtask" else task_id,
                 "from_actor": "fake",
                 "to_actor": to_actor,
                 "status": status,
