@@ -382,3 +382,30 @@ Append-only. Written by whyline; readable without it.
 **Files:** .whyline/decisions.md
 
 <!-- whyline-event: 926633e8dd1e41c0be77ecd4f6872d2e -->
+## 2026-09-20 — Guard executable push paths without outlawing the explicit push deny rule
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-13
+
+**Because:** The source must declare Bash(git push:*) as denied while still proving no implementation path invokes git push
+
+**Rejected:**
+
+- Ban every git push string — that would force removal of the safety deny declaration
+
+**Files:** tests/test_no_bypass.py
+
+<!-- whyline-event: f4c612d9b0d94f1fae3152ba7f97de63 -->
+
+## 2026-09-20 — RELAY-13 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-13
+
+**Because:** LICENSE is byte-identical to agentdock's Apache-2.0 text. test_no_bypass exempts permission-declaration lines and forbids executed pushes and bypass flags; checked to fail on injected git push and --dangerously calls. Built outside Codex's sandbox: the wheel holds all 14 modules, the LICENSE and the whyline-relay entry point, with License-Expression Apache-2.0 and Requires-Python >=3.11; the sdist adds the tests. 140 passed, matching Codex's final report, tripwires never firing. Step 7 (recording decisions in agentdock) is Claude's and is done separately
+
+**Files:** .whyline/decisions.md
+
+<!-- whyline-event: b9e382fc80d74143b8b5f0e58b1e2ec3 -->
