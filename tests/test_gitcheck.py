@@ -119,3 +119,20 @@ def _status(repo: Path) -> str:
         ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=repo, check=True, capture_output=True, text=True,
     ).stdout
+
+
+def test_dirty_paths_lists_modified_and_untracked_files(repo: Path):
+    (repo / "README.md").write_text("changed\n")
+    (repo / "new.txt").write_text("x")
+    assert sorted(gitcheck.dirty_paths(repo)) == ["README.md", "new.txt"]
+
+
+def test_commit_paths_commits_only_the_named_files(repo: Path):
+    (repo / "README.md").write_text("changed\n")
+    (repo / "other.txt").write_text("x")
+    gitcheck.commit_paths(repo, [repo / "README.md"], "chore: tick WL-1 in the plan")
+    assert gitcheck.dirty_paths(repo) == ["other.txt"]
+    assert gitcheck.commit_message(repo, gitcheck.head_commit(repo)) == "chore: tick WL-1 in the plan"
+    before = gitcheck.head_commit(repo)
+    gitcheck.commit_paths(repo, [repo / "README.md"], "chore: again")
+    assert gitcheck.head_commit(repo) == before

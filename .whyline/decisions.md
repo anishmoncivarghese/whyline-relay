@@ -267,3 +267,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, src/whyline_relay/config.py, tests/fake_agent.py
 
 <!-- whyline-event: 99a0bfa875c8424ab8708cb268ad60c4 -->
+## 2026-09-20 — Commit each verified plan tick mechanically and save exact resume progress
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-9
+
+**Because:** an uncommitted tick otherwise contaminates the next task's review commit or remains dirty at the end, while saved base, round and handoff identity let resume continue without replaying completed agent work
+
+**Rejected:**
+
+- Leave plan ticks uncommitted — the next reviewer commit would absorb the previous tick and the final run would end dirty
+- Let the relay commit arbitrary leftovers — only plan.md is mechanical relay-owned state; code remains Claude-reviewed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/state.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: 316db8f3aaad41418dac861cf25ae8bf -->
+
+
+## 2026-09-20 — RELAY-9 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-9
+
+**Because:** loop.py, state.py, gitcheck.py and all Task 9 tests are byte-identical to the pre-reviewed plan blocks (Codex's gitcheck.py differs from a from-scratch build only in the RELAY_IGNORE placement approved in Task 8). run_plan re-reads the plan before ticking, raises PlanError on an unknown --only, reuses the saved base commit, round and last_handoff_id on resume, saves state on Paused and KeyboardInterrupt, checks nothing else is uncommitted after an approval, then ticks and commits only the plan file. 104 passed, matching Codex's report for this task, with codex, claude and osascript tripwires never firing. Reviewed as one of five tasks Codex built in one continuous uncommitted run: each task's tree was rebuilt from the plan and its test count cross-checked against Codex's per-task report
+
+**Files:** .whyline/decisions.md
+
+<!-- whyline-event: abe3f06da0164f5cb967e19937de7a6e -->

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from whyline_relay import agents, config, gitcheck, handoff, plan, prompts, routing, whylinecmd
+from whyline_relay import agents, config, gitcheck, handoff, plan, prompts, routing, state, whylinecmd
 
 
 class Paused(RuntimeError):
@@ -233,3 +233,146 @@ def run_task(
                     target,
                 )
         next_move = move
+
+
+def stop_path(root: Path) -> Path:
+    return config.relay_dir(root) / "STOP"
+
+
+def stop_requested(root: Path) -> bool:
+    return stop_path(root).exists()
+
+
+def _save_pause(
+    root: Path,
+    plan_path: Path,
+    branch: str,
+    task: plan.Task,
+    base_commit: str,
+    reason: str,
+    log: Path | None,
+    only: str | None,
+    progress: dict,
+) -> None:
+    state.save(
+        root,
+        state.RelayState(
+            plan=str(plan_path),
+            branch=branch,
+            task_id=task.task_id,
+            round=progress["round"],
+            base_commit=base_commit,
+            paused_reason=reason,
+            log_path=str(log or ""),
+            only=only or "",
+            last_handoff_id=progress["last"] or "",
+        ),
+    )
+
+
+def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
+    """After an approval nothing may be left uncommitted, or it rides into the next task.
+
+    The plan file is exempt: it is ticked and committed straight afterwards.
+    """
+    try:
+        own = str(plan_path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        own = None
+    leftovers = [path for path in gitcheck.dirty_paths(root) if path != own]
+    if leftovers:
+        raise Paused(
+            f"{task.task_id} was approved and committed, but files are still "
+            f"uncommitted ({', '.join(leftovers[:5])}). Stash or remove them (do not "
+            "commit them: the relay verifies the last commit's message), then resume, "
+            "or resume with --allow-dirty."
+        )
+
+
+def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
+    """Tick the box and commit that one file, so the tree is clean after every approval.
+
+    Re-reads the plan first: an agent may have edited it while it worked, and
+    ticking a copy read before the run would silently overwrite that edit.
+    """
+    current = plan_path.read_text(encoding="utf-8")
+    plan_path.write_text(plan.tick(current, task.task_id), encoding="utf-8")
+    gitcheck.commit_paths(root, [plan_path], f"chore: tick {task.task_id} in the plan")
+
+
+def run_plan(
+    root: Path,
+    settings: config.Config,
+    plan_path: Path,
+    *,
+    branch: str,
+    only: str | None = None,
+    resume: bool = False,
+    allow_dirty: bool = False,
+    echo: bool = True,
+) -> list[Outcome]:
+    """Run every unchecked task in file order. Tick each only after it commits.
+
+    With `resume`, the first task re-enters where it stopped: it reuses the base
+    commit saved when it paused (the reviewer may already have committed, and a
+    fresh base would make the approval unverifiable) and the round it was on,
+    and `run_task` picks the next agent from the handoff record.
+    """
+    outcomes: list[Outcome] = []
+    resuming = state.load(root) if resume else None
+    while True:
+        if stop_requested(root):
+            print("STOP file present; not starting another task.")
+            return outcomes
+        tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+        if only:
+            task = plan.find(tasks, only)
+            if task is None:
+                raise plan.PlanError(f"no task {only!r} in the plan")
+        else:
+            task = plan.next_unchecked(tasks)
+        if task is None or task.checked:
+            state.clear(root)
+            return outcomes
+
+        mid_task = resuming is not None and resuming.task_id == task.task_id
+        base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(root)
+        start_round = (resuming.round or 1) if mid_task else 1
+        resuming = None
+        progress = {"round": start_round, "last": None}
+
+        def on_turn(round_: int, previous_id: str | None) -> None:
+            progress["round"] = round_
+            progress["last"] = previous_id
+
+        try:
+            outcome = run_task(
+                root,
+                settings,
+                task,
+                base_commit=base_commit,
+                echo=echo,
+                resume=mid_task,
+                start_round=start_round,
+                on_turn=on_turn,
+            )
+            if not allow_dirty:
+                _require_clean(root, plan_path, task)
+        except Paused as paused:
+            _save_pause(
+                root, plan_path, branch, task, base_commit,
+                paused.reason, paused.log_path, only, progress,
+            )
+            raise
+        except KeyboardInterrupt:
+            _save_pause(
+                root, plan_path, branch, task, base_commit,
+                "interrupted by the user (Ctrl+C)", None, only, progress,
+            )
+            raise
+
+        _tick_and_commit(root, plan_path, task)
+        outcomes.append(outcome)
+        if only:
+            state.clear(root)
+            return outcomes

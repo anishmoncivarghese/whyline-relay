@@ -96,3 +96,24 @@ def ensure_relay_ignored(root: Path) -> None:
         if existing and not existing.endswith("\n"):
             handle.write("\n")
         handle.write("\n".join(missing) + "\n")
+
+
+def dirty_paths(root: Path) -> list[str]:
+    """Paths `git status` reports as changed or untracked, ignored files excluded."""
+    output = _git(root, "status", "--porcelain", "--untracked-files=all")
+    return [line.split(maxsplit=1)[1] for line in output.splitlines() if line.strip()]
+
+
+def commit_paths(root: Path, paths: list[Path], message: str) -> None:
+    """Commit only `paths`, leaving everything else in the tree alone.
+
+    Does nothing when those paths have no changes, so it is safe to repeat.
+    """
+    try:
+        relative = [str(Path(p).resolve().relative_to(root.resolve())) for p in paths]
+    except ValueError as error:
+        raise GitError(f"{error}: a path lies outside the repository") from error
+    _git(root, "add", "--", *relative)
+    if not _git(root, "diff", "--cached", "--name-only", "--", *relative):
+        return
+    _git(root, "commit", "-m", message, "--", *relative)
