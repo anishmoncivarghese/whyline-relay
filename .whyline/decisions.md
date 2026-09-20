@@ -133,3 +133,69 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
 
 <!-- whyline-event: 1149bc3beb08414db529fce4ef4531e1 -->
+
+## 2026-09-20 — Keep routing pure and make M1 dry-run assemble without launching
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-7
+
+**Because:** routing must depend only on the handoff event and configured statuses, while dry-run should expose the exact next task, argv, sync packet, and prompt without spending agent quota
+
+**Rejected:**
+
+- Infer success from process exit or output — the spec makes the whyline handoff record the sole routing authority
+- Invoke the agent during dry-run — that would violate the milestone's no-launch contract
+
+**Files:** src/whyline_relay/routing.py, src/whyline_relay/cli.py, tests/test_routing.py, tests/test_cli_dryrun.py
+
+<!-- whyline-event: 2bf0d947204b4efcb05c47870d53b8bb -->
+
+## 2026-09-20 — RELAY-7 review: request changes. Code matches the plan byte for byte, but decide() ignored to_actor, contradicting the spec's (to_actor, status) routing table
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-7
+
+**Because:** Spec 5.2 routes codex+assigned/changes-requested to implement, claude+ready-for-review to review, and only approved/blocked for any recipient; anything else pauses. Probed: codex+ready-for-review, claude+changes-requested and claude+assigned all routed to an agent instead of pausing. A mis-addressed handoff means a confused agent, and every later task builds on decide(). Fixed with IMPLEMENTER/REVIEWER checks; 3 new parametrized cases fail on the old code, all 15 routing and CLI tests pass on the new, 66 total. Dry run verified side-effect free and launching no agent (tripwire shims not fired, HEAD and .whyline unchanged). Deferred to the Task 10 review, not this round: (1) start --only with an unknown id prints 'Nothing to do' and exits 0 in this cmd_start, which Task 10 replaces, so check run_plan for it; (2) start --dry-run on a repo where whyline is not initialised raises a raw WhylineUnavailable traceback, while Task 10's guard catches it for real runs
+
+**Rejected:**
+
+- Fix the --only silent success in this round — cmd_start is rewritten in Task 10, so a patch here is churn and risks plan errors
+- Approve and defer the to_actor check — decide() is the one place every relay decision passes through, and the plan header says the spec wins where they disagree
+
+**Files:** src/whyline_relay/routing.py, tests/test_routing.py
+
+<!-- whyline-event: 97d6fd8c157b44298d9e4124e8b37bd6 -->
+
+## 2026-09-20 — Route actionable statuses only when addressed to the matching agent
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-7
+
+**Because:** the spec defines routing over the (to_actor, status) pair, and launching on a mis-addressed handoff would amplify agent confusion instead of pausing safely
+
+**Rejected:**
+
+- Route on status alone — codex plus ready-for-review and claude plus assigned or changes-requested would launch the wrong role
+
+**Files:** src/whyline_relay/routing.py, tests/test_routing.py
+
+<!-- whyline-event: 8d02428361e74302b64616b4bdf48893 -->
+
+## 2026-09-20 — RELAY-7 review round 2: approve (milestone M1)
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-7
+
+**Because:** routing.py and test_routing.py are byte-identical to the amended, independently verified plan code; cli.py and test_cli_dryrun.py unchanged from the plan; suite passes 66/66 with codex and claude tripwire shims never firing; 11 (to_actor,status) cases on the real code match spec 5.2; the fake agent's handoffs and all three real prompt handoffs are compatible with the stricter decide(); the dry run launches no agent and leaves HEAD and the working tree untouched; HEAD unmoved so Codex did not commit. Deferred to the Task 10 review: unknown --only id exits 0 with 'Nothing to do', and --dry-run without whyline init raises a raw traceback
+
+**Rejected:**
+
+- Require the deferred CLI items in this round — cmd_start is rewritten in Task 10, so patching it here is churn
+
+**Files:** src/whyline_relay/routing.py, tests/test_routing.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: f5996c6618f04cc3bec5e7adecc91d69 -->
