@@ -1,0 +1,8 @@
+ledger.jsonl
+index.db
+active-handoff.json
+ownership.json
+readside.log
+*.lock
+*.bak
+!decisions.md
