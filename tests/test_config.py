@@ -37,3 +37,10 @@ def test_malformed_toml_raises_config_error(tmp_path: Path):
         assert "config.toml" in str(error)
     else:
         raise AssertionError("expected ConfigError")
+
+
+def test_default_claude_command_passes_the_relay_permissions(tmp_path: Path):
+    """Project settings are ignored in a workspace never trusted interactively,
+    so the permissions travel with the command instead."""
+    command = config.load(tmp_path).agents["claude"]
+    assert command[command.index("--settings") + 1] == ".whyline/relay/claude-settings.json"

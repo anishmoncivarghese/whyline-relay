@@ -233,3 +233,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py, src/whyline_relay/cli.py, tests/fake_agent.py
 
 <!-- whyline-event: 9359f7ab7d9a43dfaeb8573f6227c680 -->
+
+## 2026-09-20 — Enforce the developer/reviewer boundary at runtime and carry Claude permissions explicitly
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-8b
+
+**Because:** the real M2 run showed Codex can commit under workspace-write and Claude ignores untrusted project allowlists, so the relay must detect Codex HEAD movement and pass a dedicated settings file; no-handoff diagnostics can explain denials without influencing routing
+
+**Rejected:**
+
+- Trust the Codex sandbox to protect Git — codex-cli 0.155.1 demonstrably committed under workspace-write
+- Write only .claude/settings.json — claude -p ignores its allow entries until interactive workspace trust
+- Route from permission-denial output — handoffs remain the sole routing authority
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/config.py, tests/test_loop_single.py
+
+<!-- whyline-event: a6ce040772ee428d98c9a451a1311f5f -->
+
+## 2026-09-20 — RELAY-8b review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-8b
+
+**Because:** loop.py, config.py, fake_agent.py, test_loop_single.py and test_config.py are byte-identical to what the plan's literal Task 8b instructions produce on the committed Task 8 tree; 22 and 86 tests pass as the plan states, with codex and claude tripwire shims never firing; HEAD unmoved so Codex did not commit. Step 7 real-CLI re-check passed against the real codex and claude with the default command carrying --settings: relay/plan created, Codex implemented without committing, Claude committed hello.py and decisions.md with the trailer and no relay logs, handoff approved, exit 0. The Codex commit guard itself is proven with the fake agent's real git commit; a real Codex was measured able to commit (probe commit 99411a5) but I did not induce it inside the relay, since obeying a task that contradicts the prompt tests obedience, not the guard. Codex took about 5 minutes on one turn against under 1 minute earlier: variance, but note the 30 minute default timeout exists for it
+
+**Rejected:**
+
+- Also force a real Codex commit inside the relay — the guard is a deterministic HEAD comparison already proven with a real git commit by the fake agent
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/config.py, tests/fake_agent.py
+
+<!-- whyline-event: 99a0bfa875c8424ab8708cb268ad60c4 -->

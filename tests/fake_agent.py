@@ -2,6 +2,7 @@
 
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,11 @@ def main() -> int:
     if mode == "ratelimited":
         print("You have exceeded your usage limit. Try again later.")
         return 1
+    if mode == "denied":
+        print("Ignoring 7 permissions.allow entries: this workspace has not been trusted.")
+        denial = {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
+        print(json.dumps({"type": "result", "permission_denials": [denial]}))
+        return 0
     to_actor, status = {
         "review": ("claude", "ready-for-review"),
         "approve": ("claude", "approved"),
@@ -31,7 +37,13 @@ def main() -> int:
         "blocked": ("claude", "blocked"),
         "weird": ("claude", "banana"),
         "wrongtask": ("claude", "ready-for-review"),
+        "codexcommit": ("claude", "ready-for-review"),
     }[mode]
+    if mode == "codexcommit":
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "sneaky"],
+            cwd=root, check=True, capture_output=True,
+        )
     target = root / ".whyline"
     target.mkdir(parents=True, exist_ok=True)
     existing = target / "active-handoff.json"

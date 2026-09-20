@@ -275,3 +275,33 @@ def test_resume_ignores_a_handoff_left_by_another_task(repo: Path, monkeypatch):
         base_commit=base, echo=False, resume=True,
     )
     assert seen[0][0] == "codex"
+
+
+def test_a_commit_by_the_implementer_pauses(repo: Path):
+    """Codex's sandbox does not block git commit, so the relay must notice."""
+    settings = settings_using("codexcommit", "approve", repo)
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert "forbids" in raised.value.reason
+    assert f"git reset {base[:12]}" in raised.value.reason
+
+
+def test_a_denied_reviewer_says_what_it_was_denied(repo: Path):
+    settings = settings_using("review", "denied", repo)
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    reason = raised.value.reason
+    assert "without handing off" in reason
+    assert "git commit -m x" in reason
+    assert "claude-settings.json" in reason
+
+
+def test_a_silent_agent_pause_quotes_its_last_output_line(repo: Path):
+    settings = settings_using("silent", "approve", repo)
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert "its last output was" in raised.value.reason
+    assert "fake-agent silent" in raised.value.reason

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,40 @@ def _run_agent(
     except agents.AgentMissing as error:
         raise Paused(str(error), target) from error
     return target
+
+
+def _no_handoff_detail(target: Path) -> str:
+    """Why an agent that handed nothing off probably stopped, for the human only.
+
+    Never used to route. Claude's JSON result lists the commands it was denied;
+    failing that, the last line the agent printed is usually the cause (for
+    example a settings file that was not found).
+    """
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if lines and lines[-1].startswith("{"):
+        try:
+            result = json.loads(lines[-1])
+        except ValueError:
+            result = None
+        denials = result.get("permission_denials", []) if isinstance(result, dict) else []
+        commands = [
+            str(d.get("tool_input", {}).get("command", d.get("tool_name", "?")))[:60]
+            for d in denials
+            if isinstance(d, dict)
+        ]
+        if commands:
+            return (
+                f"; it was denied permission to run: {', '.join(commands)}. "
+                "Check .whyline/relay/claude-settings.json"
+            )
+    if lines:
+        last = "".join(ch for ch in lines[-1].strip() if ch.isprintable())[:160]
+        return f'; its last output was: "{last}"'
+    return ""
 
 
 def _hit_a_limit(target: Path) -> bool:
@@ -139,12 +174,22 @@ def run_task(
         template = "implement" if agent == "codex" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
+        head_before = gitcheck.head_commit(root)
         if on_turn is not None:
             on_turn(round_, previous_id)
 
         target = _run_agent(
             root, settings, agent, template, task, round_, feedback, echo
         )
+        if agent == "codex" and gitcheck.head_commit(root) != head_before:
+            # Codex's sandbox does not stop it committing (measured on
+            # codex-cli 0.155.1); only the prompt says not to, so check.
+            raise Paused(
+                "codex made a commit, which the relay forbids (only the reviewer "
+                f"commits). Undo it with `git reset {head_before[:12]}` (your files "
+                "stay), then resume",
+                target,
+            )
 
         record = handoff.read(root)
         move = routing.decide(record, previous_id, settings.status_map)
@@ -156,7 +201,9 @@ def run_task(
                     target,
                 )
             raise Paused(
-                f"{agent} exited without handing off; nothing was routed", target
+                f"{agent} exited without handing off{_no_handoff_detail(target)}; "
+                "nothing was routed",
+                target,
             )
         if record.task != task.task_id:
             raise Paused(

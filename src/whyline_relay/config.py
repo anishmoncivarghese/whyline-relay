@@ -20,6 +20,8 @@ DEFAULTS = {
             "acceptEdits",
             "--output-format",
             "json",
+            "--settings",
+            ".whyline/relay/claude-settings.json",
         ],
     },
     "status_map": {
