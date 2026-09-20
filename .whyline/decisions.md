@@ -296,3 +296,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** .whyline/decisions.md
 
 <!-- whyline-event: abe3f06da0164f5cb967e19937de7a6e -->
+## 2026-09-20 — Guard the branch agents will commit to and resume onto the saved branch
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-10
+
+**Because:** starting from main is normal when the relay will switch branches, while resuming on whichever branch happens to be checked out could bypass the main-branch guard and commit in the wrong place
+
+**Rejected:**
+
+- Guard the current branch before switching — it rejects the normal main-to-relay flow and makes --branch ineffective
+- Resume in the current checkout — a paused run's branch is durable state and must be restored
+
+**Files:** src/whyline_relay/cli.py, tests/test_cli_commands.py
+
+<!-- whyline-event: 47415303dd84426cb89c4e603f64fbb9 -->
+
+
+## 2026-09-20 — RELAY-10 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-10
+
+**Because:** cli.py (assembled from the plan's prose edits) and test_cli_commands.py match the pre-reviewed plan. The guard checks the branch the agents will commit to, so starting from main switches to relay/<plan> and --branch lifts the refusal; resume returns to the saved branch, reuses the saved base commit and --only, and reports git, whyline and plan errors instead of a traceback; an unknown --only or a malformed plan is a clear error with exit 1; status and stop work. 118 passed, matching Codex's report for this task, tripwires never firing. Codex's own cli.py orders two helper functions differently from the plan's assembly; that reordering lands in the Task 12 commit, which takes Codex's file as the final version
+
+**Files:** .whyline/decisions.md
+
+<!-- whyline-event: 0edede732b86471181dbb4dc0d9e81f7 -->
