@@ -1,0 +1,29 @@
+[project]
+name = "whyline-relay"
+version = "0.1.0"
+description = "Runs a planned task list through Codex and Claude, routing on whyline handoffs."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+readme = "README.md"
+authors = [{ name = "Anish Varghese" }]
+dependencies = []
+
+[project.scripts]
+whyline-relay = "whyline_relay.cli:entry"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whyline_relay"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src/whyline_relay", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
