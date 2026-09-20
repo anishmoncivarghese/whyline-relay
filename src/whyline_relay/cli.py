@@ -9,7 +9,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from whyline_relay import agents, config, gitcheck, loop, notify, plan, prompts, state, whylinecmd
+from whyline_relay import agents, config, gitcheck, init, loop, notify, plan, prompts, state, whylinecmd
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -40,6 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     stop = subparsers.add_parser("stop", help="Stop after the current agent finishes")
     stop.add_argument("--repo", default=".")
+
+    init_parser = subparsers.add_parser("init", help="Write permissions and templates")
+    init_parser.add_argument("--repo", default=".")
+    init_parser.add_argument("--yes", action="store_true")
     return parser
 
 
@@ -123,18 +127,17 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _install_sigint_handler() -> None:
-    """Ctrl+C stops the run; the agent's own process group dies with it.
+def cmd_init(args: argparse.Namespace) -> int:
+    return init.run(Path(args.repo).resolve(), assume_yes=args.yes)
 
-    Agents are started with start_new_session=True, so SIGINT does not reach
-    them automatically. loop.run_plan saves state on the way out, which is what
-    makes `resume` possible.
-    """
 
-    def handler(signum, frame):  # noqa: ARG001
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGINT, handler)
+def _report_pause(paused: loop.Paused) -> int:
+    print(f"\nPaused: {paused.reason}", file=sys.stderr)
+    if paused.log_path is not None:
+        print(f"Log: {paused.log_path}", file=sys.stderr)
+    print("Resume with: whyline-relay resume", file=sys.stderr)
+    notify.send("whyline-relay paused", paused.reason)
+    return EXIT_PAUSED
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -207,6 +210,20 @@ def cmd_start(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _install_sigint_handler() -> None:
+    """Ctrl+C stops the run; the agent's own process group dies with it.
+
+    Agents are started with start_new_session=True, so SIGINT does not reach
+    them automatically. loop.run_plan saves state on the way out, which is what
+    makes `resume` possible.
+    """
+
+    def handler(signum, frame):  # noqa: ARG001
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _install_sigint_handler()
@@ -215,21 +232,13 @@ def main(argv: list[str] | None = None) -> int:
         "resume": cmd_resume,
         "status": cmd_status,
         "stop": cmd_stop,
+        "init": cmd_init,
     }
     try:
         return commands[args.command](args)
     except KeyboardInterrupt:
         print("\nInterrupted. Resume with: whyline-relay resume", file=sys.stderr)
         return EXIT_PAUSED
-
-
-def _report_pause(paused: loop.Paused) -> int:
-    print(f"\nPaused: {paused.reason}", file=sys.stderr)
-    if paused.log_path is not None:
-        print(f"Log: {paused.log_path}", file=sys.stderr)
-    print("Resume with: whyline-relay resume", file=sys.stderr)
-    notify.send("whyline-relay paused", paused.reason)
-    return EXIT_PAUSED
 
 
 def entry() -> int:

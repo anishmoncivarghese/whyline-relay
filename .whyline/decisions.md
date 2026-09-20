@@ -354,3 +354,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** .whyline/decisions.md
 
 <!-- whyline-event: 9d77d1ee58dd416f8a3dbb01f6191aca -->
+## 2026-09-20 — Keep unattended Claude permissions relay-owned and explicit
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-12
+
+**Because:** Claude -p can ignore project permissions before interactive trust, while --settings reliably applies the relay configuration without changing user settings
+
+**Rejected:**
+
+- .claude/settings.json — merging into user-owned settings is both invasive and unreliable for a fresh unattended checkout
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: c125e35c0bb646468ce09852eff9b317 -->
+
+
+## 2026-09-20 — RELAY-12 review: approve, with README corrections
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-12
+
+**Because:** init.py and test_init.py are byte-identical to the pre-reviewed plan blocks. init writes a relay-owned .whyline/relay/claude-settings.json (passed to Claude with --settings; the user's .claude/settings.json is left alone), prompt templates, config and a relay .gitignore; declining or having no terminal writes nothing; it says plainly that the allowlist is not a sandbox. cli.py is Codex's final file, differing from the plan's prose assembly only in helper ordering. The README was corrected by the reviewer (deviation from the strict developer-only split, disclosed in the commit): missing requirements, a worked example that fails on a fresh project, an undisclosed tick commit, and the Codex commit caveat. The spec link is correct for the origin remote but 404s until agentdock is pushed. 138 passed, matching Codex's report, tripwires never firing
+
+**Files:** .whyline/decisions.md
+
+<!-- whyline-event: 926633e8dd1e41c0be77ecd4f6872d2e -->
