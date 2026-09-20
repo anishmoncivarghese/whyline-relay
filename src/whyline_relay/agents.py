@@ -112,6 +112,16 @@ def run(
                     sys.stdout.write(line)
                     sys.stdout.flush()
         code = process.wait()
+    except BaseException:
+        # Ctrl+C, or anything else that unwinds us: the agent must not outlive
+        # the relay. It runs in its own session, so SIGINT never reaches it.
+        signal_group(signal.SIGTERM)
+        try:
+            process.wait(timeout=KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            signal_group(signal.SIGKILL)
+            process.wait()
+        raise
     finally:
         watchdog.cancel()
         hard_kill.cancel()

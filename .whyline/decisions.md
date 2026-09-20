@@ -325,3 +325,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** .whyline/decisions.md
 
 <!-- whyline-event: 0edede732b86471181dbb4dc0d9e81f7 -->
+## 2026-09-20 — Treat every agent-run unwind as process-group teardown and persist Ctrl+C state
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-11
+
+**Because:** agents run in separate sessions, so SIGINT does not reach them automatically; the relay must terminate then escalate the child group before propagating interruption, while run_plan saves the exact task state for resume
+
+**Rejected:**
+
+- Assume Ctrl+C reaches child agents — start_new_session isolates them and leaves an orphan editing the repository
+- Use pgrep or pkill in tests — Codex's sandbox cannot list processes, so a recorded PID and os.kill(pid, 0) provide a meaningful check
+
+**Files:** src/whyline_relay/agents.py, src/whyline_relay/cli.py, tests/test_interrupt.py
+
+<!-- whyline-event: 02cee849701f4a388786fd4e702f00e9 -->
+
+
+## 2026-09-20 — RELAY-11 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-11
+
+**Because:** agents.run now stops the agent's whole process group on any unwind (SIGTERM, then SIGKILL after the grace period) and run_plan saves state on Ctrl+C, so resume works and no orphan is left; notify.py is best-effort and never fatal. tests/conftest.py stubs the CLI notifier so the suite makes 0 real osascript calls (measured with a tripwire; it made 3 before). The interrupt test records the agent's pid in a file and checks it with os.kill(pid, 0), because pgrep and pkill fail inside Codex's sandbox and a pgrep-based test would pass vacuously there; it fails without the kill-on-interrupt fix. 125 passed, matching Codex's report, tripwires never firing
+
+**Files:** .whyline/decisions.md
+
+<!-- whyline-event: 9d77d1ee58dd416f8a3dbb01f6191aca -->

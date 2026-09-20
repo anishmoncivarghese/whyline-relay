@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-from whyline_relay import agents, config, gitcheck, loop, plan, prompts, state, whylinecmd
+from whyline_relay import agents, config, gitcheck, loop, notify, plan, prompts, state, whylinecmd
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -122,12 +123,18 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _report_pause(paused: loop.Paused) -> int:
-    print(f"\nPaused: {paused.reason}", file=sys.stderr)
-    if paused.log_path is not None:
-        print(f"Log: {paused.log_path}", file=sys.stderr)
-    print("Resume with: whyline-relay resume", file=sys.stderr)
-    return EXIT_PAUSED
+def _install_sigint_handler() -> None:
+    """Ctrl+C stops the run; the agent's own process group dies with it.
+
+    Agents are started with start_new_session=True, so SIGINT does not reach
+    them automatically. loop.run_plan saves state on the way out, which is what
+    makes `resume` possible.
+    """
+
+    def handler(signum, frame):  # noqa: ARG001
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, handler)
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -196,18 +203,33 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(str(error), file=sys.stderr)
         return EXIT_ERROR
     print(f"\nPlan complete: {len(outcomes)} task(s) approved and committed.")
+    notify.send("whyline-relay", f"{len(outcomes)} task(s) done")
     return EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _install_sigint_handler()
     commands = {
         "start": cmd_start,
         "resume": cmd_resume,
         "status": cmd_status,
         "stop": cmd_stop,
     }
-    return commands[args.command](args)
+    try:
+        return commands[args.command](args)
+    except KeyboardInterrupt:
+        print("\nInterrupted. Resume with: whyline-relay resume", file=sys.stderr)
+        return EXIT_PAUSED
+
+
+def _report_pause(paused: loop.Paused) -> int:
+    print(f"\nPaused: {paused.reason}", file=sys.stderr)
+    if paused.log_path is not None:
+        print(f"Log: {paused.log_path}", file=sys.stderr)
+    print("Resume with: whyline-relay resume", file=sys.stderr)
+    notify.send("whyline-relay paused", paused.reason)
+    return EXIT_PAUSED
 
 
 def entry() -> int:
