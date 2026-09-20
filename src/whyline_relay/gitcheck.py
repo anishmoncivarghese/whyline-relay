@@ -1,0 +1,70 @@
+"""Git guards. Git is the authority; the relay only asks it questions."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+
+class GitError(RuntimeError):
+    """A git command failed or git is unavailable."""
+
+
+def _git(root: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=str(root), capture_output=True, text=True
+        )
+    except FileNotFoundError as error:
+        raise GitError("git is not installed or not on PATH") from error
+    if result.returncode != 0:
+        raise GitError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def current_branch(root: Path) -> str:
+    return _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+
+
+def is_dirty(root: Path) -> bool:
+    return bool(_git(root, "status", "--porcelain"))
+
+
+def head_commit(root: Path) -> str:
+    return _git(root, "rev-parse", "HEAD")
+
+
+def commit_message(root: Path, commit: str) -> str:
+    return _git(root, "log", "-1", "--format=%B", commit)
+
+
+def ensure_branch(root: Path, name: str) -> None:
+    """Switch to `name`, creating it from the current commit if it does not exist."""
+    try:
+        _git(root, "rev-parse", "--verify", f"refs/heads/{name}")
+    except GitError:
+        _git(root, "checkout", "-b", name)
+        return
+    _git(root, "checkout", name)
+
+
+def _names_task(message: str, task_id: str) -> bool:
+    """True when `task_id` appears as a whole id, not as the start of a longer one.
+
+    A plain substring test would let a commit for RELAY-10 verify RELAY-1.
+    """
+    pattern = rf"(?<![\w-]){re.escape(task_id)}(?![\w-]|\.\w)"
+    return re.search(pattern, message) is not None
+
+
+def commit_verified(root: Path, base_commit: str, task_id: str) -> bool:
+    """True when HEAD moved past `base_commit` and names `task_id` in its message.
+
+    A ticked checkbox must always mean a real commit exists for that task, so
+    both halves are required and neither is inferred from the agent's word.
+    """
+    head = head_commit(root)
+    if head == base_commit:
+        return False
+    return _names_task(commit_message(root, head), task_id)

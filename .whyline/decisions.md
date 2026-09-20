@@ -67,3 +67,69 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/agents.py, tests/test_agents.py
 
 <!-- whyline-event: 6ff924b590654b38a154b1e3ffd09b8c -->
+
+## 2026-09-20 — Verify task completion from Git state, not agent claims
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-6
+
+**Because:** a task is complete only when HEAD advances beyond its recorded base and the new commit message names the task id; branch and dirty-tree checks likewise query Git directly
+
+**Rejected:**
+
+- Trust the handoff status alone — it could approve without a corresponding attributable commit
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: dc95ece18a854537a8d9b3f973efff9c -->
+
+## 2026-09-20 — RELAY-6 review: request changes. Code matches the plan byte for byte, but commit_verified used a substring test, so a commit for RELAY-10 verified RELAY-1
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-6
+
+**Because:** Probed in real repos: commit naming only RELAY-10 -> commit_verified(RELAY-1) returned True. This plan has 13 tasks, so a stray commit for Task 10-13 could tick Task 1 and break spec 5.4 (a ticked box always corresponds to a real commit). Fixed with a whole-id regex (_names_task); 7 new parametrized cases, 3 fail on the old code, all 14 pass on the new. A second suspected defect (strict UTF-8 decode of git output) was probed and does not exist: git 2.50 re-encodes non-UTF-8 messages on output
+
+**Rejected:**
+
+- Approve and defer — the false positive lives in the one function whose job is to prevent false ticks
+- Require a delimiter convention on task ids instead — the ids come from the user's plan and cannot be constrained
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: a23f505a5c524aafba23d670d539d656 -->
+
+## 2026-09-20 — Match task ids as whole identifiers when verifying commits
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-6
+
+**Because:** substring matching lets a commit for RELAY-10 falsely verify RELAY-1, while escaped boundary-aware matching preserves punctuation and dotted ids without constraining user-defined task names
+
+**Rejected:**
+
+- Keep task_id in message — prefix collisions can tick the wrong plan item
+- Require fixed delimiters around task ids — plan authors control ids and valid messages use varied punctuation
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: cf2c8f4f3cd74a3c8c1bf22b405cc585 -->
+
+## 2026-09-20 — RELAY-6 review round 2: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-6
+
+**Because:** gitcheck.py and test_gitcheck.py are byte-identical to the amended, independently verified plan code; suite passes 51/51 with codex and claude tripwire shims never firing; 12 real-repo boundary probes on the repo code all correct (RELAY-10 no longer verifies RELAY-1; dotted, punctuated, regex-metacharacter ids and HEAD-unmoved all right); HEAD unmoved so Codex did not commit. Matching is case-sensitive and rejects longer hyphenated ids such as RELAY-1-2, both of which fail toward pausing, not toward a false tick
+
+**Rejected:**
+
+- Make the match case-insensitive — it widens what counts as verification, and the relay's own prompt tells the agent to write the id verbatim
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: 1149bc3beb08414db529fce4ef4531e1 -->
