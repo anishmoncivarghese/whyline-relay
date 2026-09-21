@@ -14,13 +14,24 @@ BASE_ALLOW = [
     "Bash(git diff:*)",
     "Bash(git status:*)",
     "Bash(git log:*)",
+    "Bash(tail:*)",
+    "Bash(head:*)",
+    "Bash(wc:*)",
+    "Bash(grep:*)",
+    "Bash(ls:*)",
     "Bash(whyline:*)",
 ]
 
 DENY = ["Bash(git push:*)", "Bash(rm -rf:*)"]
 
 PRESETS = {
-    "python": ["Bash(pytest:*)", "Bash(uv run pytest:*)", "Bash(uv run:*)"],
+    "python": [
+        "Bash(pytest:*)",
+        "Bash(uv run pytest:*)",
+        "Bash(uv run:*)",
+        "Bash(.venv/bin/pytest:*)",
+        "Bash(.venv/bin/python:*)",
+    ],
     "node": ["Bash(npm test:*)", "Bash(npm run:*)", "Bash(npx:*)"],
     "base": [],
 }

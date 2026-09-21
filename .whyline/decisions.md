@@ -606,3 +606,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/running.py
 
 <!-- whyline-event: 8641dbbcef754ee28bc56c7040a0624c -->
+
+## 2026-09-21 — Route denied reviewer test commands to a distinct blocked outcome
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-20
+
+**Because:** A permission denial needs human allowlist action and must prevent approval without being misreported as an implementation defect
+
+**Rejected:**
+
+- Use changes-requested — the implementer cannot fix a reviewer command permission denial in the code under review
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: d084d4e4c08d4eaa871c018fe93aafbb -->
+
+## 2026-09-21 — RELAY-20 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-20
+
+**Because:** REVIEW template now requires the reviewer to run the plain test command itself, forbids env prefixes/pipes/chains, routes a denied command to a blocked handoff with a --question naming the exact command and permission, and exempts no-code/no-test tasks via the summary. Placeholders unchanged; init adds .venv/bin/pytest and .venv/bin/python to the python preset and tail/head/wc/grep/ls to the base allowlist; DENY untouched. Tests cover each required phrase and both allowlists; uv run pytest -q passes (185 tests). Residual risk accepted: loop.py's Paused message for a blocked handoff prints only the summary, not the --question, so the denied command is visible only in the handoff record unless the reviewer repeats it in the summary
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: d40ac05d302a479d9e046175c517fb60 -->

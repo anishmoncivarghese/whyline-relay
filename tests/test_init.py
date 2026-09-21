@@ -33,6 +33,17 @@ def test_python_preset_allows_pytest():
     allowed = init.allowlist("python")["permissions"]["allow"]
     assert "Bash(pytest:*)" in allowed
     assert "Bash(uv run pytest:*)" in allowed
+    assert "Bash(.venv/bin/pytest:*)" in allowed
+    assert "Bash(.venv/bin/python:*)" in allowed
+
+
+def test_base_allowlist_allows_read_only_shell_helpers():
+    allowed = init.allowlist("base")["permissions"]["allow"]
+    assert "Bash(tail:*)" in allowed
+    assert "Bash(head:*)" in allowed
+    assert "Bash(wc:*)" in allowed
+    assert "Bash(grep:*)" in allowed
+    assert "Bash(ls:*)" in allowed
 
 
 def test_node_preset_allows_npm_test():

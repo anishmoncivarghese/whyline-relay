@@ -46,6 +46,24 @@ def test_review_template_names_both_permitted_outcomes():
     assert "--to codex --status changes-requested" in prompts.REVIEW
 
 
+def test_review_template_requires_independent_plain_test_command():
+    assert "Run the project's tests yourself before approving" in prompts.REVIEW
+    assert "`uv run pytest -q`" in prompts.REVIEW
+    assert "environment-variable prefixes, pipes, or shell chains" in prompts.REVIEW
+
+
+def test_review_template_blocks_when_test_command_is_denied():
+    assert "If a test command is denied, do not approve" in prompts.REVIEW
+    assert "--status blocked" in prompts.REVIEW
+    assert "exact denied command" in prompts.REVIEW
+    assert "permission to add" in prompts.REVIEW
+
+
+def test_review_template_exempts_tasks_without_code_or_tests():
+    assert "changes no code and has no tests is" in prompts.REVIEW
+    assert "exemption applies in the handoff summary" in prompts.REVIEW
+
+
 def test_no_template_ever_suggests_a_bypass_flag():
     for template in (prompts.IMPLEMENT, prompts.REVIEW):
         assert "dangerously" not in template

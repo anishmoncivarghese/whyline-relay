@@ -54,6 +54,14 @@ You are the reviewer and committer for this task. Round {round}.
 Read the working-tree diff. Judge whether it does what the task asked, whether
 the tests genuinely cover it, and whether anything is unsafe or clearly wrong.
 
+Run the project's tests yourself before approving. Use the plain test command
+(for example, `uv run pytest -q`), not the implementer's command copied from its
+handoff. Do not add environment-variable prefixes, pipes, or shell chains to the
+test command. If a test command is denied, do not approve. Hand off with
+`--status blocked` and a `--question` that names the exact denied command and the
+permission that must be added. A task that changes no code and has no tests is
+exempt; say that the exemption applies in the handoff summary.
+
 Record your ruling — reviewing is deciding:
 
     whyline note "<one-line ruling>" --because "<why>" \\
@@ -61,7 +69,7 @@ Record your ruling — reviewing is deciding:
 
 ## How to finish
 
-Exactly one of these two outcomes.
+Exactly one of these outcomes.
 
 Approve: commit the work with the task id in the message, then hand off.
 
@@ -75,9 +83,16 @@ Request changes: do not commit. Hand back with concrete, actionable feedback.
     whyline handoff {task_id} --from claude --to codex --status changes-requested \\
       --summary "<what must change, specifically>"
 
-If the task is blocked on a human decision, hand off with --status blocked and a
---question. Do not exit without running whyline handoff: the relay reads that
-record to decide what happens next, and stops if it is missing.
+Blocked: do not commit. If a command was denied, name the exact denied command
+and the permission to add in the question.
+
+    whyline handoff {task_id} --from claude --to claude --status blocked \\
+      --summary "<why review cannot finish>" \\
+      --question "<exact denied command and permission to add>"
+
+Use blocked for a denied test command or a human decision needed to proceed. Do
+not exit without running whyline handoff: the relay reads that record to decide
+what happens next, and stops if it is missing.
 """
 
 TEMPLATES = {"implement": IMPLEMENT, "review": REVIEW}
