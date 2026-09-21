@@ -11,8 +11,10 @@
 ## Install
 
 ```sh
-uv tool install .
+uv tool install whyline-relay
 ```
+
+Or, from a clone: `uv tool install .`.
 
 ## Commands
 
