@@ -730,3 +730,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/planhelp.py, src/whyline_relay/cli.py, tests/test_planhelp.py
 
 <!-- whyline-event: 4a258d5d24d448b6acd1e147085cd69d -->
+
+## 2026-09-21 — Use one ordered preflight result model for doctor and launch gating
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-24
+
+**Because:** Shared Check results keep doctor, start, and resume semantics identical while an injectable runner makes whyline and login probes hermetic in tests; resume validates its saved plan before any mutation
+
+**Rejected:**
+
+- Duplicate checks in each CLI command — output, ordering, and blocking behavior could drift
+- Remove the existing launch guards — --skip-checks still needs the established live, branch, and dirty safety behavior
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/cli.py, tests/test_preflight.py
+
+<!-- whyline-event: c254b82edb2441f6abce7bdad4df2737 -->
+
+## 2026-09-21 — RELAY-24 review round 1: approve preflight module, doctor command and start/resume gating
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-24
+
+**Because:** diff matches the task: eight checks in the specified order with the exact ok/warn/FAIL line format, fix hints and summary line; doctor exits 1 only on FAIL; start/resume print only warn/FAIL to stderr and return before any state change, branch switch or agent launch; --skip-checks bypasses, --dry-run never reaches the preflight; runner is injectable with a real default and every preflight.run test passes a fake, so no real codex/claude/whyline runs in tests. Plain uv run pytest -q passes (all green), and a real doctor run on this repo printed the specified lines, including FAIL on the live relay marker. Known nits accepted: a missing codex/claude program gives both a FAIL (PATH) and a login warn; resume now also blocks on a dirty tree unless --allow-dirty, which follows the task's 'same checks' wording
+
+**Rejected:**
+
+- Request changes for the duplicate PATH-fail plus login-warn — the warn never blocks and the task defines the login check as warn when the status command cannot run
+- Require an end-to-end test of doctor --plan/--allow-dirty passthrough — the flags are thin wiring and the module tests cover both behaviours directly
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/cli.py, tests/test_preflight.py
+
+<!-- whyline-event: f9ba945e9122464892539df4e9362e35 -->

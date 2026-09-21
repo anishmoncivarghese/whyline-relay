@@ -20,6 +20,7 @@ from whyline_relay import (
     notify,
     plan,
     planhelp,
+    preflight,
     prompts,
     remove,
     running,
@@ -78,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the clean-working-tree check.",
     )
     start.add_argument(
+        "--skip-checks",
+        action="store_true",
+        help="Skip the preflight checks.",
+    )
+    start.add_argument(
         "--max-rounds",
         type=int,
         default=None,
@@ -96,6 +102,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
     resume.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Skip the clean-working-tree check.",
+    )
+    resume.add_argument(
+        "--skip-checks",
+        action="store_true",
+        help="Skip the preflight checks.",
+    )
+
+    doctor = subparsers.add_parser("doctor", help="Check that the relay is ready to run")
+    doctor.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    doctor.add_argument(
+        "--plan", default=None, help="Use this plan file (default: from config)."
+    )
+    doctor.add_argument(
         "--allow-dirty",
         action="store_true",
         help="Skip the clean-working-tree check.",
@@ -182,6 +206,15 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if saved is None:
         print("Nothing to resume.", file=sys.stderr)
         return EXIT_ERROR
+    if not args.skip_checks:
+        checks = _launch_checks(
+            root, Path(saved.plan), allow_dirty=args.allow_dirty
+        )
+        preflight.print_checks(
+            checks, stream=sys.stderr, include_ok=False, summary=False
+        )
+        if preflight.failures(checks):
+            return EXIT_ERROR
     loop.stop_path(root).unlink(missing_ok=True)
     settings = config.load(root)
     try:
@@ -278,6 +311,21 @@ def cmd_plan_format(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    selected = Path(args.plan) if args.plan is not None else None
+    checks = preflight.run(root, selected, allow_dirty=args.allow_dirty)
+    preflight.print_checks(checks, stream=sys.stdout, include_ok=True, summary=True)
+    return EXIT_ERROR if preflight.failures(checks) else EXIT_OK
+
+
+def _launch_checks(
+    root: Path, plan_path: Path | None, *, allow_dirty: bool
+) -> list[preflight.Check]:
+    """Indirection keeps command tests from invoking installed login tools."""
+    return preflight.run(root, plan_path, allow_dirty=allow_dirty)
+
+
 def _report_pause(paused: loop.Paused) -> int:
     print(f"\nPaused: {paused.reason}", file=sys.stderr)
     if paused.log_path is not None:
@@ -296,6 +344,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
+    if not args.dry_run and not args.skip_checks:
+        selected = Path(args.plan) if args.plan is not None else None
+        checks = _launch_checks(root, selected, allow_dirty=args.allow_dirty)
+        preflight.print_checks(
+            checks, stream=sys.stderr, include_ok=False, summary=False
+        )
+        if preflight.failures(checks):
+            return EXIT_ERROR
     settings = config.load(root)
     if args.max_rounds is not None:
         settings = replace(settings, max_rounds=args.max_rounds)
@@ -393,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         "stop": cmd_stop,
         "init": cmd_init,
         "remove": cmd_remove,
+        "doctor": cmd_doctor,
         "plan-format": cmd_plan_format,
     }
     try:

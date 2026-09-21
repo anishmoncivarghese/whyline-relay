@@ -257,11 +257,15 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 `--branch BRANCH` Use this work branch (default: `relay/<plan-name>`).
 `--allow-main` Allow running on `main` or `master`.
 `--allow-dirty` Skip the clean-working-tree check.
+`--skip-checks` Skip the preflight checks.
 `--max-rounds N` Override the review-round limit from config.
 `--timeout MIN` Override the per-agent timeout from config, in minutes.
 
 **`resume`** continues after a pause, on the saved branch, from the saved decision point.
-`--repo REPO`, `--allow-dirty` as above.
+`--repo REPO`, `--allow-dirty`, and `--skip-checks` as above.
+
+**`doctor`** runs the same preflight checks used by `start` and `resume`, reports every result, and exits 1 if any check fails.
+`--repo REPO` Use this repository root (default: current directory). `--plan PLAN` Use this plan file (default: from config). `--allow-dirty` Skip the clean-working-tree check.
 
 **`status`** shows whether a run is live, or where a paused one stopped. `--repo REPO`.
 
