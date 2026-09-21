@@ -114,6 +114,19 @@ def test_relay_files_are_ignored_and_ignoring_is_idempotent(repo: Path):
     assert exclude.count(".whyline/relay/logs/") == 1
 
 
+def test_remove_relay_ignored_preserves_every_other_line(repo: Path):
+    target = repo / ".git" / "info" / "exclude"
+    target.write_text(
+        "# local rules\r\n"
+        ".whyline/relay/logs/\r\n"
+        "dist/\r\n"
+        ".whyline/relay/STOP"
+    )
+    assert gitcheck.relay_ignore_count(repo) == 2
+    assert gitcheck.remove_relay_ignored(repo) == 2
+    assert target.read_bytes() == b"# local rules\r\ndist/\r\n"
+
+
 def _status(repo: Path) -> str:
     return subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],

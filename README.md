@@ -20,6 +20,7 @@ Or, from a clone: `uv tool install .`.
 
 ```sh
 whyline-relay init [--repo PATH] [--yes]
+whyline-relay remove [--repo PATH] [--yes] [--force]
 whyline-relay start [--repo PATH] [--plan PATH] [--only TASK_ID]
 whyline-relay resume [--repo PATH]
 whyline-relay status [--repo PATH]
@@ -29,6 +30,13 @@ whyline-relay stop [--repo PATH]
 `init` writes configuration, permission settings, and editable prompt templates below `.whyline/relay/`. Commit those files, and whyline's own, before running `start`; `start` refuses a dirty working tree unless you pass `--allow-dirty`.
 
 `start` also takes `--dry-run` (print the next task's prompt and the command it would run, and launch nothing), `--branch`, `--allow-main`, `--allow-dirty`, `--max-rounds` and `--timeout`. `resume` takes `--allow-dirty`.
+
+## Removing the relay
+
+`whyline-relay remove` deletes `.whyline/relay/` and the relay's entries in the
+repository's local Git excludes. It leaves whyline's own files and the rest of
+the repository alone. The command asks before deleting; pass `--yes` to skip
+the prompt. A paused run must be resumed first unless you pass `--force`.
 
 ## Plan format
 

@@ -409,3 +409,36 @@ Append-only. Written by whyline; readable without it.
 **Files:** .whyline/decisions.md
 
 <!-- whyline-event: b9e382fc80d74143b8b5f0e58b1e2ec3 -->
+
+## 2026-09-21 — Remove relay symlinks as links and reject parent-path escapes
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-14
+
+**Because:** the remove command must delete the relay setup without ever traversing a symlink to content outside the repository
+
+**Rejected:**
+
+- Follow symlink targets during counting or deletion — that could inspect or delete files outside the repository
+
+**Files:** src/whyline_relay/remove.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: 0e264fd9330f4a93a0052461f26e1abc -->
+
+## 2026-09-21 — RELAY-14 review: approve. remove matches the spec; accepted the non-atomic rmtree-then-exclude order and a stray-file edge case as known, non-blocking limits
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-14
+
+**Because:** Probed with the real CLI in a scratch repo: init then remove leaves .whyline/decisions.md and AGENTS.md alone, a paused run is refused without --force, a second run reports nothing to remove, a .whyline symlink pointing outside the repo is refused, and other exclude lines and CRLF endings survive byte for byte. The rmtree-then-exclude edit is not atomic, but a rerun still strips leftover exclude lines because the nothing-to-remove check needs both to be absent. A regular file at .whyline/relay raises NotADirectoryError from rmtree, which is harmless (nothing is lost, and unlinking it by hand fixes it) and not worth another round
+
+**Rejected:**
+
+- Request changes for the regular-file crash — a stray file at that path is not something init or start creates, so the cost of a round outweighs the benefit
+- Make removal atomic across the directory and the exclude file — the filesystem has no transaction, and idempotent rerun already recovers
+
+**Files:** src/whyline_relay/remove.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: d010d19ead684312b1d4af4b25ab081b -->

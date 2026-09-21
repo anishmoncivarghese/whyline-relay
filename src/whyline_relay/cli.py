@@ -9,7 +9,19 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from whyline_relay import agents, config, gitcheck, init, loop, notify, plan, prompts, state, whylinecmd
+from whyline_relay import (
+    agents,
+    config,
+    gitcheck,
+    init,
+    loop,
+    notify,
+    plan,
+    prompts,
+    remove,
+    state,
+    whylinecmd,
+)
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -44,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="Write permissions and templates")
     init_parser.add_argument("--repo", default=".")
     init_parser.add_argument("--yes", action="store_true")
+
+    remove_parser = subparsers.add_parser("remove", help="Remove the relay setup")
+    remove_parser.add_argument("--repo", default=".")
+    remove_parser.add_argument("--yes", action="store_true")
+    remove_parser.add_argument("--force", action="store_true")
     return parser
 
 
@@ -129,6 +146,16 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 def cmd_init(args: argparse.Namespace) -> int:
     return init.run(Path(args.repo).resolve(), assume_yes=args.yes)
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+    try:
+        return remove.run(
+            Path(args.repo).resolve(), assume_yes=args.yes, force=args.force
+        )
+    except gitcheck.GitError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
 
 
 def _report_pause(paused: loop.Paused) -> int:
@@ -233,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": cmd_status,
         "stop": cmd_stop,
         "init": cmd_init,
+        "remove": cmd_remove,
     }
     try:
         return commands[args.command](args)
