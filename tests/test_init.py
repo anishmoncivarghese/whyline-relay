@@ -49,6 +49,9 @@ def test_run_writes_settings_templates_and_config(tmp_path: Path):
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "implement.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "review.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "config.toml").exists()
+    assert "running.json" in (
+        tmp_path / ".whyline" / "relay" / ".gitignore"
+    ).read_text().splitlines()
 
 
 def test_declining_writes_nothing(tmp_path: Path):

@@ -572,3 +572,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/agents.py, src/whyline_relay/loop.py
 
 <!-- whyline-event: 31f9aa9764f24fd4b5f66cc110746ba8 -->
+
+## 2026-09-21 — Use an atomic, process-owned live marker across the whole plan run
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-19
+
+**Because:** A fully written temporary file hard-linked into place lets only one relay claim a repository, per-turn replacement refreshes the status fields, and owner-aware finally cleanup covers completion, pauses, interrupts and exceptions without deleting another process's marker
+
+**Rejected:**
+
+- Only check running.json in the CLI — two simultaneous starts could both pass before either writes the marker
+- Remove the marker after each agent turn — that would expose gaps between turns and tasks where a second relay could enter
+
+**Files:** src/whyline_relay/running.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 9f8c158525af46209682df858e88f263 -->
+
+## 2026-09-21 — Approve RELAY-19 live marker as implemented; accept the narrow stale-takeover race and first-turn marker timing
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-19
+
+**Because:** Tests pass (181). Marker is hard-linked atomically, refreshed per turn, cleared owner-aware in run_plan/run_task finally blocks; status, start, resume and remove (even --force) behave per spec and the exclude line is picked up by existing repos. Residual risks are narrow: two relays racing over a stale marker could both take over (the loser unlinks the winner's fresh file), the marker first appears at the first agent turn rather than at CLI start, and a corrupt marker with non-UTF-8 bytes or an out-of-range pid would raise from read()/os.kill instead of being treated as stale
+
+**Rejected:**
+
+- Request changes for the stale-takeover race — needs two starts within milliseconds after a crash, and the loser of the atomic link still cannot corrupt a live run's marker in the common case
+- Request changes for hardening read()/pid_is_alive against hand-corrupted files — only the relay writes this file, atomically
+
+**Files:** src/whyline_relay/running.py
+
+<!-- whyline-event: 8641dbbcef754ee28bc56c7040a0624c -->

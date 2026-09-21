@@ -84,7 +84,7 @@ def run(root: Path, *, assume_yes: bool, confirm=input) -> int:
         "[agents.claude]\n"
         f"command = {json.dumps(claude.split())}\n",
     )
-    _write(relay / ".gitignore", "logs/\nstate.json\nSTOP\n")
+    _write(relay / ".gitignore", "logs/\nstate.json\nSTOP\nrunning.json\n")
 
     print(f"Wrote {settings_path} and {relay}.")
     print(

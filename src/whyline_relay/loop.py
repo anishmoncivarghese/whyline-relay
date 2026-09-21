@@ -8,7 +8,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from whyline_relay import agents, config, gitcheck, handoff, plan, prompts, routing, state, whylinecmd
+from whyline_relay import (
+    agents,
+    config,
+    gitcheck,
+    handoff,
+    plan,
+    prompts,
+    routing,
+    running,
+    state,
+    whylinecmd,
+)
 
 
 class Paused(RuntimeError):
@@ -42,6 +53,7 @@ def _run_agent(
     echo: bool,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
+    running.start_turn(root, agent, task.task_id, round_)
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
         prompts.load(root, template_name),
@@ -143,7 +155,7 @@ def _approved(
     return Outcome(task_id=task.task_id, rounds=round_, committed=True)
 
 
-def run_task(
+def _run_task(
     root: Path,
     settings: config.Config,
     task: plan.Task,
@@ -251,6 +263,35 @@ def run_task(
         next_move = move
 
 
+def run_task(
+    root: Path,
+    settings: config.Config,
+    task: plan.Task,
+    *,
+    base_commit: str,
+    echo: bool = True,
+    resume: bool = False,
+    start_round: int = 1,
+    on_turn: Callable[[int, str | None], None] | None = None,
+    _clear_running: bool = True,
+) -> Outcome:
+    """Drive one task and clear its live marker when used outside ``run_plan``."""
+    try:
+        return _run_task(
+            root,
+            settings,
+            task,
+            base_commit=base_commit,
+            echo=echo,
+            resume=resume,
+            start_round=start_round,
+            on_turn=on_turn,
+        )
+    finally:
+        if _clear_running:
+            running.clear(root)
+
+
 def stop_path(root: Path) -> Path:
     return config.relay_dir(root) / "STOP"
 
@@ -316,7 +357,7 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
     gitcheck.commit_paths(root, [plan_path], f"chore: tick {task.task_id} in the plan")
 
 
-def run_plan(
+def _run_plan(
     root: Path,
     settings: config.Config,
     plan_path: Path,
@@ -371,6 +412,7 @@ def run_plan(
                 resume=mid_task,
                 start_round=start_round,
                 on_turn=on_turn,
+                _clear_running=False,
             )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
@@ -394,3 +436,30 @@ def run_plan(
         if only:
             state.clear(root)
             return outcomes
+
+
+def run_plan(
+    root: Path,
+    settings: config.Config,
+    plan_path: Path,
+    *,
+    branch: str,
+    only: str | None = None,
+    resume: bool = False,
+    allow_dirty: bool = False,
+    echo: bool = True,
+) -> list[Outcome]:
+    """Run a plan while retaining one live marker across all of its tasks."""
+    try:
+        return _run_plan(
+            root,
+            settings,
+            plan_path,
+            branch=branch,
+            only=only,
+            resume=resume,
+            allow_dirty=allow_dirty,
+            echo=echo,
+        )
+    finally:
+        running.clear(root)

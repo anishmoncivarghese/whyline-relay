@@ -7,6 +7,7 @@ import shlex
 import signal
 import sys
 from dataclasses import replace
+from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from whyline_relay import (
     plan,
     prompts,
     remove,
+    running,
     state,
     whylinecmd,
 )
@@ -156,6 +158,13 @@ def guard(root: Path, args: argparse.Namespace, branch: str) -> str | None:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to resume: another relay is running here (pid {active.pid}).",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     saved = state.load(root)
     if saved is None:
         print("Nothing to resume.", file=sys.stderr)
@@ -177,7 +186,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
         )
     except loop.Paused as paused:
         return _report_pause(paused)
-    except (gitcheck.GitError, whylinecmd.WhylineUnavailable, plan.PlanError) as error:
+    except (
+        gitcheck.GitError,
+        whylinecmd.WhylineUnavailable,
+        plan.PlanError,
+        running.AlreadyRunning,
+    ) as error:
         print(str(error), file=sys.stderr)
         return EXIT_ERROR
     print("Plan complete.")
@@ -186,9 +200,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        try:
+            started = datetime.fromisoformat(active.started)
+            elapsed = datetime.now(started.tzinfo) - started
+            since = started.strftime("%H:%M:%S")
+            ago = agents.format_duration(elapsed.total_seconds())
+        except ValueError:
+            since = active.started
+            ago = "unknown"
+        action = "implementing" if active.agent == "codex" else "reviewing"
+        print(
+            f"Running: {active.agent} {action} {active.task}, round "
+            f"{active.round}, since {since} ({ago} ago)"
+        )
     saved = state.load(root)
     if saved is None:
-        print("No relay run in progress.")
+        if active is None:
+            print("No relay run in progress.")
         return EXIT_OK
     print(f"Task      {saved.task_id}")
     print(f"Branch    {saved.branch}")
@@ -234,6 +264,13 @@ def _report_pause(paused: loop.Paused) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to start: another relay is running here (pid {active.pid}).",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     settings = config.load(root)
     if args.max_rounds is not None:
         settings = replace(settings, max_rounds=args.max_rounds)
@@ -294,7 +331,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
     except loop.Paused as paused:
         return _report_pause(paused)
-    except (gitcheck.GitError, whylinecmd.WhylineUnavailable, plan.PlanError) as error:
+    except (
+        gitcheck.GitError,
+        whylinecmd.WhylineUnavailable,
+        plan.PlanError,
+        running.AlreadyRunning,
+    ) as error:
         print(str(error), file=sys.stderr)
         return EXIT_ERROR
     print(f"\nPlan complete: {len(outcomes)} task(s) approved and committed.")

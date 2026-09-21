@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -59,6 +61,46 @@ def test_paused_run_is_refused(repo: Path, capsys):
 def test_force_removes_a_paused_run(repo: Path):
     relay = _write_relay(repo, state=True)
     assert remove.run(repo, assume_yes=True, force=True) == 0
+    assert not relay.exists()
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_live_run_is_never_removed(repo: Path, capsys, force: bool):
+    relay = _write_relay(repo)
+    (relay / "running.json").write_text(
+        json.dumps(
+            {
+                "agent": "codex",
+                "task": "WL-1",
+                "round": 1,
+                "started": "2026-09-21T12:00:00+05:30",
+                "pid": os.getpid(),
+            }
+        )
+    )
+
+    assert remove.run(repo, assume_yes=True, force=force) == 1
+    assert relay.exists()
+    error = capsys.readouterr().err
+    assert str(os.getpid()) in error
+    assert "whyline-relay stop" in error
+
+
+def test_stale_run_marker_does_not_block_removal(repo: Path):
+    relay = _write_relay(repo)
+    (relay / "running.json").write_text(
+        json.dumps(
+            {
+                "agent": "codex",
+                "task": "WL-1",
+                "round": 1,
+                "started": "2026-09-21T12:00:00+05:30",
+                "pid": 2**31 - 1,
+            }
+        )
+    )
+
+    assert remove.run(repo, assume_yes=True, force=False) == 0
     assert not relay.exists()
 
 
@@ -150,6 +192,7 @@ def test_only_relay_exclude_lines_are_removed(repo: Path):
         ".whyline/relay/logs/\n"
         ".whyline/relay/state.json*\n"
         ".whyline/relay/STOP\n"
+        ".whyline/relay/running.json\n"
         "build/\n"
     )
     assert remove.run(repo, assume_yes=True, force=False) == 0

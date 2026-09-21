@@ -10,6 +10,7 @@ RELAY_IGNORE = (
     ".whyline/relay/logs/",
     ".whyline/relay/state.json*",
     ".whyline/relay/STOP",
+    ".whyline/relay/running.json",
 )
 
 
@@ -77,7 +78,7 @@ def commit_verified(root: Path, base_commit: str, task_id: str) -> bool:
 
 
 def ensure_relay_ignored(root: Path) -> None:
-    """Keep the relay's own logs, state and stop file out of `git status` and commits.
+    """Keep the relay's runtime files out of `git status` and commits.
 
     Written to .git/info/exclude, which is local and never committed, so this
     neither dirties the tree nor adds a file to a task's commit. Without it the

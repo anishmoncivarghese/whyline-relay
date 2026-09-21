@@ -79,3 +79,4 @@ def test_ctrl_c_stops_the_agent_process_and_saves_state(repo: Path):
     assert not outlived, "the agent outlived Ctrl+C"
     saved = state.load(repo)
     assert saved is not None and saved.task_id == "WL-1"
+    assert not (repo / ".whyline" / "relay" / "running.json").exists()

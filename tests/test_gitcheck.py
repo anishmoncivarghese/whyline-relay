@@ -103,15 +103,29 @@ def test_relay_files_are_ignored_and_ignoring_is_idempotent(repo: Path):
     (relay / "logs" / "WL-1-1-codex.log").write_text("x")
     (relay / "state.json").write_text("{}")
     (relay / "STOP").write_text("")
+    (relay / "running.json").write_text("{}")
     (relay / "config.toml").write_text("max_rounds = 3\n")
     assert "logs" in _status(repo)
     gitcheck.ensure_relay_ignored(repo)
     gitcheck.ensure_relay_ignored(repo)
     status = _status(repo)
-    assert "logs" not in status and "state.json" not in status and "STOP" not in status
+    assert all(
+        name not in status
+        for name in ("logs", "state.json", "STOP", "running.json")
+    )
     assert "config.toml" in status
     exclude = (repo / ".git" / "info" / "exclude").read_text().splitlines()
     assert exclude.count(".whyline/relay/logs/") == 1
+    assert exclude.count(".whyline/relay/running.json") == 1
+
+
+def test_existing_relay_excludes_pick_up_the_running_marker(repo: Path):
+    target = repo / ".git" / "info" / "exclude"
+    target.write_text("\n".join(gitcheck.RELAY_IGNORE[:-1]) + "\n")
+
+    gitcheck.ensure_relay_ignored(repo)
+
+    assert target.read_text().splitlines().count(".whyline/relay/running.json") == 1
 
 
 def test_remove_relay_ignored_preserves_every_other_line(repo: Path):
@@ -121,9 +135,10 @@ def test_remove_relay_ignored_preserves_every_other_line(repo: Path):
         ".whyline/relay/logs/\r\n"
         "dist/\r\n"
         ".whyline/relay/STOP"
+        "\r\n.whyline/relay/running.json"
     )
-    assert gitcheck.relay_ignore_count(repo) == 2
-    assert gitcheck.remove_relay_ignored(repo) == 2
+    assert gitcheck.relay_ignore_count(repo) == 3
+    assert gitcheck.remove_relay_ignored(repo) == 3
     assert target.read_bytes() == b"# local rules\r\ndist/\r\n"
 
 

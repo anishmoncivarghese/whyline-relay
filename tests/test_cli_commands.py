@@ -1,6 +1,9 @@
 import argparse
+import json
+import os
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -102,6 +105,76 @@ def test_stop_writes_the_stop_file(repo: Path):
 def test_status_reports_nothing_in_progress(repo: Path, capsys):
     assert cli.main(["status", "--repo", str(repo)]) == cli.EXIT_OK
     assert "no relay run in progress" in capsys.readouterr().out.lower()
+
+
+def _write_running(repo: Path, *, pid: int, agent: str = "codex") -> Path:
+    target = repo / ".whyline" / "relay" / "running.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "agent": agent,
+                "task": "WL-1",
+                "round": 2,
+                "started": (
+                    datetime.now().astimezone() - timedelta(seconds=65)
+                ).isoformat(),
+                "pid": pid,
+            }
+        )
+    )
+    return target
+
+
+def test_status_reports_a_live_turn_before_paused_details(repo: Path, capsys):
+    _write_running(repo, pid=os.getpid(), agent="claude")
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/plan",
+            task_id="WL-1",
+            round=2,
+            base_commit="abc",
+            paused_reason="prior pause",
+            log_path="",
+        ),
+    )
+
+    assert cli.main(["status", "--repo", str(repo)]) == cli.EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("Running: claude reviewing WL-1, round 2, since ")
+    assert " ago)" in lines[0]
+    assert "prior pause" in "\n".join(lines[1:])
+
+
+def test_status_ignores_a_stale_marker(repo: Path, capsys):
+    target = _write_running(repo, pid=2**31 - 1)
+
+    assert cli.main(["status", "--repo", str(repo)]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "No relay run in progress.\n"
+    assert target.exists()
+
+
+@pytest.mark.parametrize("command", ["start", "resume"])
+def test_start_and_resume_refuse_while_a_relay_is_live(
+    repo: Path, capsys, command: str
+):
+    _write_running(repo, pid=os.getpid())
+
+    assert cli.main([command, "--repo", str(repo)]) == cli.EXIT_ERROR
+    error = capsys.readouterr().err.lower()
+    assert str(os.getpid()) in error
+    assert "another relay is running here" in error
+
+
+def test_stale_marker_does_not_block_start(repo: Path, monkeypatch, capsys):
+    _write_running(repo, pid=2**31 - 1)
+    monkeypatch.setattr(cli.loop, "run_plan", lambda *args, **kwargs: [])
+
+    code = cli.main(["start", "--repo", str(repo), "--allow-dirty"])
+
+    assert code == cli.EXIT_OK, capsys.readouterr().err
 
 
 def test_status_reports_the_saved_pause(repo: Path, capsys):

@@ -1,7 +1,9 @@
 import json
+import os
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -78,6 +80,64 @@ def test_agent_that_writes_no_handoff_pauses(repo: Path):
     with pytest.raises(loop.Paused) as raised:
         loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
     assert "without handing off" in raised.value.reason
+
+
+def test_live_marker_describes_the_turn_and_is_removed_afterward(
+    repo: Path, monkeypatch
+):
+    seen: dict = {}
+
+    def inspect_marker(*args, **kwargs):
+        marker = json.loads(
+            (repo / ".whyline" / "relay" / "running.json").read_text()
+        )
+        seen.update(marker)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(loop.agents, "run", inspect_marker)
+    with pytest.raises(KeyboardInterrupt):
+        loop.run_task(
+            repo,
+            settings_using("silent", "approve", repo),
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+
+    assert seen["agent"] == "codex"
+    assert seen["task"] == "WL-1"
+    assert seen["round"] == 1
+    assert seen["pid"] == os.getpid()
+    assert datetime.fromisoformat(seen["started"]).tzinfo is not None
+    assert not (repo / ".whyline" / "relay" / "running.json").exists()
+
+
+def test_live_marker_is_updated_for_each_agent_turn(repo: Path, monkeypatch):
+    settings = settings_using("review", "approve", repo)
+    real_run = loop.agents.run
+    seen: list[tuple[str, int]] = []
+
+    def inspect_each_turn(command, prompt, **kwargs):
+        marker = json.loads(
+            (repo / ".whyline" / "relay" / "running.json").read_text()
+        )
+        seen.append((marker["agent"], marker["round"]))
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", inspect_each_turn)
+    loop.run_task(
+        repo,
+        settings,
+        TASK,
+        base_commit=loop.gitcheck.head_commit(repo),
+        echo=False,
+    )
+
+    assert seen == [("codex", 1), ("claude", 1)]
+    assert not (repo / ".whyline" / "relay" / "running.json").exists()
 
 
 def test_blocked_handoff_pauses(repo: Path):

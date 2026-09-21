@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from whyline_relay import config, gitcheck
+from whyline_relay import config, gitcheck, running
 
 
 def _files_under(root: Path, relay: Path) -> set[str]:
@@ -51,6 +51,15 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
         print(
             "Refusing to remove .whyline/relay: its parent resolves outside "
             "the repository.",
+            file=sys.stderr,
+        )
+        return 1
+
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to remove: another relay is running here (pid {active.pid}). "
+            "Run `whyline-relay stop` first.",
             file=sys.stderr,
         )
         return 1
