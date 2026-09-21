@@ -506,3 +506,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/cli.py, tests/test_version.py
 
 <!-- whyline-event: 96f6189f81da4743926005bb49111336 -->
+
+## 2026-09-21 — Classify the relay path itself as the removable file when it is not a directory
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-17
+
+**Because:** This makes regular and special non-directory leftovers visible to the count and tracked-file report, then removes them safely with unlink while preserving directory and symlink behavior
+
+**Rejected:**
+
+- Catch NotADirectoryError from shutil.rmtree — it would report the wrong file count and fail only after confirmation instead of selecting the correct removal operation up front
+
+**Files:** src/whyline_relay/remove.py, tests/test_remove.py
+
+<!-- whyline-event: 487ae7791a804b1596f7df9fc0889099 -->
+
+## 2026-09-21 — RELAY-17 review: approve. remove now treats a non-directory .whyline/relay as the removable file (count, list, confirm, unlink) and exits 0
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-17
+
+**Because:** Read the diff: relay_is_directory is computed once (not symlink and is_dir) and drives the state.json refusal, the listing and the rmtree-versus-unlink choice; symlinks are still classified and unlinked before any directory check, so nothing outside the repo is followed, and the existing Directory to remove message is kept for directories and symlinks. The four requested cases (--yes, y, declined, tracked report) each assert no Traceback, and the full suite passes (162). Accepted that FIFO/socket entries share the unlink branch without a dedicated test: the branch is identical to the regular-file one and creating FIFOs in tests is platform-fragile. My scratch-repo CLI probes were blocked by the sandbox, so verification is by code reading plus the test suite
+
+**Rejected:**
+
+- Request a FIFO test — same unlink branch as the regular file, low value against a platform-dependent test
+
+**Files:** src/whyline_relay/remove.py, tests/test_remove.py
+
+<!-- whyline-event: 5257f6fbc1f74be5ba0f676bc235cdea -->

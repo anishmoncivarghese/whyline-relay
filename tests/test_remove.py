@@ -32,6 +32,13 @@ def _write_relay(repo: Path, *, state: bool = False) -> Path:
     return relay
 
 
+def _write_relay_file(repo: Path) -> Path:
+    relay = repo / ".whyline" / "relay"
+    relay.parent.mkdir()
+    relay.write_text("leftover\n")
+    return relay
+
+
 def test_nothing_to_remove_is_success(repo: Path, capsys):
     assert remove.run(repo, assume_yes=False, force=False) == 0
     assert (
@@ -92,6 +99,49 @@ def test_assume_yes_skips_confirmation(repo: Path):
     assert not relay.exists()
 
 
+def test_stray_relay_file_is_removed_with_yes(repo: Path, capsys):
+    relay = _write_relay_file(repo)
+
+    assert cli.main(["remove", "--repo", str(repo), "--yes"]) == cli.EXIT_OK
+
+    captured = capsys.readouterr()
+    assert not relay.exists()
+    assert "Files to remove: 1 (0 tracked by git)." in captured.out
+    assert "File to remove: .whyline/relay" in captured.out
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_stray_relay_file_is_removed_after_confirmation(repo: Path, capsys):
+    relay = _write_relay_file(repo)
+
+    assert (
+        remove.run(
+            repo, assume_yes=False, force=False, confirm=lambda prompt: "y"
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert not relay.exists()
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_stray_relay_file_is_kept_when_declined(repo: Path, capsys):
+    relay = _write_relay_file(repo)
+
+    assert (
+        remove.run(
+            repo, assume_yes=False, force=False, confirm=lambda prompt: "n"
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert relay.read_text() == "leftover\n"
+    assert "Nothing removed." in captured.out
+    assert "Traceback" not in captured.out + captured.err
+
+
 def test_only_relay_exclude_lines_are_removed(repo: Path):
     exclude = repo / ".git" / "info" / "exclude"
     exclude.write_text(
@@ -117,6 +167,25 @@ def test_tracked_files_are_counted_and_reported(repo: Path, capsys):
     assert "Files to remove: 2 (2 tracked by git)." in output
     assert "git status" in output
     assert "need committing" in output
+
+
+def test_tracked_stray_relay_file_is_counted_and_reported(repo: Path, capsys):
+    relay = _write_relay_file(repo)
+    subprocess.run(["git", "add", ".whyline/relay"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "stray relay file"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    assert remove.run(repo, assume_yes=True, force=False) == 0
+
+    captured = capsys.readouterr()
+    assert not relay.exists()
+    assert "Files to remove: 1 (1 tracked by git)." in captured.out
+    assert "Deleted 1 file(s) tracked by git." in captured.out
+    assert "Traceback" not in captured.out + captured.err
 
 
 def test_relay_symlink_is_unlinked_without_following(repo: Path, tmp_path: Path):

@@ -17,6 +17,8 @@ def _files_under(root: Path, relay: Path) -> set[str]:
         return {relative_relay}
     if not relay.exists():
         return set()
+    if not relay.is_dir():
+        return {relative_relay}
 
     found: set[str] = set()
     for current, directories, filenames in os.walk(relay, followlinks=False):
@@ -59,8 +61,9 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
         print("Nothing to remove: whyline-relay is not set up here.")
         return 0
 
+    relay_is_directory = not relay.is_symlink() and relay.is_dir()
     state_path = relay / "state.json"
-    if relay_exists and not relay.is_symlink() and state_path.exists() and not force:
+    if relay_is_directory and state_path.exists() and not force:
         print(
             "Refusing to remove a paused or interrupted relay run. "
             "Run `whyline-relay resume`, or pass `--force` to remove it.",
@@ -72,7 +75,10 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
     tracked = files.intersection(gitcheck.tracked_paths(root, ".whyline/relay"))
     print(f"Files to remove: {len(files)} ({len(tracked)} tracked by git).")
     if relay_exists:
-        print("Directory to remove: .whyline/relay/")
+        if relay_is_directory or relay.is_symlink():
+            print("Directory to remove: .whyline/relay/")
+        else:
+            print("File to remove: .whyline/relay")
     if exclude_count:
         print(
             f"Local Git exclude lines to remove: {exclude_count} "
@@ -89,10 +95,10 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
             return 1
 
     if relay_exists:
-        if relay.is_symlink():
-            relay.unlink()
-        else:
+        if relay_is_directory:
             shutil.rmtree(relay)
+        else:
+            relay.unlink()
     gitcheck.remove_relay_ignored(root)
 
     print("Removed whyline-relay from this repository.")
