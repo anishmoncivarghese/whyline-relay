@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, TextIO
 
-from whyline_relay import config, gitcheck, plan, running
+from whyline_relay import config, gitcheck, invocation, plan, running
 
 Status = Literal["ok", "warn", "FAIL"]
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -69,7 +69,7 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
     if not target.is_file():
         return (
             _result(
-                "FAIL", f"relay config is missing: {target}", "whyline-relay init"
+                "FAIL", f"relay config is missing: {target}", invocation.command("init")
             ),
             None,
         )
@@ -77,7 +77,11 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
         settings = config.load(root)
     except (config.ConfigError, TypeError, ValueError) as error:
         return (
-            _result("FAIL", f"relay config is invalid: {error}", "whyline-relay init"),
+            _result(
+                "FAIL",
+                f"relay config is invalid: {error}",
+                invocation.command("init"),
+            ),
             None,
         )
 
@@ -96,7 +100,9 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
                 missing.append(path)
     if invalid or missing:
         details = [*invalid, *(f"settings file is missing: {path}" for path in missing)]
-        return _result("FAIL", "; ".join(details), "whyline-relay init"), settings
+        return _result(
+            "FAIL", "; ".join(details), invocation.command("init")
+        ), settings
     return _result("ok", "relay setup is complete"), settings
 
 
@@ -108,7 +114,11 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
     for command in settings.agents.values():
         if not command:
             checks.append(
-                _result("FAIL", "configured agent command is empty", "whyline-relay init")
+                _result(
+                    "FAIL",
+                    "configured agent command is empty",
+                    invocation.command("init"),
+                )
             )
             continue
         program = command[0]
@@ -256,7 +266,7 @@ def run(
         _result(
             "FAIL",
             f"another relay is running here (pid {active.pid})",
-            "wait for it, or run: whyline-relay stop",
+            f"wait for it, or run: {invocation.command('stop')}",
         )
         if active is not None
         else _result("ok", "no other relay is running here")

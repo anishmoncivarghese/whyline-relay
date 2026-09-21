@@ -16,6 +16,7 @@ from whyline_relay import (
     config,
     gitcheck,
     init,
+    invocation,
     loop,
     notify,
     plan,
@@ -41,7 +42,7 @@ def _package_version() -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="whyline-relay")
+    parser = argparse.ArgumentParser(prog=invocation.prog())
     parser.add_argument(
         "--version",
         action="version",
@@ -198,7 +199,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
     active = running.live(root)
     if active is not None:
         print(
-            f"Refusing to resume: another relay is running here (pid {active.pid}).",
+            f"Refusing to resume: another relay is running here (pid {active.pid}). "
+            f"Run `{invocation.command('stop')}` first.",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -272,7 +274,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Paused    {saved.paused_reason}")
     if saved.log_path:
         print(f"Log       {saved.log_path}")
-    print("Resume with: whyline-relay resume")
+    print(f"Resume with: {invocation.command('resume')}")
     return EXIT_OK
 
 
@@ -303,11 +305,11 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
 def cmd_plan_format(args: argparse.Namespace) -> int:
     if args.prompt:
-        print(planhelp.PROMPT)
+        print(planhelp.prompt())
     else:
-        print(planhelp.RULES)
+        print(planhelp.rules())
         print("\nPrompt to give an AI that drafts your plan:")
-        print(planhelp.PROMPT)
+        print(planhelp.prompt())
     return EXIT_OK
 
 
@@ -330,7 +332,7 @@ def _report_pause(paused: loop.Paused) -> int:
     print(f"\nPaused: {paused.reason}", file=sys.stderr)
     if paused.log_path is not None:
         print(f"Log: {paused.log_path}", file=sys.stderr)
-    print("Resume with: whyline-relay resume", file=sys.stderr)
+    print(f"Resume with: {invocation.command('resume')}", file=sys.stderr)
     notify.send("whyline-relay paused", paused.reason)
     return EXIT_PAUSED
 
@@ -340,7 +342,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     active = running.live(root)
     if active is not None:
         print(
-            f"Refusing to start: another relay is running here (pid {active.pid}).",
+            f"Refusing to start: another relay is running here (pid {active.pid}). "
+            f"Run `{invocation.command('stop')}` first.",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -439,24 +442,34 @@ def _install_sigint_handler() -> None:
     signal.signal(signal.SIGINT, handler)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    _install_sigint_handler()
-    commands = {
-        "start": cmd_start,
-        "resume": cmd_resume,
-        "status": cmd_status,
-        "stop": cmd_stop,
-        "init": cmd_init,
-        "remove": cmd_remove,
-        "doctor": cmd_doctor,
-        "plan-format": cmd_plan_format,
-    }
-    try:
-        return commands[args.command](args)
-    except KeyboardInterrupt:
-        print("\nInterrupted. Resume with: whyline-relay resume", file=sys.stderr)
-        return EXIT_PAUSED
+def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
+    """Run a relay command and return its exit code.
+
+    This is the supported entry point for embedding the relay. When ``argv`` is
+    provided it is parsed directly, without reading ``sys.argv``. This function
+    never calls ``sys.exit``; the console wrapper owns process exit behavior.
+    """
+    with invocation.called_as(prog):
+        args = build_parser().parse_args(argv)
+        _install_sigint_handler()
+        commands = {
+            "start": cmd_start,
+            "resume": cmd_resume,
+            "status": cmd_status,
+            "stop": cmd_stop,
+            "init": cmd_init,
+            "remove": cmd_remove,
+            "doctor": cmd_doctor,
+            "plan-format": cmd_plan_format,
+        }
+        try:
+            return commands[args.command](args)
+        except KeyboardInterrupt:
+            print(
+                f"\nInterrupted. Resume with: {invocation.command('resume')}",
+                file=sys.stderr,
+            )
+            return EXIT_PAUSED
 
 
 def entry() -> int:

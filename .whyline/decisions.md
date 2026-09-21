@@ -764,3 +764,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, src/whyline_relay/cli.py, tests/test_preflight.py
 
 <!-- whyline-event: f9ba945e9122464892539df4e9362e35 -->
+
+## 2026-09-21 — Scope the displayed command name to each cli.main invocation
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-25
+
+**Because:** A ContextVar-backed helper lets every command module render the caller's prog value while restoring the default after embedded calls, including parser exits
+
+**Rejected:**
+
+- Pass prog through every command function — it would spread an embedding concern across the CLI and helper modules
+- Use a persistent module global — one embedded call could leak its name into later default calls
+
+**Files:** src/whyline_relay/invocation.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 5503d5d8f2cc4120bbaf490afb00fa2b -->
+
+## 2026-09-21 — Approve RELAY-25: prog-scoped guidance via ContextVar; accept argparse SystemExit and process-wide SIGINT handler as known embedding limits
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-25
+
+**Because:** All hard-coded whyline-relay <command> hints now go through invocation.command(); the guard test, prog=whyline relay tests and default-behaviour tests pass (237). main itself never calls sys.exit and ignores sys.argv when argv is given. argparse still raises SystemExit for --help/--version/usage errors and main installs a SIGINT handler, both pre-existing behaviours the task did not ask to change
+
+**Rejected:**
+
+- Catch SystemExit in main and return its code — the task said keep default behaviour exactly as today, and existing version/help tests rely on SystemExit
+- Request changes for the planhelp.rules() string-replace on a default-prog constant — slightly fragile, but pinned by tests and existing RULES/PROMPT tests still hold
+
+**Files:** src/whyline_relay/invocation.py, src/whyline_relay/cli.py, tests/test_embedding.py
+
+<!-- whyline-event: 02644da106b64f26a9c8fac8830c415a -->

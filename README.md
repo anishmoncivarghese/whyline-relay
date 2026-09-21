@@ -29,6 +29,7 @@ It never types into a terminal for you and never pushes. Each agent runs headles
 - [Running it](#running-it)
 - [When it pauses](#when-it-pauses)
 - [Command reference](#command-reference)
+- [Using it from another program](#using-it-from-another-program)
 - [Configuration](#configuration)
 - [Permissions and safety](#permissions-and-safety)
 - [What it writes](#what-it-writes)
@@ -275,6 +276,18 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 `--repo REPO`, `--yes`, and `--force` Remove even while a run is paused.
 
 **`plan-format`** prints the plan rules and a prompt for an AI drafting the plan. `--prompt` prints only the paste-ready prompt. It does not require a repository.
+
+## Using it from another program
+
+Call `whyline_relay.cli.main` with the command arguments and the name users invoked:
+
+```python
+from whyline_relay.cli import main
+
+exit_code = main(["status", "--repo", "."], prog="whyline relay")
+```
+
+`main` is the supported embedding entry point. It returns the relay's exit code and never calls `sys.exit`. When `argv` is provided, it parses that list without reading `sys.argv`. The `prog` value appears in help output and in every instruction that tells the user how to invoke another relay command.
 
 ## Configuration
 

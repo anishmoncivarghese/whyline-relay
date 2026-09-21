@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from whyline_relay import config, gitcheck, running
+from whyline_relay import config, gitcheck, invocation, running
 
 
 def _files_under(root: Path, relay: Path) -> set[str]:
@@ -59,7 +59,7 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
     if active is not None:
         print(
             f"Refusing to remove: another relay is running here (pid {active.pid}). "
-            "Run `whyline-relay stop` first.",
+            f"Run `{invocation.command('stop')}` first.",
             file=sys.stderr,
         )
         return 1
@@ -75,7 +75,7 @@ def run(root: Path, *, assume_yes: bool, force: bool, confirm=input) -> int:
     if relay_is_directory and state_path.exists() and not force:
         print(
             "Refusing to remove a paused or interrupted relay run. "
-            "Run `whyline-relay resume`, or pass `--force` to remove it.",
+            f"Run `{invocation.command('resume')}`, or pass `--force` to remove it.",
             file=sys.stderr,
         )
         return 1

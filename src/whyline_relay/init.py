@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from whyline_relay import config, prompts
+from whyline_relay import config, invocation, prompts
 
 BASE_ALLOW = [
     "Edit",
@@ -122,7 +122,8 @@ def run(
         ".claude/settings.json, which Claude ignores in a workspace nobody has "
         "trusted interactively. The relay puts `whyline sync` output into every "
         "prompt itself, so Codex hooks are not needed for relay runs. Commit these "
-        "files before `whyline-relay start`, which refuses a dirty working tree."
+        f"files before `{invocation.command('start')}`, which refuses a dirty "
+        "working tree."
     )
     print(
         "\nThe allowlist is a convenience, not a sandbox: `uv run`, `npm` and `npx` "
