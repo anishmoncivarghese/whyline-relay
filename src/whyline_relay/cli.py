@@ -33,34 +33,85 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="Run the plan from its first unchecked task")
-    start.add_argument("--repo", default=".", help="Repository root (default: cwd)")
-    start.add_argument("--plan", default=None, help="Plan file (default: from config)")
-    start.add_argument("--dry-run", action="store_true")
-    start.add_argument("--only", default=None, metavar="TASK_ID")
-    start.add_argument("--branch", default=None)
-    start.add_argument("--allow-main", action="store_true")
-    start.add_argument("--allow-dirty", action="store_true")
-    start.add_argument("--max-rounds", type=int, default=None)
-    start.add_argument("--timeout", type=int, default=None, metavar="MIN")
+    start.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    start.add_argument(
+        "--plan", default=None, help="Use this plan file (default: from config)."
+    )
+    start.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the next task's prompt and command without launching anything.",
+    )
+    start.add_argument(
+        "--only", default=None, metavar="TASK_ID", help="Run only the named task."
+    )
+    start.add_argument(
+        "--branch",
+        default=None,
+        help="Use this work branch (default: relay/<plan-name>).",
+    )
+    start.add_argument(
+        "--allow-main", action="store_true", help="Allow running on main or master."
+    )
+    start.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Skip the clean-working-tree check.",
+    )
+    start.add_argument(
+        "--max-rounds",
+        type=int,
+        default=None,
+        help="Override the review-round limit from config.",
+    )
+    start.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        metavar="MIN",
+        help="Override the per-agent timeout from config, in minutes.",
+    )
 
     resume = subparsers.add_parser("resume", help="Continue after a pause")
-    resume.add_argument("--repo", default=".")
-    resume.add_argument("--allow-dirty", action="store_true")
+    resume.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    resume.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Skip the clean-working-tree check.",
+    )
 
     status = subparsers.add_parser("status", help="Where the relay is")
-    status.add_argument("--repo", default=".")
+    status.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
 
     stop = subparsers.add_parser("stop", help="Stop after the current agent finishes")
-    stop.add_argument("--repo", default=".")
+    stop.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
 
     init_parser = subparsers.add_parser("init", help="Write permissions and templates")
-    init_parser.add_argument("--repo", default=".")
-    init_parser.add_argument("--yes", action="store_true")
+    init_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    init_parser.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation question."
+    )
 
     remove_parser = subparsers.add_parser("remove", help="Remove the relay setup")
-    remove_parser.add_argument("--repo", default=".")
-    remove_parser.add_argument("--yes", action="store_true")
-    remove_parser.add_argument("--force", action="store_true")
+    remove_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    remove_parser.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation question."
+    )
+    remove_parser.add_argument(
+        "--force", action="store_true", help="Remove even while a run is paused."
+    )
     return parser
 
 

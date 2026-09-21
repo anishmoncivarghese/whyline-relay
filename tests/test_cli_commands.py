@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,25 @@ import pytest
 from whyline_relay import cli, gitcheck, state
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
+
+
+def test_every_subcommand_option_has_help():
+    parser = cli.build_parser()
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    missing = [
+        f"{command} {'/'.join(action.option_strings)}"
+        for command, subparser in subparsers.choices.items()
+        for action in subparser._actions
+        if action.option_strings
+        and "--help" not in action.option_strings
+        and (not isinstance(action.help, str) or not action.help.strip())
+    ]
+
+    assert missing == []
 
 
 @pytest.fixture

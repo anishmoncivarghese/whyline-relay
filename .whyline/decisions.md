@@ -442,3 +442,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/remove.py, src/whyline_relay/gitcheck.py
 
 <!-- whyline-event: d010d19ead684312b1d4af4b25ab081b -->
+
+## 2026-09-21 — Inspect argparse subparsers to enforce help on future options
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-15
+
+**Because:** walking the parser choices automatically covers every current subcommand and makes newly added undocumented options fail the suite
+
+**Rejected:**
+
+- Hard-code the current option names — that could let a future undocumented option pass unnoticed
+
+**Files:** tests/test_cli_commands.py
+
+<!-- whyline-event: af49e17cf6f44387ab815b859e58240d -->
+
+## 2026-09-21 — RELAY-15 review round 1: approve help text for every option plus the parser-walking test
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-15
+
+**Because:** all 18 options across start/resume/status/stop/init/remove now carry a one-sentence help matching the task's wording; option names, dests, defaults, types and metavars are unchanged (HEAD and working-tree parsers list identical options); help renders without argparse errors; suite passes 154/154; blanking one help in-process makes the new test's predicate report 'remove --force', so a future undocumented option fails the suite. Defaults quoted in help match the code: branch is branch_prefix + plan stem, and --plan, --max-rounds and --timeout fall back to config
+
+**Rejected:**
+
+- Require the --branch help to say 'branch_prefix from config' — the task specified relay/<plan-name> and that is the built-in default, so the shorter wording is accepted
+
+**Files:** src/whyline_relay/cli.py, tests/test_cli_commands.py
+
+<!-- whyline-event: f85ca1affdfa4909903edba5372ba1ac -->
