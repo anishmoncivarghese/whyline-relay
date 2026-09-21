@@ -538,3 +538,37 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/remove.py, tests/test_remove.py
 
 <!-- whyline-event: 5257f6fbc1f74be5ba0f676bc235cdea -->
+
+## 2026-09-21 — Keep progress output terminal-only and drive heartbeats from streamed output activity
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-18
+
+**Because:** The loop owns turn and plan context, while agents.run owns child output and lifetime; a condition-based heartbeat there can reset on every line, stop and join at process exit, and share a terminal lock without contaminating agent logs
+
+**Rejected:**
+
+- Write progress through the log tee — relay status would enter agent log files and violate the terminal-only requirement
+- Use repeating timers without activity tracking — heartbeats would continue after fresh agent output or race beyond process completion
+
+**Files:** src/whyline_relay/agents.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: c317a1475993417b92c6140a9a779ebc -->
+
+## 2026-09-21 — Approve RELAY-18 progress lines and heartbeat as implemented; accept 'finished' line also printing when a turn ends by timeout, missing binary or interrupt
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-18
+
+**Because:** Start/finish/tick lines and the echo-gated, output-resetting heartbeat match the spec, stay out of the log files, and the thread is stopped and joined in finally with no lock-order deadlock. The finish line sits in a finally so every turn that printed a start line gets a matching end; RELAY-19 is planned to make status truthful, so the wording for failed turns can be refined there
+
+**Rejected:**
+
+- Request a test that output resets the heartbeat — the reset logic is small and the required cases (fires, stops at agent end, silent with echo=False, absent from logs) are covered, so this is not worth another round
+- Print the finish line only on success — it would leave a timed-out turn with a start line and no end, which is more ambiguous on a quiet terminal
+
+**Files:** src/whyline_relay/agents.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 31f9aa9764f24fd4b5f66cc110746ba8 -->

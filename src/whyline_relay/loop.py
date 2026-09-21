@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,15 +52,30 @@ def _run_agent(
         review_feedback=review_feedback,
     )
     target = log_path(root, task.task_id, round_, agent)
-    try:
-        agents.run(
-            settings.agents[agent],
-            prompt,
-            cwd=root,
-            log_path=target,
-            timeout_seconds=settings.timeout_minutes * 60,
-            echo=echo,
+    action = "implementing" if agent == "codex" else "reviewing"
+    if echo:
+        agents.print_status(
+            f"==> {agent}: {action} {task.task_id} "
+            f"(round {round_} of {settings.max_rounds})"
         )
+    started = time.monotonic()
+    try:
+        try:
+            agents.run(
+                settings.agents[agent],
+                prompt,
+                cwd=root,
+                log_path=target,
+                timeout_seconds=settings.timeout_minutes * 60,
+                echo=echo,
+                agent_name=agent,
+            )
+        finally:
+            if echo:
+                agents.print_status(
+                    f"<== {agent} finished in "
+                    f"{agents.format_duration(time.monotonic() - started)}"
+                )
     except agents.AgentTimeout as error:
         raise Paused(str(error), target) from error
     except agents.AgentMissing as error:
@@ -372,6 +388,8 @@ def run_plan(
             raise
 
         _tick_and_commit(root, plan_path, task)
+        if echo:
+            agents.print_status(f"==> relay: ticked {task.task_id} in the plan")
         outcomes.append(outcome)
         if only:
             state.clear(root)

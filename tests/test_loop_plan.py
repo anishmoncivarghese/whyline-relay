@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +70,59 @@ def test_runs_every_unchecked_task_and_ticks_each(repo: Path, monkeypatch):
     assert [outcome.task_id for outcome in outcomes] == ["WL-1", "WL-2"]
     tasks = plan.parse((repo / "plan.md").read_text())
     assert all(task.checked for task in tasks)
+
+
+def test_progress_lines_cover_a_full_approved_run_in_order(
+    repo: Path, monkeypatch, capsys
+):
+    settings = approving_settings(repo, monkeypatch)
+    loop.run_plan(
+        repo, settings, repo / "plan.md", branch="relay/plan", only="WL-1"
+    )
+    output = capsys.readouterr().out
+    statuses = [
+        line for line in output.splitlines()
+        if re.match(r"^\[\d{2}:\d{2}:\d{2}\] (?:==>|<==)", line)
+    ]
+    assert len(statuses) == 5
+    assert re.fullmatch(
+        r"\[\d{2}:\d{2}:\d{2}\] ==> codex: implementing WL-1 \(round 1 of 3\)",
+        statuses[0],
+    )
+    assert re.fullmatch(
+        r"\[\d{2}:\d{2}:\d{2}\] <== codex finished in \d+(?:m\d+)?s",
+        statuses[1],
+    )
+    assert re.fullmatch(
+        r"\[\d{2}:\d{2}:\d{2}\] ==> claude: reviewing WL-1 \(round 1 of 3\)",
+        statuses[2],
+    )
+    assert re.fullmatch(
+        r"\[\d{2}:\d{2}:\d{2}\] <== claude finished in \d+(?:m\d+)?s",
+        statuses[3],
+    )
+    assert re.fullmatch(
+        r"\[\d{2}:\d{2}:\d{2}\] ==> relay: ticked WL-1 in the plan",
+        statuses[4],
+    )
+    logs = (repo / ".whyline" / "relay" / "logs").glob("*.log")
+    assert all(
+        "==>" not in path.read_text() and "<==" not in path.read_text()
+        for path in logs
+    )
+
+
+def test_echo_false_prints_no_progress(repo: Path, monkeypatch, capsys):
+    settings = approving_settings(repo, monkeypatch)
+    loop.run_plan(
+        repo,
+        settings,
+        repo / "plan.md",
+        branch="relay/plan",
+        only="WL-1",
+        echo=False,
+    )
+    assert capsys.readouterr().out == ""
 
 
 def test_only_runs_a_single_named_task(repo: Path, monkeypatch):

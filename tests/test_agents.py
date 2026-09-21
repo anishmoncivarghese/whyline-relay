@@ -1,4 +1,5 @@
 import inspect
+import re
 import sys
 import time
 from pathlib import Path
@@ -79,6 +80,57 @@ def test_timeout_kills_the_agent_and_raises(tmp_path: Path):
 def test_rate_limit_marker_is_recognised():
     assert agents.rate_limited("You have exceeded your usage limit. Try again later.")
     assert not agents.rate_limited("all tests passed")
+
+
+@pytest.mark.parametrize(
+    ("seconds", "formatted"),
+    [(0, "0s"), (59.9, "59s"), (60, "1m0s"), (345.9, "5m45s")],
+)
+def test_duration_format(seconds: float, formatted: str):
+    assert agents.format_duration(seconds) == formatted
+
+
+def test_heartbeat_reports_silence_until_the_agent_ends(
+    tmp_path: Path, monkeypatch, capsys
+):
+    log = tmp_path / "run.log"
+    monkeypatch.setenv("WHYLINE_RELAY_HEARTBEAT_SECONDS", "0.05")
+    code = agents.run(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('started', flush=True); time.sleep(0.18)",
+        ],
+        "p",
+        cwd=tmp_path,
+        log_path=log,
+        timeout_seconds=30,
+        which=lambda name: name,
+        agent_name="claude",
+    )
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "started\n" in output
+    heartbeat = r"\[\d{2}:\d{2}:\d{2}\] \.\.\. claude still running \(\d+s\)"
+    assert len(re.findall(heartbeat, output)) >= 2
+    assert log.read_text() == "started\n"
+    time.sleep(0.1)
+    assert capsys.readouterr().out == ""
+
+
+def test_echo_false_suppresses_heartbeat(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setenv("WHYLINE_RELAY_HEARTBEAT_SECONDS", "0.01")
+    agents.run(
+        [sys.executable, "-c", "import time; time.sleep(0.04)"],
+        "p",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        echo=False,
+        agent_name="codex",
+    )
+    assert capsys.readouterr().out == ""
 
 
 def test_non_utf8_output_does_not_crash_the_relay(tmp_path: Path):
