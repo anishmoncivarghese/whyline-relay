@@ -8,6 +8,11 @@ readme = "README.md"
 authors = [{ name = "Anish Varghese" }]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/anishmoncivarghese/whyline-relay"
+Source = "https://github.com/anishmoncivarghese/whyline-relay"
+Issues = "https://github.com/anishmoncivarghese/whyline-relay/issues"
+
 [project.scripts]
 whyline-relay = "whyline_relay.cli:entry"
 
