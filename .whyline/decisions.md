@@ -666,3 +666,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py
 
 <!-- whyline-event: 9f8bdacaf0d443998f65f92c6572b444 -->
+
+## 2026-09-21 — Classify generated init files by byte content before writing
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-22
+
+**Because:** Byte comparison leaves identical files untouched, preserves any differing user content without requiring it to decode as UTF-8, and lets overwrite deliberately rewrite every generated file
+
+**Rejected:**
+
+- Compare decoded text — invalid UTF-8 user edits would make init fail instead of preserving the file
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: e1794adb72e74283b356209d35b33b69 -->
+
+## 2026-09-21 — RELAY-22 review round 1: approve non-destructive init with --overwrite
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-22
+
+**Because:** init.run classifies each generated file: missing or --overwrite writes it, identical bytes are left untouched and silent, differing files are kept and reported with the exact 'Kept <relative path>: it already exists and differs. Run with --overwrite to replace it.' line; exit stays 0, the confirmation prompt, its default, --yes and the preamble and closing text are unchanged, README.md is untouched, and the --overwrite help text matches the spec verbatim. Replacing the old single 'Wrote X and Y.' line with one relative-path line per written or kept file is what the task's 'summary lists which files were written and which were kept' asks for. Tests cover fresh write, a no-edit second run (mtimes preserved, no Kept or Wrote), edited config/prompt/permissions kept, --overwrite through cli.main restoring everything, a missing file recreated among existing ones, and the help text; the existing decline and no-terminal tests still cover writing nothing. I ran uv run pytest -q myself: all 196 passed
+
+**Rejected:**
+
+- Request handling for a directory sitting where a generated file belongs — path.read_bytes would raise, but that is a pathological setup outside the task and the previous code failed there too
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: 6b5a83b6bdba473fa0eab8a779be3dec -->

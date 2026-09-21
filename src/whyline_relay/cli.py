@@ -117,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "--yes", action="store_true", help="Skip the confirmation question."
     )
+    init_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace files that already exist, discarding your edits.",
+    )
 
     remove_parser = subparsers.add_parser("remove", help="Remove the relay setup")
     remove_parser.add_argument(
@@ -240,7 +245,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    return init.run(Path(args.repo).resolve(), assume_yes=args.yes)
+    return init.run(
+        Path(args.repo).resolve(), assume_yes=args.yes, overwrite=args.overwrite
+    )
 
 
 def cmd_remove(args: argparse.Namespace) -> int:

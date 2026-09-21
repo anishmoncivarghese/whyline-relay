@@ -59,7 +59,9 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def run(root: Path, *, assume_yes: bool, confirm=input) -> int:
+def run(
+    root: Path, *, assume_yes: bool, overwrite: bool = False, confirm=input
+) -> int:
     stack = detect_stack(root)
     proposed = allowlist(stack)
     settings_path = config.relay_dir(root) / "claude-settings.json"
@@ -78,26 +80,43 @@ def run(root: Path, *, assume_yes: bool, confirm=input) -> int:
             return 1
 
     relay = config.relay_dir(root)
-    _write(settings_path, json.dumps(proposed, indent=2) + "\n")
-    _write(relay / "prompts" / "implement.md", prompts.IMPLEMENT)
-    _write(relay / "prompts" / "review.md", prompts.REVIEW)
     codex = " ".join(config.DEFAULTS["agents"]["codex"])
     claude = " ".join(config.DEFAULTS["agents"]["claude"])
-    _write(
-        relay / "config.toml",
-        "# whyline-relay configuration. Every key is optional.\n"
-        f'plan = "{config.DEFAULTS["plan"]}"\n'
-        f"max_rounds = {config.DEFAULTS['max_rounds']}\n"
-        f"timeout_minutes = {config.DEFAULTS['timeout_minutes']}\n"
-        f'branch_prefix = "{config.DEFAULTS["branch_prefix"]}"\n\n'
-        "[agents.codex]\n"
-        f"command = {json.dumps(codex.split())}\n\n"
-        "[agents.claude]\n"
-        f"command = {json.dumps(claude.split())}\n",
-    )
-    _write(relay / ".gitignore", "logs/\nstate.json\nSTOP\nrunning.json\n")
+    generated = [
+        (settings_path, json.dumps(proposed, indent=2) + "\n"),
+        (relay / "prompts" / "implement.md", prompts.IMPLEMENT),
+        (relay / "prompts" / "review.md", prompts.REVIEW),
+        (
+            relay / "config.toml",
+            "# whyline-relay configuration. Every key is optional.\n"
+            f'plan = "{config.DEFAULTS["plan"]}"\n'
+            f"max_rounds = {config.DEFAULTS['max_rounds']}\n"
+            f"timeout_minutes = {config.DEFAULTS['timeout_minutes']}\n"
+            f'branch_prefix = "{config.DEFAULTS["branch_prefix"]}"\n\n'
+            "[agents.codex]\n"
+            f"command = {json.dumps(codex.split())}\n\n"
+            "[agents.claude]\n"
+            f"command = {json.dumps(claude.split())}\n",
+        ),
+        (relay / ".gitignore", "logs/\nstate.json\nSTOP\nrunning.json\n"),
+    ]
+    written: list[Path] = []
+    kept: list[Path] = []
+    for path, content in generated:
+        if overwrite or not path.exists():
+            _write(path, content)
+            written.append(path)
+        elif path.read_bytes() != content.encode("utf-8"):
+            kept.append(path)
 
-    print(f"Wrote {settings_path} and {relay}.")
+    for path in written:
+        print(f"Wrote {path.relative_to(root)}.")
+    for path in kept:
+        relative = path.relative_to(root)
+        print(
+            f"Kept {relative}: it already exists and differs. "
+            "Run with --overwrite to replace it."
+        )
     print(
         "\nClaude reads these permissions through `--settings`, not through "
         ".claude/settings.json, which Claude ignores in a workspace nobody has "
