@@ -113,9 +113,12 @@ git add -A && git commit -m "chore: configure whyline and the relay"
 Preview, then run:
 
 ```sh
+whyline-relay doctor            # checks whyline, both agent logins, the plan and the working tree
 whyline-relay start --dry-run   # prints the next task's prompt and the command; launches nothing
 whyline-relay start             # the real run. Leave this terminal alone.
 ```
+
+`start` and `resume` run the same checks themselves and refuse to launch anything if one fails, so a logged-out agent or a missing setup shows up before the run, not in the middle of it. `--skip-checks` bypasses them.
 
 When it finishes you have a branch to review:
 
