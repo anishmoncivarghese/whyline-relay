@@ -7,6 +7,7 @@ import shlex
 import signal
 import sys
 from dataclasses import replace
+from importlib import metadata
 from pathlib import Path
 
 from whyline_relay import (
@@ -28,8 +29,21 @@ EXIT_ERROR = 1
 EXIT_PAUSED = 2
 
 
+def _package_version() -> str:
+    try:
+        return metadata.version("whyline-relay")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="whyline-relay")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_package_version()}",
+        help="Show the installed version and exit.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="Run the plan from its first unchecked task")

@@ -474,3 +474,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/cli.py, tests/test_cli_commands.py
 
 <!-- whyline-event: f85ca1affdfa4909903edba5372ba1ac -->
+
+## 2026-09-21 — Resolve the global version option from installed distribution metadata
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-16
+
+**Because:** The argparse version action exits successfully before required subcommand validation, while PackageNotFoundError maps precisely to the specified unknown fallback
+
+**Rejected:**
+
+- Read whyline_relay.__version__ — it could drift from installed package metadata and would make cli.py depend on a second version source
+
+**Files:** src/whyline_relay/cli.py, tests/test_version.py
+
+<!-- whyline-event: 27ee9be944d24474ac137ae01b8f8eb3 -->
+
+## 2026-09-21 — RELAY-16 review round 1: approve --version backed by importlib.metadata with unknown fallback, plus drift test
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-16
+
+**Because:** cli.py reads metadata.version('whyline-relay') and maps PackageNotFoundError to 'unknown', with no hard-coded copy; argparse's version action prints 'whyline-relay <version>' to stdout and exits 0 before the required-subcommand check; main() builds the parser per call so the fallback monkeypatch takes effect; the help text is present and the RELAY-15 parser-walking test already includes top-level actions; test_module_version_matches_package_metadata fails if __init__.__version__ and package metadata diverge; stdlib only. I could not run the suite in the review session (command execution was blocked), so the implementer's reported 158 passed and the --version run are taken on trust
+
+**Rejected:**
+
+- Request removing test_version_option_has_help as redundant with the RELAY-15 help test — it is harmless, cheap and pins the requirement locally, so not worth a round trip
+
+**Files:** src/whyline_relay/cli.py, tests/test_version.py
+
+<!-- whyline-event: 96f6189f81da4743926005bb49111336 -->
