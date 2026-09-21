@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 import sys
@@ -5,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, loop, plan
+from whyline_relay import cli, config, loop, plan
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
 
@@ -156,6 +157,41 @@ def test_a_pause_saves_resumable_state(repo: Path, monkeypatch):
     assert saved.task_id == "WL-1"
     assert "without handing off" in saved.paused_reason
     assert plan.parse((repo / "plan.md").read_text())[0].checked is False
+
+
+def test_status_after_a_blocked_pause_shows_the_question(
+    repo: Path, monkeypatch, capsys
+):
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, FAKE, "blocked", str(repo)],
+            "claude": [sys.executable, FAKE, "approve", str(repo)],
+        },
+        status_map=base.status_map,
+    )
+    real_run = loop.agents.run
+
+    def run_with_question(command, prompt, **kwargs):
+        code = real_run(command, prompt, **kwargs)
+        target = repo / ".whyline" / "active-handoff.json"
+        record = json.loads(target.read_text())
+        record["questions"] = ["permission needed: Bash(uv run pytest:*)"]
+        target.write_text(json.dumps(record))
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", run_with_question)
+    with pytest.raises(loop.Paused):
+        loop.run_plan(
+            repo, settings, repo / "plan.md", branch="relay/plan", echo=False
+        )
+
+    assert cli.main(["status", "--repo", str(repo)]) == cli.EXIT_OK
+    assert "Question: permission needed: Bash(uv run pytest:*)" in capsys.readouterr().out
 
 
 def test_stop_file_prevents_starting_a_new_task(repo: Path, monkeypatch):

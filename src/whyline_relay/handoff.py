@@ -14,6 +14,7 @@ class Handoff:
     to_actor: str
     status: str
     summary: str
+    questions: tuple[str, ...] = ()
 
 
 def path(root: Path) -> Path:
@@ -23,6 +24,13 @@ def path(root: Path) -> Path:
 def _text(record: dict, key: str) -> str:
     value = record.get(key)
     return value if isinstance(value, str) else ""
+
+
+def _texts(record: dict, key: str) -> tuple[str, ...]:
+    value = record.get(key)
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
 
 
 def read(root: Path) -> Handoff | None:
@@ -44,4 +52,5 @@ def read(root: Path) -> Handoff | None:
         to_actor=_text(record, "to_actor"),
         status=_text(record, "status"),
         summary=_text(record, "summary"),
+        questions=_texts(record, "questions"),
     )

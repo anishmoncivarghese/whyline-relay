@@ -145,7 +145,73 @@ def test_blocked_handoff_pauses(repo: Path):
     base = loop.gitcheck.head_commit(repo)
     with pytest.raises(loop.Paused) as raised:
         loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
-    assert "blocked" in raised.value.reason
+    assert raised.value.reason == "codex reported blocked: fake blocked"
+
+
+def blocked_reviewer_settings(
+    repo: Path, monkeypatch, questions: list[str]
+) -> config.Config:
+    settings = settings_using("review", "blocked", repo)
+    real_run = loop.agents.run
+
+    def run_with_questions(command, prompt, **kwargs):
+        code = real_run(command, prompt, **kwargs)
+        if "blocked" in command:
+            target = repo / ".whyline" / "active-handoff.json"
+            record = json.loads(target.read_text())
+            record["questions"] = questions
+            target.write_text(json.dumps(record))
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", run_with_questions)
+    return settings
+
+
+def test_blocked_handoff_pause_includes_one_question(repo: Path, monkeypatch):
+    settings = blocked_reviewer_settings(
+        repo, monkeypatch, ["permission needed: Bash(uv run pytest:*)"]
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            settings,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+    assert raised.value.reason == (
+        "claude reported blocked: fake blocked. "
+        "Question: permission needed: Bash(uv run pytest:*)"
+    )
+
+
+def test_blocked_handoff_pause_includes_several_questions(repo: Path, monkeypatch):
+    settings = blocked_reviewer_settings(repo, monkeypatch, ["first", "second"])
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            settings,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+    assert raised.value.reason == (
+        "claude reported blocked: fake blocked. Question: first. Question: second"
+    )
+
+
+def test_blocked_handoff_pause_cuts_an_overlong_question(repo: Path, monkeypatch):
+    settings = blocked_reviewer_settings(repo, monkeypatch, ["x" * 400])
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            settings,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+    assert len(raised.value.reason) == 300
+    assert raised.value.reason.endswith("...")
 
 
 def test_unknown_status_pauses(repo: Path):

@@ -38,6 +38,15 @@ class Outcome:
     committed: bool
 
 
+def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
+    reason = f"{agent} reported blocked: {record.summary or 'no summary given'}"
+    for question in record.questions:
+        reason += f". Question: {question}"
+    if len(reason) > 300:
+        return reason[:297] + "..."
+    return reason
+
+
 def log_path(root: Path, task_id: str, round_: int, agent: str) -> Path:
     return root / ".whyline" / "relay" / "logs" / f"{task_id}-{round_}-{agent}.log"
 
@@ -240,10 +249,7 @@ def _run_task(
                 target,
             )
         if move == routing.BLOCKED:
-            raise Paused(
-                f"{agent} reported blocked: {record.summary or 'no summary given'}",
-                target,
-            )
+            raise Paused(_blocked_reason(agent, record), target)
         if move == routing.UNKNOWN:
             raise Paused(
                 f"unrecognised handoff status {record.status!r}; the relay will not guess",

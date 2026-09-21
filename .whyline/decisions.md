@@ -634,3 +634,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py
 
 <!-- whyline-event: d40ac05d302a479d9e046175c517fb60 -->
+
+## 2026-09-21 — Render and then cap blocked pause reasons at 300 characters
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-21
+
+**Because:** Capping the complete message preserves the unchanged no-question wording, keeps questions ordered, and guarantees the status and notification limit
+
+**Rejected:**
+
+- Cap each question separately — several individually capped questions could still exceed the total limit
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: e8f396593ed741d29927bbbd622c5bf5 -->
+
+## 2026-09-21 — Approve RELAY-21: blocked pause reason lists each handoff question, capped at 300 chars
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-21
+
+**Because:** Meets the spec: Handoff.questions defaults to (), read() filters to string items, no-question wording is unchanged (asserted by exact match), cap applies to the whole rendered reason (297 chars + '...'), and status output is covered by a test. uv run pytest -q gives 190 passed. Accepted risk: a long summary can push later questions out of the 300-char window, which is inherent in the requested whole-reason cap
+
+**Rejected:**
+
+- Request reserving room for the first question — the task specified a cap on the whole reason and said to change nothing else
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 9f8bdacaf0d443998f65f92c6572b444 -->

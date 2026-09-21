@@ -27,13 +27,19 @@ def test_read_returns_none_when_absent(tmp_path: Path):
 
 
 def test_read_extracts_the_routing_fields(tmp_path: Path):
-    write_handoff(tmp_path)
+    write_handoff(tmp_path, questions=["Which cache?", "Can I run tests?"])
     record = handoff.read(tmp_path)
     assert record.event_id == "abc123"
     assert record.task == "WL-1"
     assert record.to_actor == "claude"
     assert record.status == "ready-for-review"
     assert record.summary == "Implemented the cache"
+    assert record.questions == ("Which cache?", "Can I run tests?")
+
+
+def test_handoff_can_still_be_constructed_without_questions():
+    record = handoff.Handoff("abc123", "WL-1", "claude", "ready-for-review", "done")
+    assert record.questions == ()
 
 
 def test_read_returns_none_on_corrupt_json(tmp_path: Path):
@@ -46,3 +52,4 @@ def test_read_returns_none_on_corrupt_json(tmp_path: Path):
 def test_missing_fields_become_empty_strings(tmp_path: Path):
     write_handoff(tmp_path, summary=None)
     assert handoff.read(tmp_path).summary == ""
+    assert handoff.read(tmp_path).questions == ()
