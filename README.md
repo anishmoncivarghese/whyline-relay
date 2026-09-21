@@ -176,6 +176,10 @@ whyline-relay start --plan phase-2.md --branch relay/work    # continues on the 
 
 Passing the same `--branch` keeps the work stacked. Without it, each plan gets its own branch, `relay/phase-1` and `relay/phase-2`, and a new branch starts from **whatever you have checked out**. So merge phase 1, or `git switch relay/phase-1`, before starting phase 2, or phase 2 will not include phase 1's work.
 
+### Having an AI draft the plan
+
+Run `whyline-relay plan-format` to print the format rules and a paste-ready prompt. To copy only the prompt into another tool, use `whyline-relay plan-format --prompt`.
+
 ## Running it
 
 Run `whyline-relay start` in a terminal of its own, not inside an agent session. The relay launches Codex and Claude itself; you do not open them.
@@ -265,6 +269,8 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 
 **`remove`** takes the relay out of a repository; see [Removing the relay](#removing-the-relay).
 `--repo REPO`, `--yes`, and `--force` Remove even while a run is paused.
+
+**`plan-format`** prints the plan rules and a prompt for an AI drafting the plan. `--prompt` prints only the paste-ready prompt. It does not require a repository.
 
 ## Configuration
 

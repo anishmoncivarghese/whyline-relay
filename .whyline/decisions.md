@@ -698,3 +698,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/init.py
 
 <!-- whyline-event: 6b5a83b6bdba473fa0eab8a779be3dec -->
+
+## 2026-09-21 — Keep plan guidance as importable constants and validate its worked example with the production parser
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RELAY-23
+
+**Because:** the CLI can print guidance without repository state while tests directly prevent the documented task format from drifting from plan.parse
+
+**Rejected:**
+
+- Duplicate the guide in the CLI and tests — multiple copies could diverge and would make exact prompt output harder to verify
+
+**Files:** src/whyline_relay/planhelp.py, src/whyline_relay/cli.py, tests/test_planhelp.py
+
+<!-- whyline-event: 5ea8df0f83b64033b615b039999acd82 -->
+
+## 2026-09-21 — RELAY-23 review round 1: approve plan-format and planhelp constants as written
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RELAY-23
+
+**Because:** output matches the spec exactly (RULES, blank line, heading, PROMPT; --prompt prints only PROMPT); every rule in the text agrees with plan.parse (id before first colon or first word, unique ids, indented detail, [x] skipped); the PROMPT example is parsed with plan.parse in a test; PROMPT is 162 words (<200); the command needs no repo, verified by a subprocess test in a tmp dir; suite passes with plain uv run pytest -q
+
+**Rejected:**
+
+- Request wording changes to the guidance — the text is clear and accurate, and the reviewer-flagged risk was wording only, so no change is warranted
+
+**Files:** src/whyline_relay/planhelp.py, src/whyline_relay/cli.py, tests/test_planhelp.py
+
+<!-- whyline-event: 4a258d5d24d448b6acd1e147085cd69d -->

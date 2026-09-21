@@ -19,6 +19,7 @@ from whyline_relay import (
     loop,
     notify,
     plan,
+    planhelp,
     prompts,
     remove,
     running,
@@ -132,6 +133,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     remove_parser.add_argument(
         "--force", action="store_true", help="Remove even while a run is paused."
+    )
+
+    plan_format = subparsers.add_parser(
+        "plan-format", help="Print how to write a plan"
+    )
+    plan_format.add_argument(
+        "--prompt", action="store_true", help="Print only the paste-ready prompt."
     )
     return parser
 
@@ -260,6 +268,16 @@ def cmd_remove(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
+def cmd_plan_format(args: argparse.Namespace) -> int:
+    if args.prompt:
+        print(planhelp.PROMPT)
+    else:
+        print(planhelp.RULES)
+        print("\nPrompt to give an AI that drafts your plan:")
+        print(planhelp.PROMPT)
+    return EXIT_OK
+
+
 def _report_pause(paused: loop.Paused) -> int:
     print(f"\nPaused: {paused.reason}", file=sys.stderr)
     if paused.log_path is not None:
@@ -375,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
         "stop": cmd_stop,
         "init": cmd_init,
         "remove": cmd_remove,
+        "plan-format": cmd_plan_format,
     }
     try:
         return commands[args.command](args)
