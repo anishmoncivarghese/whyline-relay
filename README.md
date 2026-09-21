@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through **Codex** (implements) and **
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. The 0.2 features (`remove`, `--version`, the progress lines and the truthful `status`, the verified-review rule) were built by running this tool on its own plan: Codex implemented, Claude reviewed and committed. It has run on eight real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. The 0.2 features (`remove`, `--version`, the progress lines and the truthful `status`, the verified-review rule) were built by running this tool on its own plan: Codex implemented, Claude reviewed and committed. It has run on nine real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 
@@ -69,6 +69,23 @@ whyline-relay --version
 ```
 
 Upgrade with `uv tool upgrade whyline-relay`, remove with `uv tool uninstall whyline-relay`. From a clone: `uv tool install .`.
+
+## Upgrading from 0.1
+
+```sh
+uv tool upgrade whyline-relay
+```
+
+The program upgrades, but each repository keeps the files `init` wrote earlier, and 0.2 ships an improved review prompt and wider permissions (the reviewer must run the tests itself and may not approve on the implementer's word; read-only helpers such as `tail` and `grep`; `.venv/bin/pytest`). To pick them up in a repository you set up with 0.1:
+
+```sh
+cp -r .whyline/relay /tmp/relay-backup      # keep your edits
+whyline-relay init --overwrite              # replaces config, prompts and permissions with the 0.2 defaults
+# then re-apply your own edits from the backup (timeouts, project test command, ...)
+git diff .whyline/relay                     # review what changed, then commit it
+```
+
+Or apply just the two changes by hand: add `Bash(tail:*)`, `Bash(head:*)`, `Bash(wc:*)`, `Bash(grep:*)`, `Bash(ls:*)` (and for Python `Bash(.venv/bin/pytest:*)`, `Bash(.venv/bin/python:*)`) to `claude-settings.json`, and copy the "How to review" paragraph from a fresh `init` into `prompts/review.md`.
 
 ## Quick start
 
@@ -224,9 +241,9 @@ whyline-relay [--version] <command>
 ```
 
 **`init`** writes the relay's setup into `.whyline/relay/`, after asking.
-`--repo REPO` Use this repository root (default: current directory). `--yes` Skip the confirmation question.
+`--repo REPO` Use this repository root (default: current directory). `--yes` Skip the confirmation question. `--overwrite` Replace files that already exist, discarding your edits.
 It detects a Python project (`pyproject.toml`), a Node project (`package.json`), or neither, and picks the permission preset to match. Declining, or having no terminal, writes nothing.
-**Careful:** `init` overwrites the files it writes. Running it again on a repository that is already set up resets `config.toml`, the prompt templates and `claude-settings.json` to the defaults and discards your edits, without a warning. Copy your edits aside first.
+`init` is safe to re-run. A file that does not exist is written; a file identical to what it would write is left alone; a file that exists and differs is **kept**, with a line such as `Kept .whyline/relay/prompts/review.md: it already exists and differs. Run with --overwrite to replace it.` Pass `--overwrite` to replace every file with the defaults, discarding your edits.
 
 **`start`** runs the plan from its first unchecked task.
 `--repo REPO` Use this repository root (default: current directory).
@@ -343,7 +360,7 @@ It leaves whyline's own files, your history, and your branches alone. To uninsta
 
 ## What it costs
 
-Measured on one macOS machine over the eight tasks that built 0.2 (a few dozen to a few hundred lines each):
+Measured on one macOS machine over the nine tasks that built 0.2 (a few dozen to a few hundred lines each):
 
 | | Typical |
 |---|---|
