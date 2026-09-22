@@ -261,11 +261,15 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
                 )
             )
 
-    for agent in agents:
+    for agent, (_, backup_for) in agents.items():
         adapter = config.adapter_for(settings, agent)
         if adapter.name == "generic":
             continue
-        role = "implementer" if agent == roles.implementer else "reviewer"
+        role = (
+            f"{backup_for} backup"
+            if backup_for is not None
+            else ("implementer" if agent == roles.implementer else "reviewer")
+        )
         checks.append(_result("ok", adapters.describe(adapter, role, agent)))
 
     return checks

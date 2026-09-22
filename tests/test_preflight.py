@@ -233,6 +233,30 @@ def test_failed_backup_login_names_its_role(ready_repo: Path, monkeypatch):
     )
 
 
+def test_the_summary_line_labels_a_backup_as_a_backup_not_a_primary(
+    ready_repo: Path, monkeypatch
+):
+    """Regression: the per-role summary loop derived its label from `agent ==
+
+    roles.implementer` alone, so a backup-only agent (never a primary) was
+    described as if it were currently filling that role.
+    """
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nimplementer = "claude"\nreviewer = "claude"\n'
+        '[roles.backup]\nreviewer = "codex"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+    )
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: name)
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    messages = [check.message for check in checks]
+    assert not any(msg.startswith("reviewer: codex") for msg in messages), messages
+    assert any(msg.startswith("reviewer backup: codex") for msg in messages), messages
+
+
 def test_non_codex_or_claude_program_skips_login_check(ready_repo: Path):
     calls = []
     checks = preflight.run(ready_repo, runner=successful_runner(calls))

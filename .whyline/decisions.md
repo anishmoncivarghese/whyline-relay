@@ -1232,3 +1232,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py
 
 <!-- whyline-event: 63e376a4683446e7a08d943aa100077c -->
+
+## 2026-09-22 — A backup-only agent in doctor's per-role summary was described as if it were the current primary
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PREFLIGHT-BACKUP-LABEL
+
+**Because:** The summary loop derived its role label purely from 'agent == roles.implementer', ignoring _agents_in_use's own backup_for field; found by re-running the exact manual scenario used to verify the 0.2.4 release for real, after publishing -- none of the 17 acceptance tests written for that release happened to combine non-default roles with a backup naming a genuinely third agent
+
+**Rejected:**
+
+- Leave it — it's message-only, not a routing/safety bug, but doctor's whole purpose is telling the truth about what's configured
+
+**Files:** src/whyline_relay/preflight.py
+
+<!-- whyline-event: 4511016178c84407aa86818568403393 -->
