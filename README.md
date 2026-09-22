@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through an implementer and a reviewer
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. Every 0.2.x feature, including the pluggable agents in 0.2.2, was built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. It has run on eighteen real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 is the exception: a one-line prompt fix, found and fixed directly, then validated with two real relay runs rather than built through one.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 

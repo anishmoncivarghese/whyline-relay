@@ -13,8 +13,10 @@ fix the edge
 
 ## How to finish
 
-Implement the task. Run the project's tests and note the exact command and its
-result — you will report both in your handoff.
+Implement the task. Run every command to completion and read its result before
+moving on or finishing your turn: never run anything in the background, and never
+end your turn while something you started is still running. Then note the exact
+test command and its result — you will report both in your handoff.
 
 Do not commit. The reviewer commits.
 

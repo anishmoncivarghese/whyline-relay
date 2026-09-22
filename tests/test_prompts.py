@@ -35,6 +35,18 @@ def test_builtin_templates_use_only_known_placeholders():
             assert found in prompts.PLACEHOLDERS, found
 
 
+def test_implement_template_forbids_backgrounded_commands():
+    """Measured against a real headless agent (2026-09-22): a turn can end while a
+
+    command it started is still running in the background, silently dropping the
+    work. Telling it not to do that beat telling the task itself not to run
+    anything, in a real side-by-side comparison (half the tokens, and it still
+    ran the real tests instead of only reading files back).
+    """
+    assert "never run anything in the background" in prompts.IMPLEMENT
+    assert "never\nend your turn while something you started is still running" in prompts.IMPLEMENT
+
+
 def test_implement_template_names_the_exact_handoff_command():
     assert "whyline handoff {task_id} --from {implementer} --to {reviewer}" in prompts.IMPLEMENT
     assert "--status ready-for-review" in prompts.IMPLEMENT
