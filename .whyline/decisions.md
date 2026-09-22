@@ -1094,3 +1094,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** docs/releases/v0.2.2.md
 
 <!-- whyline-event: bb314eeaa85a456ca117309d29e20bed -->
+
+## 2026-09-22 — Validate backup roles after primary roles and configured agents
+
+**Actor:** codex
+**Role:** implementer
+**Task:** FBO-1
+
+**Because:** backup validation needs resolved primary role names for self-agent checks and the configured adapter map for generic-agent checks
+
+**Rejected:**
+
+- Validate backups inside the primary role loop — backup is a nested table and requires validation against both resolved primary roles and configured agents
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: c5c3479e439f41b3bd516e860a56a0ca -->
+
+## 2026-09-22 — Approve FBO-1: [roles.backup] parsing/validation matches spec verbatim, all 321 tests pass (8 new)
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FBO-1
+
+**Because:** diff reviewed line-by-line against spec: Config.backups field placement, role_values loop accepting 'backup', post-role validation order (unknown key, non-string, self-match, unknown agent), error strings match verbatim, backups=dict(backup_values) returned; only config.py and test_config.py touched, no pyproject/uv.lock/version changes
+
+**Files:** src/whyline_relay/config.py, tests/test_config.py
+
+<!-- whyline-event: 9cbaec0979134658a64309b75bc8947a -->

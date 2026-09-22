@@ -47,6 +47,7 @@ class Config:
     status_map: dict[str, str]
     roles: Roles = field(default_factory=Roles)
     adapters: dict[str, str] = field(default_factory=dict)
+    backups: dict[str, str] = field(default_factory=dict)
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -97,7 +98,7 @@ def load(root: Path) -> Config:
 
     role_values = raw.get("roles") or {}
     for key in role_values:
-        if key not in ("implementer", "reviewer"):
+        if key not in ("implementer", "reviewer", "backup"):
             raise ConfigError(
                 f"[roles] has an unknown key '{key}' (use implementer or reviewer)"
             )
@@ -115,6 +116,27 @@ def load(root: Path) -> Config:
                 f"({builtins}) or a configured generic agent"
             )
 
+    backup_values = role_values.get("backup") or {}
+    for key in backup_values:
+        if key not in ("implementer", "reviewer"):
+            raise ConfigError(
+                f"[roles.backup] has an unknown key '{key}' "
+                f"(use implementer or reviewer)"
+            )
+        value = backup_values[key]
+        if not isinstance(value, str):
+            raise ConfigError(f"[roles.backup] {key} must be a string")
+        if value == role_names[key]:
+            raise ConfigError(
+                f"[roles.backup] {key} cannot be the same as its own agent"
+            )
+        if value not in adapters.BUILTIN and value not in configured_adapters:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            raise ConfigError(
+                f"[roles.backup] {key} names '{value}', which is not a built-in "
+                f"agent ({builtins}) or a configured generic agent"
+            )
+
     status_map = {**DEFAULTS["status_map"], **(raw.get("status_map") or {})}
     return Config(
         plan=raw.get("plan", DEFAULTS["plan"]),
@@ -125,4 +147,5 @@ def load(root: Path) -> Config:
         status_map=status_map,
         roles=Roles(**role_names),
         adapters=configured_adapters,
+        backups=dict(backup_values),
     )

@@ -112,6 +112,72 @@ def test_config_can_still_be_built_without_roles_or_adapters():
     assert built.adapters == {}
 
 
+def test_no_backup_table_means_no_backups(tmp_path):
+    write(tmp_path, "")
+    assert config.load(tmp_path).backups == {}
+
+
+def test_a_role_backup_is_parsed(tmp_path):
+    write(tmp_path, '[roles.backup]\nimplementer = "claude"\n')
+    loaded = config.load(tmp_path)
+    assert loaded.backups == {"implementer": "claude"}
+    assert loaded.roles.implementer == "codex"  # the primary is untouched
+
+
+def test_a_backup_may_be_a_configured_generic_agent(tmp_path):
+    write(
+        tmp_path,
+        '[roles.backup]\nreviewer = "aider"\n[agents.aider]\n'
+        'adapter = "generic"\ncommand = ["aider"]\n',
+    )
+    assert config.load(tmp_path).backups == {"reviewer": "aider"}
+
+
+def test_a_backup_naming_the_same_agent_as_its_role_is_refused(tmp_path):
+    write(tmp_path, '[roles.backup]\nimplementer = "codex"\n')
+    with pytest.raises(config.ConfigError, match="cannot be the same as its own agent"):
+        config.load(tmp_path)
+
+
+def test_a_backup_naming_an_unknown_agent_is_refused(tmp_path):
+    write(tmp_path, '[roles.backup]\nimplementer = "gemini"\n')
+    with pytest.raises(
+        config.ConfigError,
+        match="not a built-in agent .* or a configured generic agent",
+    ):
+        config.load(tmp_path)
+
+
+def test_an_unknown_key_under_roles_backup_is_refused(tmp_path):
+    write(tmp_path, '[roles.backup]\nplanner = "claude"\n')
+    with pytest.raises(
+        config.ConfigError,
+        match="\\[roles.backup\\] has an unknown key 'planner'",
+    ):
+        config.load(tmp_path)
+
+
+def test_a_non_string_backup_is_refused(tmp_path):
+    write(tmp_path, "[roles.backup]\nimplementer = 3\n")
+    with pytest.raises(
+        config.ConfigError,
+        match="\\[roles.backup\\] implementer must be a string",
+    ):
+        config.load(tmp_path)
+
+
+def test_config_built_by_hand_still_works_without_backups():
+    cfg = config.Config(
+        plan="plan.md",
+        max_rounds=3,
+        timeout_minutes=30,
+        branch_prefix="relay/",
+        agents={},
+        status_map={},
+    )
+    assert cfg.backups == {}
+
+
 def test_defaults_when_no_file(tmp_path: Path):
     loaded = config.load(tmp_path)
     assert loaded.plan == "plan.md"
