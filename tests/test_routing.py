@@ -56,6 +56,55 @@ def test_status_map_is_honoured():
     assert routing.decide(moved, "e1", custom) == routing.REVIEW
 
 
+def test_roles_other_than_the_defaults_route_by_name():
+    ready = record(to_actor="gemini", status="ready-for-review")
+    assert (
+        routing.decide(
+            ready, "e1", STATUS, implementer="aider", reviewer="gemini"
+        )
+        == routing.REVIEW
+    )
+    back = record(to_actor="aider", status="changes-requested")
+    assert (
+        routing.decide(
+            back, "e1", STATUS, implementer="aider", reviewer="gemini"
+        )
+        == routing.IMPLEMENT
+    )
+
+
+def test_the_default_reviewer_name_is_not_special_once_roles_change():
+    ready = record(to_actor="claude", status="ready-for-review")
+    assert (
+        routing.decide(
+            ready, "e1", STATUS, implementer="aider", reviewer="gemini"
+        )
+        == routing.UNKNOWN
+    )
+
+
+def test_one_agent_in_both_roles_routes_by_status():
+    solo = dict(implementer="claude", reviewer="claude")
+    assert (
+        routing.decide(
+            record(to_actor="claude", status="ready-for-review"),
+            "e1",
+            STATUS,
+            **solo,
+        )
+        == routing.REVIEW
+    )
+    assert (
+        routing.decide(
+            record(to_actor="claude", status="changes-requested"),
+            "e1",
+            STATUS,
+            **solo,
+        )
+        == routing.IMPLEMENT
+    )
+
+
 @pytest.mark.parametrize(
     ("to_actor", "status"),
     [

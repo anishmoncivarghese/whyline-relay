@@ -37,6 +37,24 @@ def test_read_extracts_the_routing_fields(tmp_path: Path):
     assert record.questions == ("Which cache?", "Can I run tests?")
 
 
+def test_read_returns_from_actor_when_present(tmp_path: Path):
+    write_handoff(tmp_path, from_actor="aider")
+    assert handoff.read(tmp_path).from_actor == "aider"
+
+
+def test_read_returns_empty_from_actor_when_missing(tmp_path: Path):
+    write_handoff(tmp_path)
+    record = json.loads((tmp_path / ".whyline" / "active-handoff.json").read_text())
+    del record["from_actor"]
+    (tmp_path / ".whyline" / "active-handoff.json").write_text(json.dumps(record))
+    assert handoff.read(tmp_path).from_actor == ""
+
+
+def test_read_returns_empty_from_actor_when_not_a_string(tmp_path: Path):
+    write_handoff(tmp_path, from_actor=42)
+    assert handoff.read(tmp_path).from_actor == ""
+
+
 def test_handoff_can_still_be_constructed_without_questions():
     record = handoff.Handoff("abc123", "WL-1", "claude", "ready-for-review", "done")
     assert record.questions == ()

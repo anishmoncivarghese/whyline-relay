@@ -19,6 +19,8 @@ def decide(
     record: handoff.Handoff | None,
     previous_id: str | None,
     status_map: dict[str, str],
+    implementer: str = IMPLEMENTER,
+    reviewer: str = REVIEWER,
 ) -> str:
     """Pick the next move from the handoff record alone.
 
@@ -38,11 +40,11 @@ def decide(
         return APPROVED
     if status == status_map["blocked"]:
         return BLOCKED
-    if status == status_map["review"] and record.to_actor == REVIEWER:
+    if status == status_map["review"] and record.to_actor == reviewer:
         return REVIEW
     if (
         status in (status_map["changes"], status_map["assigned"])
-        and record.to_actor == IMPLEMENTER
+        and record.to_actor == implementer
     ):
         return IMPLEMENT
     return UNKNOWN

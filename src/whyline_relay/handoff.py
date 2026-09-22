@@ -15,6 +15,7 @@ class Handoff:
     status: str
     summary: str
     questions: tuple[str, ...] = ()
+    from_actor: str = ""
 
 
 def path(root: Path) -> Path:
@@ -53,4 +54,5 @@ def read(root: Path) -> Handoff | None:
         status=_text(record, "status"),
         summary=_text(record, "summary"),
         questions=_texts(record, "questions"),
+        from_actor=_text(record, "from_actor"),
     )

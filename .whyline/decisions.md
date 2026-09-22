@@ -826,3 +826,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/claude.py
 
 <!-- whyline-event: 4acbca328c1741768acfb5d14b1af4e9 -->
+
+## 2026-09-22 — Approve ADPT-2: routing.decide takes implementer/reviewer params, Handoff gains from_actor
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-2
+
+**Because:** diff is scoped exactly to the four named files, matches the spec's signature and field additions verbatim, default IMPLEMENTER/REVIEWER preserve relay 0.2.1 behavior for existing callers in loop.py, and the new tests match the spec's required cases; full suite (258 tests) passes with the plain uv run pytest -q command
+
+**Files:** src/whyline_relay/routing.py, src/whyline_relay/handoff.py
+
+<!-- whyline-event: 6e2059c000bb47629d03c961f56cf045 -->
