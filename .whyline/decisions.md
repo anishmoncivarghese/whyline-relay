@@ -1122,3 +1122,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py, tests/test_config.py
 
 <!-- whyline-event: 9cbaec0979134658a64309b75bc8947a -->
+
+## 2026-09-22 — Treat failed or timed-out login probes as inconclusive
+
+**Actor:** codex
+**Role:** implementer
+**Task:** FBO-2
+
+**Because:** A broken diagnostic must not switch away from an agent that may still be authenticated
+
+**Rejected:**
+
+- Treat probe errors as logged out — transient local failures would trigger false failover
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: 5ecb318135414fdd80c3b96d1a2678b7 -->
+
+## 2026-09-22 — FBO-2 review: approve. failover.py matches spec exactly (overrides, effective_agent, still_logged_in, failover_reason, pause_message), gitcheck ignore entry added, no other files touched
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FBO-2
+
+**Because:** Verified failover.py and test_failover.py byte-for-byte against the spec, confirmed config.relay_dir/Roles/Config, adapters.base.Adapter, codex/generic ADAPTER fields, and agents.rate_limited all match what the module calls, and ran the full suite (336 tests, all dots, no failures)
+
+**Rejected:**
+
+- Request changes over the docstring-only prose differences from the spec — cosmetic, no behavior impact
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/gitcheck.py, tests/test_failover.py
+
+<!-- whyline-event: 784727e184124a738b4de4170dbf055a -->

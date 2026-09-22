@@ -11,6 +11,7 @@ RELAY_IGNORE = (
     ".whyline/relay/state.json*",
     ".whyline/relay/STOP",
     ".whyline/relay/running.json",
+    ".whyline/relay/active-roles.json",
 )
 
 
