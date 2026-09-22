@@ -258,7 +258,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         except ValueError:
             since = active.started
             ago = "unknown"
-        action = "implementing" if active.agent == "codex" else "reviewing"
+        if active.role == "reviewer":
+            action = "reviewing"
+        elif active.role == "implementer":
+            action = "implementing"
+        else:
+            action = "implementing" if active.agent == "codex" else "reviewing"
         print(
             f"Running: {active.agent} {action} {active.task}, round "
             f"{active.round}, since {since} ({ago} ago)"
@@ -389,8 +394,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             sync_packet=packet,
             round_=1,
             review_feedback="",
+            implementer=settings.roles.implementer,
+            reviewer=settings.roles.reviewer,
         )
-        argv = agents.build_argv(settings.agents["codex"], rendered)
+        argv = agents.build_argv(settings.agents[settings.roles.implementer], rendered)
         print(f"Next task: {task.task_id}")
         print(f"Would run: {shlex.join(argv[:-1])} <prompt>")
         print("--- prompt ---")

@@ -866,3 +866,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py
 
 <!-- whyline-event: 2c269f04fb624e9a80e7cf6c3d4d6a4f -->
+
+## 2026-09-22 — Treat every nonblank agent marker as a valid relay owner
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-4
+
+**Because:** Configured and future agent names must participate in the one-relay safety guard, while the optional role preserves explicit status semantics and legacy markers retain the old fallback
+
+**Rejected:**
+
+- Keep a fixed agent-name allowlist — markers for configured generic agents would be ignored and permit a second relay
+
+**Files:** src/whyline_relay/running.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 8be5f9a3aa644fd8bf48f3d08a643522 -->
+
+## 2026-09-22 — ADPT-4 approved: one-relay guard now covers any nonblank agent marker, status/dry-run stay role-aware without renaming codex/claude
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-4
+
+**Because:** read() now rejects only non-string/blank agent or non-string role instead of a fixed codex/claude allowlist, closing the second-relay hole for configured agents like gemini; cmd_status and the --dry-run branch read settings.roles instead of hardcoding codex, and defaults (codex/claude) keep 0.2.1 output byte-identical; new tests in test_running_roles.py and test_cli_roles.py cover the live-marker guard for a third agent, empty-agent rejection, missing/non-string role, start_turn writing role, status verb for reviewer/implementer/legacy markers, and dry-run picking the configured implementer; full suite passes 270/270 with plain uv run pytest -q
+
+**Rejected:**
+
+- requiring a role on every marker — would break old markers already on disk, which the task explicitly requires to keep loading with role==''
+
+**Files:** src/whyline_relay/running.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 8dc9dfb5d8e943cea8ae5986f6e7e158 -->

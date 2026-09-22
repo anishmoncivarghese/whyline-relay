@@ -19,6 +19,7 @@ class Running:
     round: int
     started: str
     pid: int
+    role: str = ""
 
 
 class AlreadyRunning(RuntimeError):
@@ -39,11 +40,13 @@ def read(root: Path) -> Running | None:
         marker = Running(**record)
     except (OSError, json.JSONDecodeError, TypeError):
         return None
-    if marker.agent not in ("codex", "claude"):
+    if not isinstance(marker.agent, str) or not marker.agent.strip():
         return None
     if not isinstance(marker.task, str) or not isinstance(marker.round, int):
         return None
     if not isinstance(marker.started, str) or not isinstance(marker.pid, int):
+        return None
+    if not isinstance(marker.role, str):
         return None
     return marker
 
@@ -86,7 +89,9 @@ def _temporary(target: Path, marker: Running) -> Path:
         raise
 
 
-def start_turn(root: Path, agent: str, task: str, round_: int) -> Running:
+def start_turn(
+    root: Path, agent: str, task: str, round_: int, role: str = ""
+) -> Running:
     """Atomically claim the repository, or update this process's current turn."""
     marker = Running(
         agent=agent,
@@ -94,6 +99,7 @@ def start_turn(root: Path, agent: str, task: str, round_: int) -> Running:
         round=round_,
         started=datetime.now().astimezone().isoformat(),
         pid=os.getpid(),
+        role=role,
     )
     target = path(root)
     temporary = _temporary(target, marker)
