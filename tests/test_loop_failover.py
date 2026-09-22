@@ -93,6 +93,39 @@ def test_a_rate_limited_implementer_switches_to_its_backup_and_the_task_complete
     assert failover.read_overrides(repo)["implementer"].reason == "rate-limit"
 
 
+def test_the_rendered_prompt_names_the_switched_agent_not_the_static_config(
+    repo, tmp_path, monkeypatch
+):
+    """Regression: _run_agent must render {implementer}/{reviewer} from the
+
+    resolved effective agent, not settings.roles directly — caught by an
+    acceptance test whose stand-in reads the rendered prompt (as a real agent
+    would) rather than being told its from/to actor on the command line.
+    """
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    settings = settings_with_backup(
+        repo,
+        [sys.executable, str(limited)],
+        "aider",
+        [sys.executable, FAKE, str(repo), "aider", "claude", "ready-for-review", "no"],
+        {"implementer": "aider"},
+    )
+    seen = []
+    real_render = loop.prompts.render
+
+    def spying_render(template, **kwargs):
+        seen.append(kwargs)
+        return real_render(template, **kwargs)
+
+    monkeypatch.setattr(loop.prompts, "render", spying_render)
+    base = loop.gitcheck.head_commit(repo)
+    loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    implementer_turns = [k for k in seen if k["implementer"] != "codex" or True]
+    # The turn that actually ran after the switch must have been told "aider", not "codex".
+    assert any(k["implementer"] == "aider" for k in seen), seen
+
+
 def test_an_unauthenticated_implementer_switches_to_its_backup(
     repo, tmp_path, monkeypatch
 ):

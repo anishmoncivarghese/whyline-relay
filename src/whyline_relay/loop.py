@@ -72,6 +72,8 @@ def _run_agent(
     review_feedback: str,
     echo: bool,
     *,
+    implementer: str,
+    reviewer: str,
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
@@ -94,10 +96,10 @@ def _run_agent(
         sync_packet=packet,
         round_=round_,
         review_feedback=review_feedback,
-        implementer=settings.roles.implementer,
-        reviewer=settings.roles.reviewer,
+        implementer=implementer,
+        reviewer=reviewer,
     )
-    log_role = role if settings.roles.implementer == settings.roles.reviewer else ""
+    log_role = role if implementer == reviewer else ""
     target = log_path(root, task.task_id, round_, agent, log_role)
     action = "implementing" if role == "implementer" else "reviewing"
     if echo:
@@ -228,6 +230,8 @@ def _run_task(
             round_,
             feedback,
             echo,
+            implementer=implementer,
+            reviewer=reviewer,
             runner=runner,
         )
         if role == "implementer" and gitcheck.head_commit(root) != head_before:
