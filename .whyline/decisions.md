@@ -1154,3 +1154,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/failover.py, src/whyline_relay/gitcheck.py, tests/test_failover.py
 
 <!-- whyline-event: 784727e184124a738b4de4170dbf055a -->
+
+## 2026-09-22 — Persist role failover and retry the same round with the effective backup
+
+**Actor:** codex
+**Role:** implementer
+**Task:** FBO-3
+
+**Because:** A detected quota or authentication failure must survive later invocations while preserving the current review round
+
+**Rejected:**
+
+- Pause after the primary failure — a configured backup can continue the task automatically
+- Increment the round on failover — switching agents is a retry of the same routing move
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_loop_failover.py
+
+<!-- whyline-event: 2dfbb718c3d249bf93e6aa623da66da7 -->
+
+## 2026-09-22 — FBO-3 approved: loop.py and cli.py resolve failover backups via failover.effective_agent exactly per spec
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FBO-3
+
+**Because:** runner threaded through all five functions as specified, implementer/reviewer resolved fresh via failover.effective_agent before and at the top of the retry loop, _hit_a_limit removed in favor of failover.failover_reason, NO_HANDOFF branch matches the spec's code verbatim, cli.py dry-run uses the same resolver for both the render call and the agents lookup, and the full suite (uv run pytest -q) passes with no regressions
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_loop_failover.py
+
+<!-- whyline-event: 2c7f11a38ad74fe6b341a8a3342e9b5e -->

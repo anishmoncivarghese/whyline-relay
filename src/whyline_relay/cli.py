@@ -15,6 +15,7 @@ from whyline_relay import (
     adapters,
     agents,
     config,
+    failover,
     gitcheck,
     init,
     invocation,
@@ -413,10 +414,13 @@ def cmd_start(args: argparse.Namespace) -> int:
             sync_packet=packet,
             round_=1,
             review_feedback="",
-            implementer=settings.roles.implementer,
+            implementer=failover.effective_agent(root, settings, "implementer"),
             reviewer=settings.roles.reviewer,
         )
-        argv = agents.build_argv(settings.agents[settings.roles.implementer], rendered)
+        argv = agents.build_argv(
+            settings.agents[failover.effective_agent(root, settings, "implementer")],
+            rendered,
+        )
         print(f"Next task: {task.task_id}")
         print(f"Would run: {shlex.join(argv[:-1])} <prompt>")
         print("--- prompt ---")

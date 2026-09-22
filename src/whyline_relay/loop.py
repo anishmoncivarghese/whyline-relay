@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from whyline_relay import (
     adapters,
     agents,
     config,
+    failover,
     gitcheck,
     handoff,
     invocation,
@@ -68,6 +71,8 @@ def _run_agent(
     round_: int,
     review_feedback: str,
     echo: bool,
+    *,
+    runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
     command = settings.agents[agent]
@@ -137,19 +142,6 @@ def _no_handoff_detail(target: Path, adapter: adapters.Adapter) -> str:
     return adapter.diagnose(text)
 
 
-def _hit_a_limit(target: Path) -> bool:
-    """Whether the agent's output says it ran out of quota.
-
-    Only asked when the agent handed nothing off. Ordinary code and prose say
-    "rate limit" and "too many requests" all the time, so those words alone must
-    never discard a handoff the agent did make.
-    """
-    try:
-        return agents.rate_limited(target.read_text(encoding="utf-8", errors="replace"))
-    except OSError:
-        return False
-
-
 def _approved(
     root: Path, task: plan.Task, base_commit: str, round_: int, log: Path | None
 ) -> Outcome:
@@ -173,6 +165,7 @@ def _run_task(
     resume: bool = False,
     start_round: int = 1,
     on_turn: Callable[[int, str | None], None] | None = None,
+    runner: failover.Runner = subprocess.run,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -189,8 +182,8 @@ def _run_task(
     round_ = start_round
     feedback = ""
     next_move = routing.IMPLEMENT
-    implementer = settings.roles.implementer
-    reviewer = settings.roles.reviewer
+    implementer = failover.effective_agent(root, settings, "implementer")
+    reviewer = failover.effective_agent(root, settings, "reviewer")
     gitcheck.ensure_relay_ignored(root)
     whylinecmd.claim(root, task.task_id, implementer, "implementer")
     if resume:
@@ -212,6 +205,8 @@ def _run_task(
                 feedback = current.summary
 
     while True:
+        implementer = failover.effective_agent(root, settings, "implementer")
+        reviewer = failover.effective_agent(root, settings, "reviewer")
         if next_move == routing.APPROVED:
             return _approved(root, task, base_commit, round_, None)
         role = "implementer" if next_move == routing.IMPLEMENT else "reviewer"
@@ -224,7 +219,16 @@ def _run_task(
             on_turn(round_, previous_id)
 
         target = _run_agent(
-            root, settings, agent, role, template, task, round_, feedback, echo
+            root,
+            settings,
+            agent,
+            role,
+            template,
+            task,
+            round_,
+            feedback,
+            echo,
+            runner=runner,
         )
         if role == "implementer" and gitcheck.head_commit(root) != head_before:
             # Codex's sandbox does not stop it committing (measured on
@@ -246,15 +250,41 @@ def _run_task(
         )
 
         if move == routing.NO_HANDOFF:
-            if _hit_a_limit(target):
+            try:
+                text = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            adapter = config.adapter_for(settings, agent)
+            reason = failover.failover_reason(
+                adapter, text, settings.agents[agent], runner=runner
+            )
+            if reason is not None:
+                backup = settings.backups.get(role)
+                if backup is not None and backup != agent:
+                    verb, _ = failover.REASON_TEXT[reason]
+                    failover.write_override(
+                        root,
+                        role,
+                        failover.ActiveOverride(
+                            agent=backup,
+                            backup_for=agent,
+                            reason=reason,
+                            since=datetime.now().astimezone().isoformat(),
+                        ),
+                    )
+                    if echo:
+                        agents.print_status(
+                            f"==> relay: {role} switched from {agent} to {backup} "
+                            f"({agent} {verb})"
+                        )
+                    continue
+                existing = failover.read_overrides(root).get(role)
                 raise Paused(
-                    f"{agent} hit a usage or rate limit; try again when it resets",
-                    target,
+                    failover.pause_message(agent, role, reason, existing), target
                 )
             raise Paused(
                 f"{agent} exited without handing off"
-                f"{_no_handoff_detail(target, config.adapter_for(settings, agent))}; "
-                "nothing was routed",
+                f"{_no_handoff_detail(target, adapter)}; nothing was routed",
                 target,
             )
         if record.task != task.task_id:
@@ -302,6 +332,7 @@ def run_task(
     start_round: int = 1,
     on_turn: Callable[[int, str | None], None] | None = None,
     _clear_running: bool = True,
+    runner: failover.Runner = subprocess.run,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     try:
@@ -314,6 +345,7 @@ def run_task(
             resume=resume,
             start_round=start_round,
             on_turn=on_turn,
+            runner=runner,
         )
     finally:
         if _clear_running:
@@ -395,6 +427,7 @@ def _run_plan(
     resume: bool = False,
     allow_dirty: bool = False,
     echo: bool = True,
+    runner: failover.Runner = subprocess.run,
 ) -> list[Outcome]:
     """Run every unchecked task in file order. Tick each only after it commits.
 
@@ -441,6 +474,7 @@ def _run_plan(
                 start_round=start_round,
                 on_turn=on_turn,
                 _clear_running=False,
+                runner=runner,
             )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
@@ -476,6 +510,7 @@ def run_plan(
     resume: bool = False,
     allow_dirty: bool = False,
     echo: bool = True,
+    runner: failover.Runner = subprocess.run,
 ) -> list[Outcome]:
     """Run a plan while retaining one live marker across all of its tasks."""
     try:
@@ -488,6 +523,7 @@ def run_plan(
             resume=resume,
             allow_dirty=allow_dirty,
             echo=echo,
+            runner=runner,
         )
     finally:
         running.clear(root)
