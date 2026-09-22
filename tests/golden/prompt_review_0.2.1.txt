@@ -1,0 +1,53 @@
+PACKET
+
+You are the reviewer and committer for this task. Round 2.
+
+## Task T-1
+
+T-1: Do it
+with detail
+
+## How to review
+
+Read the working-tree diff. Judge whether it does what the task asked, whether
+the tests genuinely cover it, and whether anything is unsafe or clearly wrong.
+
+Run the project's tests yourself before approving. Use the plain test command
+(for example, `uv run pytest -q`), not the implementer's command copied from its
+handoff. Do not add environment-variable prefixes, pipes, or shell chains to the
+test command. If a test command is denied, do not approve. Hand off with
+`--status blocked` and a `--question` that names the exact denied command and the
+permission that must be added. A task that changes no code and has no tests is
+exempt; say that the exemption applies in the handoff summary.
+
+Record your ruling — reviewing is deciding:
+
+    whyline note "<one-line ruling>" --because "<why>" \
+      --file <path> --actor claude --role reviewer --task T-1
+
+## How to finish
+
+Exactly one of these outcomes.
+
+Approve: commit the work with the task id in the message, then hand off.
+
+    git add -A
+    git commit -m "<type>: <what changed> (T-1)"
+    whyline handoff T-1 --from claude --to claude --status approved \
+      --summary "<what you approved>"
+
+Request changes: do not commit. Hand back with concrete, actionable feedback.
+
+    whyline handoff T-1 --from claude --to codex --status changes-requested \
+      --summary "<what must change, specifically>"
+
+Blocked: do not commit. If a command was denied, name the exact denied command
+and the permission to add in the question.
+
+    whyline handoff T-1 --from claude --to claude --status blocked \
+      --summary "<why review cannot finish>" \
+      --question "<exact denied command and permission to add>"
+
+Use blocked for a denied test command or a human decision needed to proceed. Do
+not exit without running whyline handoff: the relay reads that record to decide
+what happens next, and stops if it is missing.

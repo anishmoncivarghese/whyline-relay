@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PLACEHOLDERS = ("task_id", "task_text", "sync_packet", "round", "review_feedback")
+PLACEHOLDERS = (
+    "task_id",
+    "task_text",
+    "sync_packet",
+    "round",
+    "review_feedback",
+    "implementer",
+    "reviewer",
+)
 
 IMPLEMENT = """{sync_packet}
 
@@ -28,11 +36,11 @@ Do not commit. The reviewer commits.
 Record any genuine decision a future reader would wonder about:
 
     whyline note "<one-line decision>" --because "<why>" --rejected "<option>: <why not>" \\
-      --file <path> --actor codex --role implementer --task {task_id}
+      --file <path> --actor {implementer} --role implementer --task {task_id}
 
 Finish by handing off, exactly once, with exactly these values:
 
-    whyline handoff {task_id} --from codex --to claude --status ready-for-review \\
+    whyline handoff {task_id} --from {implementer} --to {reviewer} --status ready-for-review \\
       --summary "<what you changed>" --file <each file you touched> \\
       --test "<command>: <result>" --risk "<anything the reviewer should check>"
 
@@ -65,7 +73,7 @@ exempt; say that the exemption applies in the handoff summary.
 Record your ruling — reviewing is deciding:
 
     whyline note "<one-line ruling>" --because "<why>" \\
-      --file <path> --actor claude --role reviewer --task {task_id}
+      --file <path> --actor {reviewer} --role reviewer --task {task_id}
 
 ## How to finish
 
@@ -75,18 +83,18 @@ Approve: commit the work with the task id in the message, then hand off.
 
     git add -A
     git commit -m "<type>: <what changed> ({task_id})"
-    whyline handoff {task_id} --from claude --to claude --status approved \\
+    whyline handoff {task_id} --from {reviewer} --to {reviewer} --status approved \\
       --summary "<what you approved>"
 
 Request changes: do not commit. Hand back with concrete, actionable feedback.
 
-    whyline handoff {task_id} --from claude --to codex --status changes-requested \\
+    whyline handoff {task_id} --from {reviewer} --to {implementer} --status changes-requested \\
       --summary "<what must change, specifically>"
 
 Blocked: do not commit. If a command was denied, name the exact denied command
 and the permission to add in the question.
 
-    whyline handoff {task_id} --from claude --to claude --status blocked \\
+    whyline handoff {task_id} --from {reviewer} --to {reviewer} --status blocked \\
       --summary "<why review cannot finish>" \\
       --question "<exact denied command and permission to add>"
 
@@ -119,12 +127,17 @@ def render(
     sync_packet: str,
     round_: int,
     review_feedback: str,
+    implementer: str = "codex",
+    reviewer: str = "claude",
 ) -> str:
-    """Substitute the five placeholders.
+    """Substitute the placeholders.
 
     str.replace, not str.format: the templates carry JSON and shell braces, and
     .format would raise on the first one it met.
     """
+    rendered = template.replace("{implementer}", implementer).replace(
+        "{reviewer}", reviewer
+    )
     values = {
         "{task_id}": task_id,
         "{task_text}": task_text,
@@ -132,7 +145,6 @@ def render(
         "{round}": str(round_),
         "{review_feedback}": review_feedback or "(none — this is the first round)",
     }
-    rendered = template
     for placeholder, value in values.items():
         rendered = rendered.replace(placeholder, value)
     return rendered

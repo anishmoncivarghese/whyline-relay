@@ -36,14 +36,14 @@ def test_builtin_templates_use_only_known_placeholders():
 
 
 def test_implement_template_names_the_exact_handoff_command():
-    assert "whyline handoff {task_id} --from codex --to claude" in prompts.IMPLEMENT
+    assert "whyline handoff {task_id} --from {implementer} --to {reviewer}" in prompts.IMPLEMENT
     assert "--status ready-for-review" in prompts.IMPLEMENT
     assert "whyline note" in prompts.IMPLEMENT
 
 
 def test_review_template_names_both_permitted_outcomes():
     assert "--status approved" in prompts.REVIEW
-    assert "--to codex --status changes-requested" in prompts.REVIEW
+    assert "--to {implementer} --status changes-requested" in prompts.REVIEW
 
 
 def test_review_template_requires_independent_plain_test_command():

@@ -1,0 +1,34 @@
+PACKET
+
+You are the implementer for this task. Round 2.
+
+## Task T-1
+
+T-1: Do it
+with detail
+
+## Feedback from the previous review round
+
+fix the edge
+
+## How to finish
+
+Implement the task. Run the project's tests and note the exact command and its
+result — you will report both in your handoff.
+
+Do not commit. The reviewer commits.
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" --rejected "<option>: <why not>" \
+      --file <path> --actor codex --role implementer --task T-1
+
+Finish by handing off, exactly once, with exactly these values:
+
+    whyline handoff T-1 --from codex --to claude --status ready-for-review \
+      --summary "<what you changed>" --file <each file you touched> \
+      --test "<command>: <result>" --risk "<anything the reviewer should check>"
+
+If you cannot complete the task, hand off with --status blocked and a --question
+saying what you need. Do not exit without running whyline handoff: the relay
+reads that record to decide what happens next, and stops if it is missing.

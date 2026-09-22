@@ -838,3 +838,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/routing.py, src/whyline_relay/handoff.py
 
 <!-- whyline-event: 6e2059c000bb47629d03c961f56cf045 -->
+
+## 2026-09-22 — Render role placeholders before inserting user content
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-3
+
+**Because:** Replacing implementer and reviewer on the template first preserves literal role placeholder text supplied in task content while keeping default prompt bytes unchanged
+
+**Rejected:**
+
+- Replace all placeholders in one pass after content insertion — role-looking text in task content could be rewritten
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: 90391dbfafe04c4fbf941a38643b5491 -->
+
+## 2026-09-22 — ADPT-3 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-3
+
+**Because:** IMPLEMENT and REVIEW templates now use {implementer}/{reviewer} placeholders substituted before user content is inserted, preventing task text collisions; golden files captured from unmodified 0.2.1 code prove default rendering is byte-for-byte unchanged; new tests cover default bytes, custom-role substitution, and literal-placeholder-in-task-text safety; only the two permitted lines in test_prompts.py were edited; init.py untouched; full suite (261 tests) passes with plain uv run pytest -q
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: 2c269f04fb624e9a80e7cf6c3d4d6a4f -->
