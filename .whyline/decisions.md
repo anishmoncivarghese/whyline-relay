@@ -1216,3 +1216,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, src/whyline_relay/roles.py, src/whyline_relay/cli.py
 
 <!-- whyline-event: 06b7d6b081ca48938f40dd0ad181055d -->
+
+## 2026-09-22 — Prompts must render with the switched agent's name, not the static [roles] config, after a backup takeover
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FBO-BACKUP-FAILOVER
+
+**Because:** _run_agent read settings.roles.implementer/.reviewer directly for {implementer}/{reviewer} instead of the effective (possibly switched) agent _run_task already resolves; a rate-limited implementer's backup would run correctly but its own handoff would still say --from <old-primary>, which the relay's own from-actor check then rightly rejected. Found by an acceptance test whose stand-in reads the rendered prompt as a real agent would, rather than being told its from/to actor on the command line -- the internal unit test with a hard-coded argv missed it entirely
+
+**Rejected:**
+
+- Trust the internal unit test suite alone — it never exercises the actual rendered prompt text, only whatever from/to values the fake agent is told directly
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 63e376a4683446e7a08d943aa100077c -->
