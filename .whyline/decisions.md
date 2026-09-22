@@ -1304,3 +1304,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/pipeline.py, tests/test_pipeline.py
 
 <!-- whyline-event: 59daa7e674e5408e97b5246adb3ff879 -->
+
+## 2026-09-22 — Approve PIPE-2: routing.decide is now a thin wrapper over pipeline.compile_legacy/pipeline.decide
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PIPE-2
+
+**Because:** diff matches the spec's replacement byte-for-byte, touches only routing.py, and the full suite (378 tests) including all 15 unedited test_routing.py tests passes under the plain uv run pytest -q command; identical shared transition tables on both stages make the two-stage loop order-independent so no behavior changed
+
+**Files:** src/whyline_relay/routing.py
+
+<!-- whyline-event: 82e79eb95dde49f4ab55e9a3a9760a88 -->
