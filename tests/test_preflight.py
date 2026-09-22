@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, preflight, state
+from whyline_relay import cli, preflight, prompts, state
 
 
 def _git(root: Path, *args: str) -> None:
@@ -180,6 +180,123 @@ def test_non_codex_or_claude_program_skips_login_check(ready_repo: Path):
     checks = preflight.run(ready_repo, runner=successful_runner(calls))
     assert calls == [["whyline", "sync"]]
     assert not any("logged in" in check.message for check in checks)
+
+
+def test_only_agents_filling_roles_are_checked(ready_repo: Path, monkeypatch):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nimplementer = "claude"\nreviewer = "claude"\n'
+        '[agents.codex]\ncommand = ["codex", "--settings", "missing.json"]\n'
+        '[agents.claude]\ncommand = ["claude", "-p"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: "/bin/claude" if name == "claude" else None,
+    )
+
+    checks = preflight.run(
+        ready_repo, allow_dirty=True, runner=successful_runner()
+    )
+
+    assert checks[2] == preflight.Check("ok", "relay setup is complete")
+    assert not any(check.message == "codex is not on PATH" for check in checks)
+    assert any(
+        check
+        == preflight.Check(
+            "warn",
+            "claude is both the implementer and the reviewer, so the review is not independent",
+        )
+        for check in checks
+    )
+
+
+def test_generic_agent_is_checked_and_warned_without_login(
+    ready_repo: Path, monkeypatch
+):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nreviewer = "aider"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--message"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "aider" else name,
+    )
+    calls: list[list[str]] = []
+
+    checks = preflight.run(
+        ready_repo, allow_dirty=True, runner=successful_runner(calls)
+    )
+
+    assert any(check.message == "aider is on PATH" for check in checks)
+    assert [check for check in checks if "aider is a generic agent" in check.message] == [
+        preflight.Check(
+            "warn",
+            "aider is a generic agent: the relay does not manage its permissions, login or denials",
+        )
+    ]
+    assert calls == [["whyline", "sync"]]
+
+
+@pytest.mark.parametrize("template", ["stale", "fresh", "missing"])
+def test_non_default_roles_validate_existing_prompt_templates(
+    ready_repo: Path, template: str
+):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nimplementer = "claude"\nreviewer = "codex"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+    )
+    prompt = ready_repo / ".whyline" / "relay" / "prompts" / "implement.md"
+    if template != "missing":
+        prompt.parent.mkdir()
+        content = prompts.IMPLEMENT
+        if template == "stale":
+            content = content.replace("{implementer}", "codex").replace(
+                "{reviewer}", "claude"
+            )
+        prompt.write_text(content)
+
+    checks = preflight.run(
+        ready_repo, allow_dirty=True, runner=successful_runner()
+    )
+    template_failures = [
+        check
+        for check in checks
+        if check.message.startswith("prompt template .whyline/relay/prompts/")
+    ]
+
+    if template == "stale":
+        assert template_failures == [
+            preflight.Check(
+                "FAIL",
+                "prompt template .whyline/relay/prompts/implement.md does not use "
+                "{implementer} and {reviewer}, so an agent would be told the wrong names",
+                "whyline-relay init --overwrite",
+            )
+        ]
+    else:
+        assert template_failures == []
+    assert [
+        check.message
+        for check in checks
+        if check.message.startswith(("implementer:", "reviewer:"))
+    ] == [
+        "implementer: claude  permissions: managed  login: checked  denials: reported",
+        "reviewer: codex  permissions: managed  login: checked  denials: reported",
+    ]
+
+
+def test_stand_in_codex_command_is_not_login_checked(ready_repo: Path):
+    calls: list[list[str]] = []
+
+    preflight.run(ready_repo, runner=successful_runner(calls))
+
+    assert calls == [["whyline", "sync"]]
 
 
 @pytest.mark.parametrize(

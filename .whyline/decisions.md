@@ -962,3 +962,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, tests/fake_agent.py, tests/test_loop_roles.py
 
 <!-- whyline-event: 727fcf5a1fe244df99f5f32986fc3351 -->
+
+## 2026-09-22 — Use role order when deduplicating agents for preflight
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-7
+
+**Because:** An agent filling both roles must be checked once, and implementer is the specified first role
+
+**Rejected:**
+
+- Emit one capability row per role — the task requires each in-use agent once
+
+**Files:** src/whyline_relay/preflight.py
+
+<!-- whyline-event: 188cb3a427e9423d939423301c79797d -->
+
+## 2026-09-22 — Approved ADPT-7: role-scoped preflight checks agents in use, adapters for logins, and warns/fails on weak multi-agent setups
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-7
+
+**Because:** Implementation matches spec exactly: _agents_in_use dedupes by role order, _logins/_programs/_relay_setup iterate only in-use agents, _role_checks emits independence/generic warnings and non-default-role template/summary checks; default-role output verified byte-identical via unedited test_all_checks_pass_in_documented_order, and all 287 tests pass
+
+**Rejected:**
+
+- Trusting the handoff's own test claim without rerunning — reran full suite independently per review protocol
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/adapters/__init__.py, tests/test_preflight.py
+
+<!-- whyline-event: dc228c77dfac4cf7b0d0a353ee17849a -->

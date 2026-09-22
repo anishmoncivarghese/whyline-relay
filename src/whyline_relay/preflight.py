@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, TextIO
 
-from whyline_relay import config, gitcheck, invocation, plan, running
+from whyline_relay import adapters, config, gitcheck, invocation, plan, prompts, running
 
 Status = Literal["ok", "warn", "FAIL"]
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -64,6 +64,14 @@ def _whyline(root: Path, runner: Runner) -> Check:
     return _result("ok", "whyline is installed and initialised")
 
 
+def _agents_in_use(settings: config.Config) -> dict[str, list[str]]:
+    agents: dict[str, list[str]] = {}
+    for name in (settings.roles.implementer, settings.roles.reviewer):
+        if name in settings.agents and name not in agents:
+            agents[name] = settings.agents[name]
+    return agents
+
+
 def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
     target = config.config_path(root)
     if not target.is_file():
@@ -87,7 +95,7 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
 
     missing: list[Path] = []
     invalid: list[str] = []
-    for command in settings.agents.values():
+    for command in _agents_in_use(settings).values():
         for index, argument in enumerate(command):
             if argument != "--settings":
                 continue
@@ -111,7 +119,7 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
         return [], []
     checks: list[Check] = []
     programs: list[str] = []
-    for command in settings.agents.values():
+    for command in _agents_in_use(settings).values():
         if not command:
             checks.append(
                 _result(
@@ -138,20 +146,22 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
     return checks, programs
 
 
-def _logins(root: Path, programs: list[str], runner: Runner) -> list[Check]:
+def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
     checks: list[Check] = []
     seen: set[str] = set()
-    for configured_program in programs:
-        program = Path(configured_program).name
-        if program not in {"codex", "claude"} or program in seen:
+    for agent, command in _agents_in_use(settings).items():
+        adapter = config.adapter_for(settings, agent)
+        if (
+            not command
+            or adapter.login_argv is None
+            or Path(command[0]).name != adapter.binary
+            or adapter.binary in seen
+        ):
             continue
+        program = adapter.binary
         seen.add(program)
-        argv = (
-            ["codex", "login", "status"]
-            if program == "codex"
-            else ["claude", "auth", "status"]
-        )
-        fix = "codex login" if program == "codex" else "claude auth login"
+        argv = list(adapter.login_argv)
+        fix = adapter.login_fix
         try:
             result = runner(
                 argv,
@@ -178,6 +188,60 @@ def _logins(root: Path, programs: list[str], runner: Runner) -> list[Check]:
             checks.append(_result("ok", f"{program} is logged in"))
         else:
             checks.append(_result("FAIL", f"{program} is not logged in", fix))
+    return checks
+
+
+def _role_checks(root: Path, settings: config.Config) -> list[Check]:
+    checks: list[Check] = []
+    roles = settings.roles
+    agents = _agents_in_use(settings)
+
+    if roles.implementer == roles.reviewer:
+        checks.append(
+            _result(
+                "warn",
+                f"{roles.implementer} is both the implementer and the reviewer, "
+                "so the review is not independent",
+            )
+        )
+
+    for agent in agents:
+        if config.adapter_for(settings, agent).name == "generic":
+            checks.append(
+                _result(
+                    "warn",
+                    f"{agent} is a generic agent: the relay does not manage its "
+                    "permissions, login or denials",
+                )
+            )
+
+    if roles == config.Roles():
+        return checks
+
+    prompt_dir = prompts.prompts_dir(root)
+    for name in ("implement.md", "review.md"):
+        template = prompt_dir / name
+        if not template.exists():
+            continue
+        text = template.read_text(encoding="utf-8")
+        if "{implementer}" not in text or "{reviewer}" not in text:
+            checks.append(
+                _result(
+                    "FAIL",
+                    f"prompt template .whyline/relay/prompts/{name} does not use "
+                    "{implementer} and {reviewer}, so an agent would be told the "
+                    "wrong names",
+                    f"{invocation.command('init')} --overwrite",
+                )
+            )
+
+    for agent in agents:
+        adapter = config.adapter_for(settings, agent)
+        if adapter.name == "generic":
+            continue
+        role = "implementer" if agent == roles.implementer else "reviewer"
+        checks.append(_result("ok", adapters.describe(adapter, role, agent)))
+
     return checks
 
 
@@ -230,9 +294,11 @@ def run(
     results.append(_whyline(root, runner))
     setup, settings = _relay_setup(root)
     results.append(setup)
-    program_checks, programs = _programs(settings)
+    program_checks, _ = _programs(settings)
     results.extend(program_checks)
-    results.extend(_logins(root, programs, runner))
+    if settings is not None:
+        results.extend(_logins(root, settings, runner))
+        results.extend(_role_checks(root, settings))
 
     selected_plan = plan_path
     if selected_plan is None:

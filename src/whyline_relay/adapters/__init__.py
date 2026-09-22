@@ -17,3 +17,15 @@ def get(name: str) -> Adapter:
         return BUILTIN[name]
     except KeyError:
         raise KeyError(name) from None
+
+
+def describe(adapter: Adapter, role: str, agent: str) -> str:
+    """Summarise the safeguards an adapter manages for one role."""
+    manages = adapter.manages
+    permissions = "managed" if manages.permissions else "not managed"
+    login = "checked" if manages.login else "not verified"
+    denials = "reported" if manages.denials else "not reported"
+    return (
+        f"{role}: {agent}  permissions: {permissions}  login: {login}  "
+        f"denials: {denials}"
+    )
