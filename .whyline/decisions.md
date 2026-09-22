@@ -1276,3 +1276,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/base.py
 
 <!-- whyline-event: 84f87ae79a914a2b9a1ace3b78e03e34 -->
+
+## 2026-09-22 — Model legacy routing with a shared transition table across both stages
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PIPE-1
+
+**Because:** the current router is stateless with respect to the stage that just ended, while recipient matching belongs to the role of the resolved target stage
+
+**Rejected:**
+
+- Use separate per-stage transition tables — that would change legacy behavior by making outcomes depend on the prior stage
+
+**Files:** src/whyline_relay/pipeline.py, tests/test_pipeline.py
+
+<!-- whyline-event: 210e3edf2274435bb3a30ed127f4dbde -->
+
+## 2026-09-22 — PIPE-1 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PIPE-1
+
+**Because:** pipeline.py and test_pipeline.py are byte-faithful to the spec (only cosmetic multi-line formatting differs); compile_legacy reproduces routing.decide's exact behavior (approved/blocked short-circuit regardless of recipient, review/changes/assigned gated on the resolved stage's role), and decide() generalizes correctly to N stages. 378 tests pass (uv run pytest -q), including all 16 new tests, with routing.py and every other file untouched. The iteration-order risk noted in the handoff isn't a live bug: the legacy shape's two stages share an identical transitions dict so order can't affect the result, and the three-stage test fixture has no status key shared across stages except the blocked terminal, which is order-independent
+
+**Files:** src/whyline_relay/pipeline.py, tests/test_pipeline.py
+
+<!-- whyline-event: 59daa7e674e5408e97b5246adb3ff879 -->
