@@ -1248,3 +1248,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py
 
 <!-- whyline-event: 4511016178c84407aa86818568403393 -->
+
+## 2026-09-22 — Resolve custom agent variants through adapter capability metadata
+
+**Actor:** codex
+**Role:** implementer
+**Task:** MDL-1
+
+**Because:** A variant must inherit the aliased built-in command and preflight behavior while model arguments are applied only when that adapter declares a real model flag
+
+**Rejected:**
+
+- Treat every custom name as generic — that would lose built-in defaults and Claude/Codex login and permission checks
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/base.py
+
+<!-- whyline-event: 9bb12429f9b14c4493b3bb82266338b2 -->
+
+## 2026-09-22 — Approve MDL-1: config.py loop, adapter model_flag fields, and tests match spec verbatim; full suite (362 tests) passes unedited except the one permitted case
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** MDL-1
+
+**Because:** Diff reviewed line-by-line against the task spec: base/claude/codex/generic model_flag additions and the config.py loop replacement are byte-identical to the prescribed code; the only existing-test edit is the sanctioned adapter-mystery case; ran uv run pytest -q (plain command, not implementer's --frozen) and got 362 passed with no failures
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/base.py
+
+<!-- whyline-event: 84f87ae79a914a2b9a1ace3b78e03e34 -->

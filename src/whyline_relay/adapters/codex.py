@@ -20,4 +20,5 @@ ADAPTER = Adapter(
     permission_files=lambda stack: {},
     diagnose=last_line_detail,
     manages=Manages(True, True, True),
+    model_flag=("--model",),
 )

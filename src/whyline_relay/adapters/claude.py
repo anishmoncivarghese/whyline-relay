@@ -88,4 +88,5 @@ ADAPTER = Adapter(
     permission_files=permission_files,
     diagnose=diagnose,
     manages=Manages(True, True, True),
+    model_flag=("--model",),
 )

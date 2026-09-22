@@ -77,8 +77,9 @@ def test_roles_may_name_a_configured_generic_agent(tmp_path: Path):
             "agent 'codex' is built in and cannot set adapter",
         ),
         (
-            '[agents.aider]\nadapter = "claude"\ncommand = ["aider"]\n',
-            '[agents.aider] adapter must be "generic", not \'claude\'',
+            '[agents.aider]\nadapter = "mystery"\ncommand = ["aider"]\n',
+            '[agents.aider] adapter must be "generic" or a built-in agent '
+            "(claude, codex), not 'mystery'",
         ),
         (
             '[agents.aider]\nadapter = "generic"\ncommand = []\n',
@@ -219,3 +220,101 @@ def test_default_claude_command_passes_the_relay_permissions(tmp_path: Path):
     so the permissions travel with the command instead."""
     command = config.load(tmp_path).agents["claude"]
     assert command[command.index("--settings") + 1] == ".whyline/relay/claude-settings.json"
+
+
+def test_a_custom_name_may_alias_the_claude_adapter(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.claude-opus]\nadapter = "claude"\n',
+    )
+    loaded = config.load(tmp_path)
+    assert loaded.agents["claude-opus"] == config.DEFAULTS["agents"]["claude"]
+    assert config.adapter_for(loaded, "claude-opus").name == "claude"
+
+
+def test_a_claude_variant_can_override_command_and_add_a_model(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.claude-opus]\nadapter = "claude"\n'
+        'command = ["claude", "-p"]\nmodel = "opus"\n',
+    )
+    loaded = config.load(tmp_path)
+    assert loaded.agents["claude-opus"] == ["claude", "-p", "--model", "opus"]
+    assert config.adapter_for(loaded, "claude-opus").name == "claude"
+
+
+def test_a_codex_variant_with_no_command_gets_the_default_plus_the_model(
+    tmp_path: Path,
+):
+    write(tmp_path, '[agents.codex-fast]\nadapter = "codex"\nmodel = "gpt-5-mini"\n')
+    loaded = config.load(tmp_path)
+    assert loaded.agents["codex-fast"] == [
+        *config.DEFAULTS["agents"]["codex"],
+        "--model",
+        "gpt-5-mini",
+    ]
+
+
+def test_the_literal_built_in_name_can_also_take_a_model(tmp_path: Path):
+    write(tmp_path, '[agents.claude]\nmodel = "haiku"\n')
+    loaded = config.load(tmp_path)
+    assert loaded.agents["claude"] == [
+        *config.DEFAULTS["agents"]["claude"],
+        "--model",
+        "haiku",
+    ]
+
+
+def test_model_on_a_generic_agent_is_refused(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\nmodel = "x"\n',
+    )
+    with pytest.raises(
+        config.ConfigError, match="cannot set model: the generic adapter"
+    ):
+        config.load(tmp_path)
+
+
+def test_a_non_string_model_is_refused(tmp_path: Path):
+    write(tmp_path, "[agents.claude]\nmodel = 3\n")
+    with pytest.raises(config.ConfigError, match="model must be a non-empty string"):
+        config.load(tmp_path)
+
+
+def test_an_empty_model_is_refused(tmp_path: Path):
+    write(tmp_path, '[agents.claude]\nmodel = ""\n')
+    with pytest.raises(config.ConfigError, match="model must be a non-empty string"):
+        config.load(tmp_path)
+
+
+def test_an_unrecognised_adapter_value_still_names_both_valid_options(
+    tmp_path: Path,
+):
+    write(tmp_path, '[agents.aider]\nadapter = "mystery"\ncommand = ["aider"]\n')
+    with pytest.raises(
+        config.ConfigError,
+        match=r'adapter must be "generic" or a built-in agent \(claude, codex\)',
+    ):
+        config.load(tmp_path)
+
+
+def test_a_claude_variant_is_login_checked_and_bypass_checked_like_claude_itself(
+    tmp_path: Path,
+):
+    from whyline_relay import preflight
+    from whyline_relay.adapters.base import Manages
+
+    write(
+        tmp_path,
+        '[roles]\nreviewer = "claude-opus"\n'
+        '[agents.claude-opus]\nadapter = "claude"\nmodel = "opus"\n',
+    )
+    loaded = config.load(tmp_path)
+    in_use = preflight._agents_in_use(loaded)
+    assert "claude-opus" in in_use
+    command, backup_for = in_use["claude-opus"]
+    assert command[0] == "claude" and backup_for is None
+    adapter = config.adapter_for(loaded, "claude-opus")
+    assert adapter.login_argv == ("claude", "auth", "status")
+    assert adapter.manages == Manages(True, True, True)

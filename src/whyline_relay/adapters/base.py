@@ -23,6 +23,7 @@ class Adapter:
     permission_files: Callable[[str], dict[str, str]]
     diagnose: Callable[[str], str]
     manages: Manages
+    model_flag: tuple[str, ...] | None
 
 
 def last_line_detail(text: str) -> str:

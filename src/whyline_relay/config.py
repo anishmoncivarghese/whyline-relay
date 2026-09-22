@@ -77,6 +77,7 @@ def load(root: Path) -> Config:
         if name in adapters.BUILTIN:
             if "adapter" in table:
                 raise ConfigError(f"agent '{name}' is built in and cannot set adapter")
+            resolved_adapter = adapters.get(name)
         else:
             if "adapter" not in table:
                 raise ConfigError(
@@ -84,17 +85,39 @@ def load(root: Path) -> Config:
                     f"and a command under [agents.{name}]"
                 )
             adapter_name = table["adapter"]
-            if adapter_name != "generic":
+            if adapter_name == "generic":
+                resolved_adapter = adapters.GENERIC
+                configured_adapters[name] = "generic"
+            elif adapter_name in adapters.BUILTIN:
+                resolved_adapter = adapters.get(adapter_name)
+                configured_adapters[name] = adapter_name
+            else:
+                builtins = ", ".join(sorted(adapters.BUILTIN))
                 raise ConfigError(
-                    f'[agents.{name}] adapter must be "generic", not {adapter_name!r}'
+                    f'[agents.{name}] adapter must be "generic" or a built-in agent '
+                    f'({builtins}), not {adapter_name!r}'
                 )
-            command = table.get("command")
-            if not isinstance(command, list) or not command:
-                raise ConfigError(f"[agents.{name}] needs a non-empty command")
-            configured_adapters[name] = "generic"
+            if resolved_adapter.default_command is None:
+                command = table.get("command")
+                if not isinstance(command, list) or not command:
+                    raise ConfigError(f"[agents.{name}] needs a non-empty command")
         command = table.get("command")
         if command is not None:
+            if not isinstance(command, list) or not command:
+                raise ConfigError(f"[agents.{name}] needs a non-empty command")
             agents[name] = list(command)
+        elif name not in agents:
+            agents[name] = list(resolved_adapter.default_command)
+        model = table.get("model")
+        if model is not None:
+            if not isinstance(model, str) or not model:
+                raise ConfigError(f"[agents.{name}] model must be a non-empty string")
+            if resolved_adapter.model_flag is None:
+                raise ConfigError(
+                    f"[agents.{name}] cannot set model: the {resolved_adapter.name} "
+                    "adapter has no way to apply it"
+                )
+            agents[name] = [*agents[name], *resolved_adapter.model_flag, model]
 
     role_values = raw.get("roles") or {}
     for key in role_values:
