@@ -1,6 +1,6 @@
 # whyline-relay
 
-Give it a Markdown plan. It runs each task through **Codex** (implements) and **Claude** (reviews and commits), one task at a time, unattended, and stops when something needs a human.
+Give it a Markdown plan. It runs each task through an implementer and a reviewer, by default **Codex** (implements) and **Claude** (reviews and commits), one task at a time, unattended, and stops when something needs a human. Since 0.2.2 either role can be filled by any built-in agent, or by another tool you configure yourself; see [Choosing which agent fills each role](#choosing-which-agent-fills-each-role).
 
 ```text
    plan.md                     ┌──────────────── one task ────────────────┐
@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through **Codex** (implements) and **
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. The 0.2 features (`remove`, `--version`, the progress lines and the truthful `status`, the verified-review rule) were built by running this tool on its own plan: Codex implemented, Claude reviewed and committed. It has run on nine real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. Every 0.2.x feature, including the pluggable agents in 0.2.2, was built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. It has run on eighteen real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 
@@ -31,6 +31,7 @@ It never types into a terminal for you and never pushes. Each agent runs headles
 - [Command reference](#command-reference)
 - [Using it from another program](#using-it-from-another-program)
 - [Configuration](#configuration)
+- [Choosing which agent fills each role](#choosing-which-agent-fills-each-role)
 - [Permissions and safety](#permissions-and-safety)
 - [What it writes](#what-it-writes)
 - [Removing the relay](#removing-the-relay)
@@ -249,9 +250,9 @@ whyline-relay [--version] <command>
 ```
 
 **`init`** writes the relay's setup into `.whyline/relay/`, after asking.
-`--repo REPO` Use this repository root (default: current directory). `--yes` Skip the confirmation question. `--overwrite` Replace files that already exist, discarding your edits.
-It detects a Python project (`pyproject.toml`), a Node project (`package.json`), or neither, and picks the permission preset to match. Declining, or having no terminal, writes nothing.
-`init` is safe to re-run. A file that does not exist is written; a file identical to what it would write is left alone; a file that exists and differs is **kept**, with a line such as `Kept .whyline/relay/prompts/review.md: it already exists and differs. Run with --overwrite to replace it.` Pass `--overwrite` to replace every file with the defaults, discarding your edits.
+`--repo REPO` Use this repository root (default: current directory). `--yes` Skip the confirmation question. `--overwrite` Replace files that already exist, discarding your edits. `--implementer NAME`, `--reviewer NAME` Choose a built-in agent (`codex` or `claude`) for the role; see [Choosing which agent fills each role](#choosing-which-agent-fills-each-role).
+It detects a Python project (`pyproject.toml`), a Node project (`package.json`), or neither, and picks the permission preset to match. It writes permission files only for the agents actually filling a role, so `--implementer codex --reviewer codex` writes no `claude-settings.json`. Declining, or having no terminal, writes nothing.
+`init` is safe to re-run. A file that does not exist is written; a file identical to what it would write is left alone; a file that exists and differs is **kept**, with a line such as `Kept .whyline/relay/prompts/review.md: it already exists and differs. Run with --overwrite to replace it.` Pass `--overwrite` to replace every file with the defaults, discarding your edits. Run it again with `--overwrite` after changing `[roles]` in an existing setup, so the prompt templates name the new roles; `doctor` catches a stale template and tells you to.
 
 **`start`** runs the plan from its first unchecked task.
 `--repo REPO` Use this repository root (default: current directory).
@@ -315,12 +316,37 @@ changes = "changes-requested"
 approved = "approved"
 blocked = "blocked"
 assigned = "assigned"
+
+[roles]                     # since 0.2.2; both optional, these are the defaults
+implementer = "codex"
+reviewer    = "claude"
 ```
 
 - The prompt is appended to each command as its last argument.
-- The two roles are named `codex` and `claude` in the handoff protocol. You can change the command each one runs, but the names are fixed.
-- **Prompts:** `.whyline/relay/prompts/implement.md` and `review.md` are the wrapper prompts sent each turn. They are yours to edit. Placeholders are `{task_id}`, `{task_text}`, `{sync_packet}`, `{round}` and `{review_feedback}`, substituted as plain text (so braces in JSON examples are safe). `--dry-run` shows the assembled Codex prompt.
-- **Where instructions reach the agents from:** the task in the plan, the two prompt templates, `AGENTS.md` (whyline's block, which agents read on their own), and, for Claude, the permissions file.
+- **Prompts:** `.whyline/relay/prompts/implement.md` and `review.md` are the wrapper prompts sent each turn. They are yours to edit. Placeholders are `{task_id}`, `{task_text}`, `{sync_packet}`, `{round}`, `{review_feedback}`, and, since 0.2.2, `{implementer}` and `{reviewer}` (the two agent names, so a template stays correct if you change `[roles]`), substituted as plain text (so braces in JSON examples are safe). `--dry-run` shows the assembled prompt for whichever agent implements.
+- **Where instructions reach the agents from:** the task in the plan, the two prompt templates, `AGENTS.md` (whyline's block, which agents read on their own), and, for an agent whose permissions the relay manages, the permissions file.
+
+## Choosing which agent fills each role
+
+By default the implementer is `codex` and the reviewer is `claude`; nothing here changes unless you set `[roles]`. Since 0.2.2, either role can be:
+
+- **A built-in agent**, `codex` or `claude`, in either role. `init --implementer claude --reviewer codex` sets both up, writing only the permission file the agents in use need (here, still `claude-settings.json`, since Claude fills a role either way). The same agent can fill both roles (`implementer = "claude"` and `reviewer = "claude"`); `doctor` then warns that the review is not independent, but does not stop you.
+- **A generic agent** — any other headless command, run the same way the built-ins are: with the prompt appended as its last argument. Configure it explicitly; there is no default and no guessing:
+
+  ```toml
+  [roles]
+  reviewer = "aider"
+
+  [agents.aider]
+  adapter = "generic"
+  command = ["aider", "--message"]
+  ```
+
+  A generic agent must be able to run `whyline handoff` and `git` in a shell, from whatever permissions its own tool grants; the relay does not manage its permissions, its login, or how it reports a denial, and `doctor` says so. It inherits the relay's environment, including any API keys the shell has. Writing `adapter = "generic"` is your acceptance of that; there is no way to opt in silently. A tool that cannot take its instructions as a trailing command-line argument (for example, one that only reads a prompt from stdin or a file) cannot be used this way.
+
+Whichever agent runs, the handoff record names it: `--from gemini --to claude` if `gemini` were configured, for instance, so `.whyline/decisions.md` and the commit history say which model actually did the work. The relay checks this: if a handoff is recorded under a name other than the agent that just ran, it pauses rather than accept it. After changing `[roles]` on a repository set up before 0.2.2 (or with older prompt templates), run `init --overwrite` so the templates use the new names; `doctor` will tell you to if you forget.
+
+Only `codex` and `claude` are supported today. There is no Gemini adapter yet; adding one needs its own measured behaviour (a signed-in run, not guesswork) and is tracked for a future release.
 
 ## Permissions and safety
 
@@ -336,14 +362,17 @@ Edit the file to add your project's test command so the reviewer can run tests. 
 
 **The allowlist is a convenience, not a security boundary.** Broad entries such as `uv run`, `npm` and `npx` execute arbitrary project code. Run unattended relays on an isolated branch, in a repository (or a fresh clone) that holds no valuable secrets, and read the resulting branch before merging it.
 
-**Codex** runs with `-s workspace-write`: it can write inside the repository, has no network, and can be told to run tests. **That sandbox does not stop it from running `git commit`** (measured on `codex-cli 0.155.1`). The prompt forbids it and the relay checks HEAD after every Codex turn, but that is a check, not a wall.
+**Codex** runs with `-s workspace-write`: it can write inside the repository, has no network, and can be told to run tests. **That sandbox does not stop it from running `git commit`** (measured on `codex-cli 0.155.1`). The prompt forbids it and the relay checks HEAD after every implementer turn, whichever built-in agent that is, but that is a check, not a wall.
+
+**A generic agent's permissions are its own tool's**, not the relay's. The relay does not add, remove, or inspect them; it can only refuse to launch a command containing one of the flags below.
 
 **What the relay does to protect you**
 
-- Never runs `git push`, and never passes a permission-bypass flag (`--dangerously-*`). Both are enforced by the test suite.
+- Never runs `git push`, and never passes or accepts a permission-bypass flag on a built-in agent's command: Codex's `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`, and a sandbox of `danger-full-access`; Claude's `--dangerously-skip-permissions` and `--permission-mode bypassPermissions`. A configured command containing one is refused by `doctor`, and by `start` even with `--skip-checks`, before anything is launched. All enforced by the test suite. A generic agent's command cannot be inspected this way.
 - Refuses to start on `main` or `master` without `--allow-main`, and refuses a dirty working tree without `--allow-dirty`.
-- Checks that Codex did not commit, that an approval is backed by a commit naming the task, and that nothing was left uncommitted afterwards.
-- Reviews are fail-closed: the review prompt tells Claude not to approve on the implementer's word if it cannot run the tests, but to hand off `blocked` and name the denied command.
+- Checks that the implementer did not commit, that an approval is backed by a commit naming the task, and that nothing was left uncommitted afterwards.
+- Checks that a handoff was recorded under the name of the agent that actually just ran.
+- Reviews are fail-closed: the review prompt tells the reviewer not to approve on the implementer's word if it cannot run the tests, but to hand off `blocked` and name the denied command.
 - Kills an agent's whole process group on timeout and on Ctrl+C, and refuses to run two relays in one repository.
 - Stops at the first problem.
 
@@ -358,7 +387,7 @@ Everything the relay adds is under `.whyline/relay/`:
 | `config.toml` | settings (above) | yes: commit it |
 | `claude-settings.json` | Claude's permissions | yes: commit it, it is reviewable |
 | `prompts/` | the two editable prompt templates | yes |
-| `logs/` | one file per agent turn, `<task>-<round>-<agent>.log` | no, ignored locally |
+| `logs/` | one file per agent turn, `<task>-<round>-<agent>.log` (`-implementer`/`-reviewer` added when one agent fills both roles, so the two turns don't share a file) | no, ignored locally |
 | `state.json` | saved progress of a paused run | no, ignored locally |
 | `STOP` | written by `whyline-relay stop` | no, ignored locally |
 | `running.json` | marks a live run (agent, task, round, pid) | no, ignored locally |
@@ -411,7 +440,7 @@ At those averages a plan of 20 such tasks is roughly two hours, about 1.2 millio
 
 **My project needs network to run its tests.** Codex's sandbox has none, so those tests will fail for Codex. Install dependencies beforehand, or exclude network tests from the default command.
 
-**Can I use a different agent?** You can change the command each role runs, but the roles are named `codex` and `claude` in the protocol, and the prompts and permissions assume those two tools.
+**Can I use a different agent?** Since 0.2.2, yes: swap which built-in agent, `codex` or `claude`, fills which role in `[roles]`, or configure any other headless tool as a `generic` agent. See [Choosing which agent fills each role](#choosing-which-agent-fills-each-role). There is no built-in Gemini adapter yet.
 
 **It approved something wrong.** It happens; the reviewer is a model. Review the branch before merging, and tighten the task text.
 
@@ -422,7 +451,8 @@ At those averages a plan of 20 such tasks is roughly two hours, about 1.2 millio
 - Claude's turn prints nothing until it ends (JSON output).
 - The relay trusts what the agents write to whyline. It verifies the commit and the working tree, not the code's correctness.
 - Task ids are not validated for shape; see [the plan rules](#writing-a-plan).
-- `resume` re-enters a task at its saved decision point but does not preserve Codex's conversation, which is a fresh session each turn.
+- `resume` re-enters a task at its saved decision point but does not preserve the implementer's conversation, which is a fresh session each turn.
+- Only `codex` and `claude` are built in. A `generic` agent's login, permissions, quota, and how it reports a denied command are entirely its own; the relay does not manage or check any of them.
 
 ## Development
 
