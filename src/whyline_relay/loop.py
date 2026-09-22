@@ -21,6 +21,7 @@ from whyline_relay import (
     state,
     whylinecmd,
 )
+from whyline_relay.adapters import bypass
 
 
 class Paused(RuntimeError):
@@ -69,6 +70,16 @@ def _run_agent(
     echo: bool,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
+    command = settings.agents[agent]
+    adapter = config.adapter_for(settings, agent)
+    found = bypass.find(adapter.name, command)
+    if found:
+        raise Paused(
+            f"refusing to run {agent}: its command contains a permission-bypass "
+            f"flag ({', '.join(found)}). The relay never runs an agent that way; "
+            "remove it from .whyline/relay/config.toml",
+            None,
+        )
     running.start_turn(root, agent, task.task_id, round_, role=role)
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
@@ -93,7 +104,7 @@ def _run_agent(
     try:
         try:
             agents.run(
-                settings.agents[agent],
+                command,
                 prompt,
                 cwd=root,
                 log_path=target,

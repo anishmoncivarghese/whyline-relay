@@ -1022,3 +1022,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/init.py, src/whyline_relay/cli.py, tests/test_init_roles.py
 
 <!-- whyline-event: 536f220e29424031aac7f516af6e3117 -->
+
+## 2026-09-22 — Reject built-in bypass options at both preflight and the final launch boundary
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-9
+
+**Because:** Preflight gives doctor, start and resume an actionable failure, while the launch-boundary check guarantees skipped checks can never pass a bypass command to an agent
+
+**Rejected:**
+
+- Rely only on preflight — --skip-checks would permit the unsafe command
+
+**Files:** src/whyline_relay/adapters/bypass.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py
+
+<!-- whyline-event: b031c2d5337a4acf9923144bcbf62fde -->
+
+## 2026-09-22 — ADPT-9 approved: single bypass registry enforced at preflight and the launch boundary
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-9
+
+**Because:** bypass.py is the sole source of the refused flags/values; loop._run_agent checks before start_turn/launch (holds under --skip-checks) and preflight._role_checks FAILs with matching wording; find() correctly matches exact/=-joined flags plus codex -s/--sandbox and claude --permission-mode forms; guard test extended for bypassPermissions with bypass.py exempted by exact name; new tests cover per-adapter isolation, defaults, generic no-op, run_task refusing before agents.run is called, preflight FAIL, and start --skip-checks exiting non-zero; full suite passes (311 tests, uv run pytest -q); pyproject.toml/uv.lock untouched
+
+**Files:** src/whyline_relay/adapters/bypass.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_bypass.py, tests/test_no_bypass.py
+
+<!-- whyline-event: 5e30d340766a4cb98087f3f2a9372cad -->

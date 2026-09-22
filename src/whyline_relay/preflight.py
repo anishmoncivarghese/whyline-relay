@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Literal, TextIO
 
 from whyline_relay import adapters, config, gitcheck, invocation, plan, prompts, running
+from whyline_relay.adapters import bypass
 
 Status = Literal["ok", "warn", "FAIL"]
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -205,8 +206,20 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
             )
         )
 
-    for agent in agents:
-        if config.adapter_for(settings, agent).name == "generic":
+    for agent, command in agents.items():
+        adapter = config.adapter_for(settings, agent)
+        found = bypass.find(adapter.name, command)
+        if found:
+            checks.append(
+                _result(
+                    "FAIL",
+                    f"refusing to run {agent}: its command contains a "
+                    f"permission-bypass flag ({', '.join(found)}). The relay never "
+                    "runs an agent that way",
+                    "remove it from .whyline/relay/config.toml",
+                )
+            )
+        if adapter.name == "generic":
             checks.append(
                 _result(
                     "warn",
