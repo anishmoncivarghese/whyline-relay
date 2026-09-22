@@ -798,3 +798,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/invocation.py, src/whyline_relay/cli.py, tests/test_embedding.py
 
 <!-- whyline-event: 02644da106b64f26a9c8fac8830c415a -->
+
+## 2026-09-22 — Map configured generic agent names to the generic adapter while deriving built-in defaults from the registry
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-1
+
+**Because:** agent commands remain keyed by role-visible names, while adapter_for can select capability behavior without changing the codex and claude 0.2.1 defaults
+
+**Rejected:**
+
+- Use agent names directly as adapter names — configured generic names such as aider would fail registry lookup
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/__init__.py
+
+<!-- whyline-event: e41e0797c60a4f87a130a510eb0b047d -->
+
+## 2026-09-22 — Approve ADPT-1: adapter registry matches spec exactly, moved allowlist code unchanged, config.load role/adapter validation messages match verbatim
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-1
+
+**Because:** diff reviewed line-by-line against spec; all 15 new tests plus 237 existing pass (252 total); 0.2.1 default commands, BASE_ALLOW/DENY/PRESETS, and loop._no_handoff_detail logic preserved unchanged
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/claude.py
+
+<!-- whyline-event: 4acbca328c1741768acfb5d14b1af4e9 -->

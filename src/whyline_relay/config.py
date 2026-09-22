@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from whyline_relay import adapters
 
 DEFAULTS = {
     "plan": "plan.md",
@@ -12,17 +14,8 @@ DEFAULTS = {
     "timeout_minutes": 30,
     "branch_prefix": "relay/",
     "agents": {
-        "codex": ["codex", "exec", "-s", "workspace-write", "--color", "never"],
-        "claude": [
-            "claude",
-            "-p",
-            "--permission-mode",
-            "acceptEdits",
-            "--output-format",
-            "json",
-            "--settings",
-            ".whyline/relay/claude-settings.json",
-        ],
+        name: list(adapter.default_command)
+        for name, adapter in adapters.BUILTIN.items()
     },
     "status_map": {
         "review": "ready-for-review",
@@ -39,6 +32,12 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class Roles:
+    implementer: str = "codex"
+    reviewer: str = "claude"
+
+
+@dataclass(frozen=True)
 class Config:
     plan: str
     max_rounds: int
@@ -46,6 +45,12 @@ class Config:
     branch_prefix: str
     agents: dict[str, list[str]]
     status_map: dict[str, str]
+    roles: Roles = field(default_factory=Roles)
+    adapters: dict[str, str] = field(default_factory=dict)
+
+
+def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
+    return adapters.get(settings.adapters.get(agent, agent))
 
 
 def relay_dir(root: Path) -> Path:
@@ -66,10 +71,50 @@ def load(root: Path) -> Config:
         except (tomllib.TOMLDecodeError, OSError) as error:
             raise ConfigError(f"could not read {path.name} ({path}): {error}") from error
     agents = dict(DEFAULTS["agents"])
+    configured_adapters: dict[str, str] = {}
     for name, table in (raw.get("agents") or {}).items():
+        if name in adapters.BUILTIN:
+            if "adapter" in table:
+                raise ConfigError(f"agent '{name}' is built in and cannot set adapter")
+        else:
+            if "adapter" not in table:
+                raise ConfigError(
+                    f"agent '{name}' is not built in: set adapter = \"generic\" "
+                    f"and a command under [agents.{name}]"
+                )
+            adapter_name = table["adapter"]
+            if adapter_name != "generic":
+                raise ConfigError(
+                    f'[agents.{name}] adapter must be "generic", not {adapter_name!r}'
+                )
+            command = table.get("command")
+            if not isinstance(command, list) or not command:
+                raise ConfigError(f"[agents.{name}] needs a non-empty command")
+            configured_adapters[name] = "generic"
         command = table.get("command")
         if command is not None:
             agents[name] = list(command)
+
+    role_values = raw.get("roles") or {}
+    for key in role_values:
+        if key not in ("implementer", "reviewer"):
+            raise ConfigError(
+                f"[roles] has an unknown key '{key}' (use implementer or reviewer)"
+            )
+    role_names = {
+        "implementer": role_values.get("implementer", Roles.implementer),
+        "reviewer": role_values.get("reviewer", Roles.reviewer),
+    }
+    for role, name in role_names.items():
+        if not isinstance(name, str):
+            raise ConfigError(f"[roles] {role} must be a string")
+        if name not in adapters.BUILTIN and name not in configured_adapters:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            raise ConfigError(
+                f"role '{role}' names '{name}', which is not a built-in agent "
+                f"({builtins}) or a configured generic agent"
+            )
+
     status_map = {**DEFAULTS["status_map"], **(raw.get("status_map") or {})}
     return Config(
         plan=raw.get("plan", DEFAULTS["plan"]),
@@ -78,4 +123,6 @@ def load(root: Path) -> Config:
         branch_prefix=raw.get("branch_prefix", DEFAULTS["branch_prefix"]),
         agents=agents,
         status_map=status_map,
+        roles=Roles(**role_names),
+        adapters=configured_adapters,
     )

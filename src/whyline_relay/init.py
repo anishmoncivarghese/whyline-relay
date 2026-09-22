@@ -6,35 +6,7 @@ import json
 from pathlib import Path
 
 from whyline_relay import config, invocation, prompts
-
-BASE_ALLOW = [
-    "Edit",
-    "Bash(git add:*)",
-    "Bash(git commit:*)",
-    "Bash(git diff:*)",
-    "Bash(git status:*)",
-    "Bash(git log:*)",
-    "Bash(tail:*)",
-    "Bash(head:*)",
-    "Bash(wc:*)",
-    "Bash(grep:*)",
-    "Bash(ls:*)",
-    "Bash(whyline:*)",
-]
-
-DENY = ["Bash(git push:*)", "Bash(rm -rf:*)"]
-
-PRESETS = {
-    "python": [
-        "Bash(pytest:*)",
-        "Bash(uv run pytest:*)",
-        "Bash(uv run:*)",
-        "Bash(.venv/bin/pytest:*)",
-        "Bash(.venv/bin/python:*)",
-    ],
-    "node": ["Bash(npm test:*)", "Bash(npm run:*)", "Bash(npx:*)"],
-    "base": [],
-}
+from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
 
 
 def detect_stack(root: Path) -> str:
@@ -43,15 +15,6 @@ def detect_stack(root: Path) -> str:
     if (root / "package.json").exists():
         return "node"
     return "base"
-
-
-def allowlist(stack: str) -> dict:
-    return {
-        "permissions": {
-            "allow": [*BASE_ALLOW, *PRESETS.get(stack, [])],
-            "deny": list(DENY),
-        }
-    }
 
 
 def _write(path: Path, content: str) -> None:
