@@ -898,3 +898,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/running.py, src/whyline_relay/cli.py
 
 <!-- whyline-event: 8dc9dfb5d8e943cea8ae5986f6e7e158 -->
+
+## 2026-09-22 — Disambiguate shared-agent turns with role-specific log suffixes
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-5
+
+**Because:** When one configured agent fills both roles, the implementer and reviewer run in the same round and would otherwise overwrite the same log; distinct agents retain the 0.2.1 names
+
+**Rejected:**
+
+- Always add role suffixes — that would change default log names
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 0ce12ce31eb64b4099af2c65ff7fb574 -->
+
+## 2026-09-22 — ADPT-5 approved: loop.py is now role-driven end to end
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-5
+
+**Because:** implementer/reviewer come from settings.roles, agents/templates/logs/progress verbs/commit-check follow role not hardcoded codex/claude names, _no_handoff_detail delegates to the agent's adapter; default-role behavior verified unchanged by the full existing suite (275/275), and new tests genuinely exercise swapped roles, shared-agent log disambiguation, and generic-adapter silence diagnosis
+
+**Rejected:**
+
+- trusting the handoff's own claim without re-running tests — reviewer must run the plain test command itself, which was done
+
+**Files:** src/whyline_relay/loop.py, tests/fake_role_agent.py, tests/test_loop_roles.py
+
+<!-- whyline-event: be8e4f3b983e4bd08405407cdc751c41 -->

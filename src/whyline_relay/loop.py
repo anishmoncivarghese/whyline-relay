@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from whyline_relay import (
+    adapters,
     agents,
     config,
     gitcheck,
@@ -47,14 +47,20 @@ def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     return reason
 
 
-def log_path(root: Path, task_id: str, round_: int, agent: str) -> Path:
-    return root / ".whyline" / "relay" / "logs" / f"{task_id}-{round_}-{agent}.log"
+def log_path(
+    root: Path, task_id: str, round_: int, agent: str, role: str = ""
+) -> Path:
+    suffix = f"-{role}" if role else ""
+    return root / ".whyline" / "relay" / "logs" / (
+        f"{task_id}-{round_}-{agent}{suffix}.log"
+    )
 
 
 def _run_agent(
     root: Path,
     settings: config.Config,
     agent: str,
+    role: str,
     template_name: str,
     task: plan.Task,
     round_: int,
@@ -62,7 +68,7 @@ def _run_agent(
     echo: bool,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
-    running.start_turn(root, agent, task.task_id, round_)
+    running.start_turn(root, agent, task.task_id, round_, role=role)
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
         prompts.load(root, template_name),
@@ -71,9 +77,12 @@ def _run_agent(
         sync_packet=packet,
         round_=round_,
         review_feedback=review_feedback,
+        implementer=settings.roles.implementer,
+        reviewer=settings.roles.reviewer,
     )
-    target = log_path(root, task.task_id, round_, agent)
-    action = "implementing" if agent == "codex" else "reviewing"
+    log_role = role if settings.roles.implementer == settings.roles.reviewer else ""
+    target = log_path(root, task.task_id, round_, agent, log_role)
+    action = "implementing" if role == "implementer" else "reviewing"
     if echo:
         agents.print_status(
             f"==> {agent}: {action} {task.task_id} "
@@ -104,38 +113,16 @@ def _run_agent(
     return target
 
 
-def _no_handoff_detail(target: Path) -> str:
+def _no_handoff_detail(target: Path, adapter: adapters.Adapter) -> str:
     """Why an agent that handed nothing off probably stopped, for the human only.
 
-    Never used to route. Claude's JSON result lists the commands it was denied;
-    failing that, the last line the agent printed is usually the cause (for
-    example a settings file that was not found).
+    Never used to route. The agent adapter interprets its own output format.
     """
     try:
         text = target.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
-    lines = [line for line in text.splitlines() if line.strip()]
-    if lines and lines[-1].startswith("{"):
-        try:
-            result = json.loads(lines[-1])
-        except ValueError:
-            result = None
-        denials = result.get("permission_denials", []) if isinstance(result, dict) else []
-        commands = [
-            str(d.get("tool_input", {}).get("command", d.get("tool_name", "?")))[:60]
-            for d in denials
-            if isinstance(d, dict)
-        ]
-        if commands:
-            return (
-                f"; it was denied permission to run: {', '.join(commands)}. "
-                "Check .whyline/relay/claude-settings.json"
-            )
-    if lines:
-        last = "".join(ch for ch in lines[-1].strip() if ch.isprintable())[:160]
-        return f'; its last output was: "{last}"'
-    return ""
+    return adapter.diagnose(text)
 
 
 def _hit_a_limit(target: Path) -> bool:
@@ -190,12 +177,20 @@ def _run_task(
     round_ = start_round
     feedback = ""
     next_move = routing.IMPLEMENT
+    implementer = settings.roles.implementer
+    reviewer = settings.roles.reviewer
     gitcheck.ensure_relay_ignored(root)
-    whylinecmd.claim(root, task.task_id, "codex", "implementer")
+    whylinecmd.claim(root, task.task_id, implementer, "implementer")
     if resume:
         current = handoff.read(root)
         if current is not None and current.task == task.task_id:
-            resumed = routing.decide(current, None, settings.status_map)
+            resumed = routing.decide(
+                current,
+                None,
+                settings.status_map,
+                implementer=implementer,
+                reviewer=reviewer,
+            )
             if resumed in (routing.REVIEW, routing.APPROVED):
                 next_move = resumed
             elif (
@@ -207,8 +202,9 @@ def _run_task(
     while True:
         if next_move == routing.APPROVED:
             return _approved(root, task, base_commit, round_, None)
-        agent = "codex" if next_move == routing.IMPLEMENT else "claude"
-        template = "implement" if agent == "codex" else "review"
+        role = "implementer" if next_move == routing.IMPLEMENT else "reviewer"
+        agent = implementer if role == "implementer" else reviewer
+        template = "implement" if role == "implementer" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
         head_before = gitcheck.head_commit(root)
@@ -216,20 +212,26 @@ def _run_task(
             on_turn(round_, previous_id)
 
         target = _run_agent(
-            root, settings, agent, template, task, round_, feedback, echo
+            root, settings, agent, role, template, task, round_, feedback, echo
         )
-        if agent == "codex" and gitcheck.head_commit(root) != head_before:
+        if role == "implementer" and gitcheck.head_commit(root) != head_before:
             # Codex's sandbox does not stop it committing (measured on
             # codex-cli 0.155.1); only the prompt says not to, so check.
             raise Paused(
-                "codex made a commit, which the relay forbids (only the reviewer "
+                f"{agent} made a commit, which the relay forbids (only the reviewer "
                 f"commits). Undo it with `git reset {head_before[:12]}` (your files "
                 "stay), then resume",
                 target,
             )
 
         record = handoff.read(root)
-        move = routing.decide(record, previous_id, settings.status_map)
+        move = routing.decide(
+            record,
+            previous_id,
+            settings.status_map,
+            implementer=implementer,
+            reviewer=reviewer,
+        )
 
         if move == routing.NO_HANDOFF:
             if _hit_a_limit(target):
@@ -238,7 +240,8 @@ def _run_task(
                     target,
                 )
             raise Paused(
-                f"{agent} exited without handing off{_no_handoff_detail(target)}; "
+                f"{agent} exited without handing off"
+                f"{_no_handoff_detail(target, config.adapter_for(settings, agent))}; "
                 "nothing was routed",
                 target,
             )
