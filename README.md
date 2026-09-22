@@ -344,9 +344,9 @@ By default the implementer is `codex` and the reviewer is `claude`; nothing here
 
   A generic agent must be able to run `whyline handoff` and `git` in a shell, from whatever permissions its own tool grants; the relay does not manage its permissions, its login, or how it reports a denial, and `doctor` says so. It inherits the relay's environment, including any API keys the shell has. Writing `adapter = "generic"` is your acceptance of that; there is no way to opt in silently. A tool that cannot take its instructions as a trailing command-line argument (for example, one that only reads a prompt from stdin or a file) cannot be used this way.
 
-Whichever agent runs, the handoff record names it: `--from gemini --to claude` if `gemini` were configured, for instance, so `.whyline/decisions.md` and the commit history say which model actually did the work. The relay checks this: if a handoff is recorded under a name other than the agent that just ran, it pauses rather than accept it. After changing `[roles]` on a repository set up before 0.2.2 (or with older prompt templates), run `init --overwrite` so the templates use the new names; `doctor` will tell you to if you forget.
+Whichever agent runs, the handoff record names it: `--from antigravity --to claude` if `antigravity` were configured, for instance, so `.whyline/decisions.md` and the commit history say which model actually did the work. The relay checks this: if a handoff is recorded under a name other than the agent that just ran, it pauses rather than accept it. After changing `[roles]` on a repository set up before 0.2.2 (or with older prompt templates), run `init --overwrite` so the templates use the new names; `doctor` will tell you to if you forget.
 
-Only `codex` and `claude` are built in today. Google's `gemini-cli` is a dead end for this: as of September 2026 it rejects its own individual-account sign-in for every account, paid or free (`IneligibleTierError`, `reasonCode: UNSUPPORTED_CLIENT`), and points you at Antigravity instead.
+Only `codex` and `claude` are built in today. For a third option, see "Using Antigravity today" just below.
 
 ### Using Antigravity (`agy`) today, via the generic adapter
 
@@ -480,7 +480,7 @@ At those averages a plan of 20 such tasks is roughly two hours, about 1.2 millio
 
 **My project needs network to run its tests.** Codex's sandbox has none, so those tests will fail for Codex. Install dependencies beforehand, or exclude network tests from the default command.
 
-**Can I use a different agent?** Since 0.2.2, yes: swap which built-in agent, `codex` or `claude`, fills which role in `[roles]`, or configure any other headless tool as a `generic` agent. See [Choosing which agent fills each role](#choosing-which-agent-fills-each-role). There is no built-in Gemini adapter yet.
+**Can I use a different agent?** Since 0.2.2, yes: swap which built-in agent, `codex` or `claude`, fills which role in `[roles]`, or configure any other headless tool as a `generic` agent — Antigravity (`agy`) is a documented, working example. See [Choosing which agent fills each role](#choosing-which-agent-fills-each-role).
 
 **It approved something wrong.** It happens; the reviewer is a model. Review the branch before merging, and tighten the task text.
 
