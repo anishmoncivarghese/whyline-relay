@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through an implementer and a reviewer
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 is the exception: a one-line prompt fix, found and fixed directly, then validated with two real relay runs rather than built through one.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2 and backup agents in 0.2.4, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 is the exception: a one-line prompt fix, found and fixed directly, then validated with two real relay runs rather than built through one.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 
@@ -32,6 +32,7 @@ It never types into a terminal for you and never pushes. Each agent runs headles
 - [Using it from another program](#using-it-from-another-program)
 - [Configuration](#configuration)
 - [Choosing which agent fills each role](#choosing-which-agent-fills-each-role)
+- [Backup agents](#backup-agents)
 - [Permissions and safety](#permissions-and-safety)
 - [What it writes](#what-it-writes)
 - [Removing the relay](#removing-the-relay)
@@ -281,6 +282,8 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 
 **`plan-format`** prints the plan rules and a prompt for an AI drafting the plan. `--prompt` prints only the paste-ready prompt. It does not require a repository.
 
+**`roles status`** shows each role's configured agent, and, if a backup has taken over, which one and why. **`roles reset [ROLE]`** clears a role's backup switch (or every role's, with no argument), reverting to the configured agent. Both take `--repo REPO`. See [Backup agents](#backup-agents).
+
 ## Using it from another program
 
 Call `whyline_relay.cli.main` with the command arguments and the name users invoked:
@@ -388,6 +391,26 @@ test command and its result — you will report both in your handoff.
 
 **One more thing worth knowing:** `--new-project`, needed to pin each headless call to the right directory (without it, one call was measured operating on a stale prior project and reading the wrong file entirely), leaves a conversation directory behind under `~/.gemini/antigravity-cli/brain/<uuid>/` every single task, with no built-in cleanup.
 
+## Backup agents
+
+Since 0.2.4, a role can name one backup agent, used automatically when the role's active agent hits a detected usage limit or stops being authenticated:
+
+```toml
+[roles.backup]
+implementer = "antigravity"
+# reviewer has no backup here — a rate limit or auth loss on claude pauses, exactly as before
+```
+
+A backup is validated exactly like a role in `[roles]`: it must be a built-in agent or a configured generic one, and it cannot name the same agent already filling that role.
+
+**The switch is sticky.** Once the backup takes over, it stays the role's effective agent — for the rest of that task, and every task after — until you change it, because no agent measured so far reliably reports when a quota actually resets. `whyline-relay roles status` shows whether a role is currently on its backup, and why; `whyline-relay roles reset [ROLE]` reverts it (or every role, with no argument).
+
+**Two triggers, and only these two.** A detected rate limit switches, using the same text-marker check the relay has always used. So does a detected loss of authentication — checked by re-running the agent's own login-status command (`codex login status`, `claude auth status`), never by guessing at output text; a generic agent has no such command, so it can never trigger this path. Nothing else switches an agent: a missing binary, a misconfigured command, or a repeated permission denial are configuration problems, and papering over one by silently switching agents would hide a bug instead of surfacing it.
+
+**Preflight checks a configured backup too**, not only the primary — on PATH, and, for a built-in agent, logged in — so a backup that can't run is caught before it's ever needed, not discovered mid-plan. A backup that is *also* already someone's primary is reported as that primary; it's already fully checked either way.
+
+**If the backup also fails**, there's no further fallback (one hop only): the run pauses, naming both agents and what each one hit.
+
 ## Permissions and safety
 
 **Read this before using it on anything valuable.**
@@ -481,6 +504,8 @@ At those averages a plan of 20 such tasks is roughly two hours, about 1.2 millio
 **My project needs network to run its tests.** Codex's sandbox has none, so those tests will fail for Codex. Install dependencies beforehand, or exclude network tests from the default command.
 
 **Can I use a different agent?** Since 0.2.2, yes: swap which built-in agent, `codex` or `claude`, fills which role in `[roles]`, or configure any other headless tool as a `generic` agent — Antigravity (`agy`) is a documented, working example. See [Choosing which agent fills each role](#choosing-which-agent-fills-each-role).
+
+**One of my agents ran out of quota mid-plan.** Since 0.2.4, configure a backup for that role (`[roles.backup]`) and the relay switches to it automatically and keeps going; see [Backup agents](#backup-agents). Without one, it pauses with a message naming the agent and the limit, same as before.
 
 **It approved something wrong.** It happens; the reviewer is a model. Review the branch before merging, and tighten the task text.
 
