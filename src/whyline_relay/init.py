@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from whyline_relay import config, invocation, prompts
+from whyline_relay import adapters, config, invocation, prompts
 from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
 
 
@@ -23,15 +23,28 @@ def _write(path: Path, content: str) -> None:
 
 
 def run(
-    root: Path, *, assume_yes: bool, overwrite: bool = False, confirm=input
+    root: Path,
+    *,
+    assume_yes: bool,
+    overwrite: bool = False,
+    confirm=input,
+    implementer: str | None = None,
+    reviewer: str | None = None,
 ) -> int:
+    roles_given = implementer is not None or reviewer is not None
+    implementer = implementer or "codex"
+    reviewer = reviewer or "claude"
+    agents_in_use = list(dict.fromkeys((implementer, reviewer)))
     stack = detect_stack(root)
-    proposed = allowlist(stack)
-    settings_path = config.relay_dir(root) / "claude-settings.json"
+    permission_files: dict[str, str] = {}
+    for name in agents_in_use:
+        permission_files.update(adapters.BUILTIN[name].permission_files(stack))
+    relay = config.relay_dir(root)
 
     print(f"Detected stack: {stack}")
-    print(f"Proposed {settings_path}:")
-    print(json.dumps(proposed, indent=2))
+    for key, text in permission_files.items():
+        print(f"Proposed {relay / key}:")
+        print(text, end="" if text.endswith("\n") else "\n")
     print("Also writing prompt templates and config under .whyline/relay/.")
     if not assume_yes:
         try:
@@ -42,25 +55,43 @@ def run(
             print("Nothing written.")
             return 1
 
-    relay = config.relay_dir(root)
-    codex = " ".join(config.DEFAULTS["agents"]["codex"])
-    claude = " ".join(config.DEFAULTS["agents"]["claude"])
+    header = (
+        "# whyline-relay configuration. Every key is optional.\n"
+        f'plan = "{config.DEFAULTS["plan"]}"\n'
+        f"max_rounds = {config.DEFAULTS['max_rounds']}\n"
+        f"timeout_minutes = {config.DEFAULTS['timeout_minutes']}\n"
+        f'branch_prefix = "{config.DEFAULTS["branch_prefix"]}"\n\n'
+    )
+    if roles_given:
+        config_text = (
+            header
+            + "[roles]\n"
+            + f'implementer = "{implementer}"\n'
+            + f'reviewer = "{reviewer}"\n\n'
+        )
+        for name in agents_in_use:
+            command = config.DEFAULTS["agents"][name]
+            config_text += (
+                f"[agents.{name}]\n"
+                f"command = {json.dumps(command)}\n"
+            )
+            if name != agents_in_use[-1]:
+                config_text += "\n"
+    else:
+        codex = " ".join(config.DEFAULTS["agents"]["codex"])
+        claude = " ".join(config.DEFAULTS["agents"]["claude"])
+        config_text = (
+            header
+            + "[agents.codex]\n"
+            + f"command = {json.dumps(codex.split())}\n\n"
+            + "[agents.claude]\n"
+            + f"command = {json.dumps(claude.split())}\n"
+        )
     generated = [
-        (settings_path, json.dumps(proposed, indent=2) + "\n"),
+        *((relay / key, text) for key, text in permission_files.items()),
         (relay / "prompts" / "implement.md", prompts.IMPLEMENT),
         (relay / "prompts" / "review.md", prompts.REVIEW),
-        (
-            relay / "config.toml",
-            "# whyline-relay configuration. Every key is optional.\n"
-            f'plan = "{config.DEFAULTS["plan"]}"\n'
-            f"max_rounds = {config.DEFAULTS['max_rounds']}\n"
-            f"timeout_minutes = {config.DEFAULTS['timeout_minutes']}\n"
-            f'branch_prefix = "{config.DEFAULTS["branch_prefix"]}"\n\n'
-            "[agents.codex]\n"
-            f"command = {json.dumps(codex.split())}\n\n"
-            "[agents.claude]\n"
-            f"command = {json.dumps(claude.split())}\n",
-        ),
+        (relay / "config.toml", config_text),
         (relay / ".gitignore", "logs/\nstate.json\nSTOP\nrunning.json\n"),
     ]
     written: list[Path] = []
@@ -80,17 +111,18 @@ def run(
             f"Kept {relative}: it already exists and differs. "
             "Run with --overwrite to replace it."
         )
-    print(
-        "\nClaude reads these permissions through `--settings`, not through "
-        ".claude/settings.json, which Claude ignores in a workspace nobody has "
-        "trusted interactively. The relay puts `whyline sync` output into every "
-        "prompt itself, so Codex hooks are not needed for relay runs. Commit these "
-        f"files before `{invocation.command('start')}`, which refuses a dirty "
-        "working tree."
-    )
-    print(
-        "\nThe allowlist is a convenience, not a sandbox: `uv run`, `npm` and `npx` "
-        "execute arbitrary project code. Run unattended relays on an isolated "
-        "branch or repository that holds no secrets."
-    )
+    if "claude" in agents_in_use:
+        print(
+            "\nClaude reads these permissions through `--settings`, not through "
+            ".claude/settings.json, which Claude ignores in a workspace nobody has "
+            "trusted interactively. The relay puts `whyline sync` output into every "
+            "prompt itself, so Codex hooks are not needed for relay runs. Commit these "
+            f"files before `{invocation.command('start')}`, which refuses a dirty "
+            "working tree."
+        )
+        print(
+            "\nThe allowlist is a convenience, not a sandbox: `uv run`, `npm` and `npx` "
+            "execute arbitrary project code. Run unattended relays on an isolated "
+            "branch or repository that holds no secrets."
+        )
     return 0

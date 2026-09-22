@@ -12,6 +12,7 @@ from importlib import metadata
 from pathlib import Path
 
 from whyline_relay import (
+    adapters,
     agents,
     config,
     gitcheck,
@@ -147,6 +148,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite",
         action="store_true",
         help="Replace files that already exist, discarding your edits.",
+    )
+    init_parser.add_argument(
+        "--implementer",
+        choices=sorted(adapters.BUILTIN),
+        default=None,
+        metavar="NAME",
+        help="Which built-in agent implements (default: codex)",
+    )
+    init_parser.add_argument(
+        "--reviewer",
+        choices=sorted(adapters.BUILTIN),
+        default=None,
+        metavar="NAME",
+        help="Which built-in agent reviews and commits (default: claude)",
     )
 
     remove_parser = subparsers.add_parser("remove", help="Remove the relay setup")
@@ -294,7 +309,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 def cmd_init(args: argparse.Namespace) -> int:
     return init.run(
-        Path(args.repo).resolve(), assume_yes=args.yes, overwrite=args.overwrite
+        Path(args.repo).resolve(),
+        assume_yes=args.yes,
+        overwrite=args.overwrite,
+        implementer=args.implementer,
+        reviewer=args.reviewer,
     )
 
 

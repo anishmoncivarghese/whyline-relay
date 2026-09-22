@@ -1,0 +1,39 @@
+Detected stack: python
+Proposed {ROOT}/.whyline/relay/claude-settings.json:
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(whyline:*)",
+      "Bash(pytest:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run:*)",
+      "Bash(.venv/bin/pytest:*)",
+      "Bash(.venv/bin/python:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}
+Also writing prompt templates and config under .whyline/relay/.
+Wrote .whyline/relay/claude-settings.json.
+Wrote .whyline/relay/prompts/implement.md.
+Wrote .whyline/relay/prompts/review.md.
+Wrote .whyline/relay/config.toml.
+Wrote .whyline/relay/.gitignore.
+
+Claude reads these permissions through `--settings`, not through .claude/settings.json, which Claude ignores in a workspace nobody has trusted interactively. The relay puts `whyline sync` output into every prompt itself, so Codex hooks are not needed for relay runs. Commit these files before `whyline-relay start`, which refuses a dirty working tree.
+
+The allowlist is a convenience, not a sandbox: `uv run`, `npm` and `npx` execute arbitrary project code. Run unattended relays on an isolated branch or repository that holds no secrets.

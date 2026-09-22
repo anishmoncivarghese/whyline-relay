@@ -994,3 +994,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, src/whyline_relay/adapters/__init__.py, tests/test_preflight.py
 
 <!-- whyline-event: dc228c77dfac4cf7b0d0a353ee17849a -->
+
+## 2026-09-22 — Generate init files from the deduplicated selected built-in agents while preserving a legacy default config path
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-8
+
+**Because:** Role options must emit only the selected agents and their adapter permission files, while an option-free init must remain byte-identical to 0.2.1
+
+**Rejected:**
+
+- Always emit both built-in agent blocks and Claude permissions — role-specific init would write files and commands unused by Codex-only or single-agent setups
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: ac0212472ae74021a332a5ca809200eb -->
+
+## 2026-09-22 — Approve ADPT-8: role-selecting init flags with byte-identical default path
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-8
+
+**Because:** Verified roles_given branching in init.py matches spec exactly (permission files scoped to agents in use, claude-only closing notes, config.toml [roles]+[agents.*] blocks); legacy no-flag path is the unchanged 0.2.1 code relocated, confirmed byte-identical via passing golden test; full suite (294 tests) passes
+
+**Files:** src/whyline_relay/init.py, src/whyline_relay/cli.py, tests/test_init_roles.py
+
+<!-- whyline-event: 536f220e29424031aac7f516af6e3117 -->
