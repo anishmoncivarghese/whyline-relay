@@ -1183,3 +1183,36 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_loop_failover.py
 
 <!-- whyline-event: 2c7f11a38ad74fe6b341a8a3342e9b5e -->
+
+## 2026-09-22 — Preflight configured backups and expose sticky role override controls
+
+**Actor:** codex
+**Role:** implementer
+**Task:** FBO-4
+
+**Because:** A backup may become active after launch, so its executable and login must be validated up front and operators need supported status and reset commands
+
+**Rejected:**
+
+- Check only primary agents — a later failover could select an unusable backup
+- Manage active-roles.json by hand — CLI commands can report and clear overrides through the existing failover API
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/roles.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 8d8701e64108414b8a63f1ec5a643b94 -->
+
+## 2026-09-22 — Approve FBO-4: backup-aware preflight labelling and roles status/reset match spec
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FBO-4
+
+**Because:** preflight._agents_in_use now carries backup_for per spec, program/login FAIL messages label the backup role, roles.py and the CLI roles subcommand match the given code exactly, and tests genuinely cover the new backup-labelled failures plus roles status/reset; full suite passes with no dependency or version changes
+
+**Rejected:**
+
+- Require --repo only on the roles parser as literally shown — argparse can't accept a parent optional placed after the chosen subcommand, so status/reset need their own suppressed --repo to satisfy the task's own post-subcommand invocations
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/roles.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 06b7d6b081ca48938f40dd0ad181055d -->

@@ -26,6 +26,7 @@ from whyline_relay import (
     preflight,
     prompts,
     remove,
+    roles,
     running,
     state,
     whylinecmd,
@@ -174,6 +175,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     remove_parser.add_argument(
         "--force", action="store_true", help="Remove even while a run is paused."
+    )
+
+    roles_parser = subparsers.add_parser(
+        "roles", help="Inspect or reset a backup switch"
+    )
+    roles_parser.add_argument(
+        "--repo",
+        default=".",
+        help="Use this repository root (default: current directory).",
+    )
+    roles_sub = roles_parser.add_subparsers(dest="roles_command", required=True)
+    roles_status = roles_sub.add_parser(
+        "status", help="Show each role's configured and active agent"
+    )
+    roles_status.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    roles_reset = roles_sub.add_parser(
+        "reset", help="Clear a sticky backup switch"
+    )
+    roles_reset.add_argument(
+        "role",
+        nargs="?",
+        default=None,
+        choices=("implementer", "reviewer"),
+        help="Reset only this role (default: every role).",
+    )
+    roles_reset.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
 
     plan_format = subparsers.add_parser(
@@ -326,6 +356,16 @@ def cmd_remove(args: argparse.Namespace) -> int:
     except gitcheck.GitError as error:
         print(str(error), file=sys.stderr)
         return EXIT_ERROR
+
+
+def cmd_roles(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    settings = config.load(root)
+    if args.roles_command == "status":
+        print(roles.status(root, settings))
+    else:
+        print(roles.reset(root, args.role))
+    return EXIT_OK
 
 
 def cmd_plan_format(args: argparse.Namespace) -> int:
@@ -489,6 +529,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "stop": cmd_stop,
             "init": cmd_init,
             "remove": cmd_remove,
+            "roles": cmd_roles,
             "doctor": cmd_doctor,
             "plan-format": cmd_plan_format,
         }

@@ -128,6 +128,35 @@ def test_every_distinct_configured_program_is_checked(ready_repo: Path, monkeypa
     ]
 
 
+def test_missing_backup_program_names_its_role(ready_repo: Path, monkeypatch):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles.backup]\nimplementer = "aider"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--message"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: None if name == "aider" else name,
+    )
+
+    checks = preflight.run(
+        ready_repo, allow_dirty=True, runner=successful_runner()
+    )
+
+    assert any(
+        check
+        == preflight.Check(
+            "FAIL",
+            "aider (backup for implementer) is not on PATH",
+            "install aider and make sure it is on PATH",
+        )
+        for check in checks
+    )
+
+
 def test_codex_and_claude_logins_are_checked(ready_repo: Path, monkeypatch):
     target = ready_repo / ".whyline" / "relay" / "config.toml"
     target.write_text(
@@ -173,6 +202,35 @@ def test_failed_login_blocks_and_unrunnable_or_slow_login_warns(ready_repo, monk
     assert login_checks[1].status == "warn"
     assert login_checks[1].hint == "claude auth login"
     assert preflight.failures(login_checks) == 1
+
+
+def test_failed_backup_login_names_its_role(ready_repo: Path, monkeypatch):
+    backup = ready_repo / "claude"
+    backup.write_text("#!/bin/sh\nexit 0\n")
+    backup.chmod(0o755)
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nreviewer = "codex"\n'
+        '[roles.backup]\nimplementer = "claude"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{backup}", "-p"]\n'
+    )
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: name)
+
+    def runner(argv, **kwargs):
+        return _completed(argv, 0 if argv[0] == "whyline" else 1)
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=runner)
+
+    assert any(
+        check
+        == preflight.Check(
+            "FAIL",
+            "claude (backup for implementer) is not logged in",
+            "claude auth login",
+        )
+        for check in checks
+    )
 
 
 def test_non_codex_or_claude_program_skips_login_check(ready_repo: Path):

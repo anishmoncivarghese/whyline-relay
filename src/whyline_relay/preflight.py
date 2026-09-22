@@ -65,11 +65,17 @@ def _whyline(root: Path, runner: Runner) -> Check:
     return _result("ok", "whyline is installed and initialised")
 
 
-def _agents_in_use(settings: config.Config) -> dict[str, list[str]]:
-    agents: dict[str, list[str]] = {}
-    for name in (settings.roles.implementer, settings.roles.reviewer):
-        if name in settings.agents and name not in agents:
-            agents[name] = settings.agents[name]
+def _agents_in_use(
+    settings: config.Config,
+) -> dict[str, tuple[list[str], str | None]]:
+    agents: dict[str, tuple[list[str], str | None]] = {}
+    for role in ("implementer", "reviewer"):
+        name = getattr(settings.roles, role)
+        if name not in agents:
+            agents[name] = (settings.agents[name], None)
+    for role, name in settings.backups.items():
+        if name not in agents:
+            agents[name] = (settings.agents[name], role)
     return agents
 
 
@@ -96,7 +102,7 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
 
     missing: list[Path] = []
     invalid: list[str] = []
-    for command in _agents_in_use(settings).values():
+    for _, (command, _) in _agents_in_use(settings).items():
         for index, argument in enumerate(command):
             if argument != "--settings":
                 continue
@@ -120,7 +126,7 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
         return [], []
     checks: list[Check] = []
     programs: list[str] = []
-    for command in _agents_in_use(settings).values():
+    for _, (command, backup_for) in _agents_in_use(settings).items():
         if not command:
             checks.append(
                 _result(
@@ -138,7 +144,9 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
             checks.append(
                 _result(
                     "FAIL",
-                    f"{program} is not on PATH",
+                    f"{program} (backup for {backup_for}) is not on PATH"
+                    if backup_for is not None
+                    else f"{program} is not on PATH",
                     f"install {program} and make sure it is on PATH",
                 )
             )
@@ -150,7 +158,7 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
 def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
     checks: list[Check] = []
     seen: set[str] = set()
-    for agent, command in _agents_in_use(settings).items():
+    for agent, (command, backup_for) in _agents_in_use(settings).items():
         adapter = config.adapter_for(settings, agent)
         if (
             not command
@@ -188,7 +196,12 @@ def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
         if result.returncode == 0:
             checks.append(_result("ok", f"{program} is logged in"))
         else:
-            checks.append(_result("FAIL", f"{program} is not logged in", fix))
+            message = (
+                f"{program} (backup for {backup_for}) is not logged in"
+                if backup_for is not None
+                else f"{program} is not logged in"
+            )
+            checks.append(_result("FAIL", message, fix))
     return checks
 
 
@@ -206,7 +219,7 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
             )
         )
 
-    for agent, command in agents.items():
+    for agent, (command, _) in agents.items():
         adapter = config.adapter_for(settings, agent)
         found = bypass.find(adapter.name, command)
         if found:
