@@ -346,7 +346,47 @@ By default the implementer is `codex` and the reviewer is `claude`; nothing here
 
 Whichever agent runs, the handoff record names it: `--from gemini --to claude` if `gemini` were configured, for instance, so `.whyline/decisions.md` and the commit history say which model actually did the work. The relay checks this: if a handoff is recorded under a name other than the agent that just ran, it pauses rather than accept it. After changing `[roles]` on a repository set up before 0.2.2 (or with older prompt templates), run `init --overwrite` so the templates use the new names; `doctor` will tell you to if you forget.
 
-Only `codex` and `claude` are supported today. There is no Gemini adapter yet; adding one needs its own measured behaviour (a signed-in run, not guesswork) and is tracked for a future release.
+Only `codex` and `claude` are built in today. Google's `gemini-cli` is a dead end for this: as of September 2026 it rejects its own individual-account sign-in for every account, paid or free (`IneligibleTierError`, `reasonCode: UNSUPPORTED_CLIENT`), and points you at Antigravity instead.
+
+### Using Antigravity (`agy`) today, via the generic adapter
+
+Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no way to scope its permissions to a repository or an invocation, no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path — three real gaps that would make a "built-in" label dishonest about what the relay actually manages for it. Configure it like this:
+
+```toml
+[roles]
+implementer = "antigravity"   # or reviewer; either role works
+reviewer    = "claude"
+
+[agents.antigravity]
+adapter = "generic"
+command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-project", "--add-dir", ".", "-p"]
+```
+
+**`-p` must be the last item in the command.** The relay always appends the prompt as the command's final argument. `agy -p` greedily consumes whatever token comes right after it, so `-p` anywhere earlier makes it swallow the next flag instead of the real prompt, and the turn silently does nothing.
+
+**It denies everything by default, including reads**, unless the repository is in `trustedWorkspaces` and the tool is in `permissions.allow`, both in one file global to the machine: `~/.gemini/antigravity-cli/settings.json`. There is no per-repository or per-invocation override. A working setup needs something like:
+
+```json
+{
+  "trustedWorkspaces": ["/path/to/your/repository"],
+  "permissions": {"allow": ["read_file(*)", "write_file(*)", "edit_file(*)", "command(*)"]}
+}
+```
+
+Narrower patterns such as `command(git)` were tried and did not work as their own error messages imply; `command(*)` is what was actually verified. Because it is global, this loosens every `agy` session on the machine, not just relay runs.
+
+**It can end a turn while work it started is still running.** Measured once: asked to "run the project's tests" with no further guidance, it started something in the background, reported success, and the CLI exited before that work finished — no handoff, nothing committed, the background task killed on exit. The fix that held up under a real side-by-side comparison: add a line to `.whyline/relay/prompts/implement.md` telling it explicitly not to background anything:
+
+```
+Implement the task. Run every command to completion and read its result before
+moving on or finishing your turn: never run anything in the background, and never
+end your turn while something you started is still running. Then note the exact
+test command and its result — you will report both in your handoff.
+```
+
+(This replaces the built-in template's shorter "Run the project's tests and note the exact command and its result" opening line under "How to finish".) A comparison run confirmed this beats telling the task itself not to run tests: half the tokens, and it actually ran the real tests instead of only reading files back.
+
+**One more thing worth knowing:** `--new-project`, needed to pin each headless call to the right directory (without it, one call was measured operating on a stale prior project and reading the wrong file entirely), leaves a conversation directory behind under `~/.gemini/antigravity-cli/brain/<uuid>/` every single task, with no built-in cleanup.
 
 ## Permissions and safety
 

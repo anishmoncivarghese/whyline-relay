@@ -1050,3 +1050,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/adapters/bypass.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_bypass.py, tests/test_no_bypass.py
 
 <!-- whyline-event: 5e30d340766a4cb98087f3f2a9372cad -->
+
+## 2026-09-22 — agy's -p flag must be the last item in a generic-agent command list, immediately before the appended prompt
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** GEMINI-SPIKE
+
+**Because:** whyline-relay always appends the prompt as the command's final argv element; agy's -p/--print greedily consumes whatever token follows it, so placing -p anywhere earlier makes it swallow the next flag (e.g. --output-format) as the prompt and silently ignore the real one, measured as a full turn producing no handoff
+
+**Rejected:**
+
+- -p immediately followed by the prompt with other flags after it — works standalone but not through the relay, since the relay never inserts the prompt except at the very end
+
+**Files:** docs/antigravity-adapter-consultation.md
+
+<!-- whyline-event: 9e7bf4c7a1e8484593240af41c3c1abb -->
+
+## 2026-09-22 — For antigravity as implementer, forbid backgrounded commands in the prompt rather than forbidding test-running in the task text
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** GEMINI-SPIKE
+
+**Because:** Measured A/B: telling it not to run any test command (task-text fix) worked but produced weaker verification and used 2.3x the tokens (297k vs 128k) because it had to reason around an artificial constraint; telling it to never background a command and never end its turn early (prompt-level fix) let it actually run the real tests, completed in half the time, and generalises to any task instead of depending on each task author correctly knowing whether a test runner exists
+
+**Rejected:**
+
+- Task text says 'do not run tests' per task — fragile, depends on every task author judging test-runner presence correctly, and produces weaker verification than actually running tests
+
+**Files:** docs/antigravity-adapter-consultation.md
+
+<!-- whyline-event: a5aaaab71e474863bb99f7d12734208d -->
