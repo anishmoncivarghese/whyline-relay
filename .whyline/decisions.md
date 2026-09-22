@@ -930,3 +930,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, tests/fake_role_agent.py, tests/test_loop_roles.py
 
 <!-- whyline-event: be8e4f3b983e4bd08405407cdc751c41 -->
+
+## 2026-09-22 — Validate provenance only on the handoff produced by the agent turn
+
+**Actor:** codex
+**Role:** implementer
+**Task:** ADPT-6
+
+**Because:** The fresh handoff must identify the agent that just ran, while resume must continue routing records created before the current process ran
+
+**Rejected:**
+
+- Validate the existing resume record — no agent has just run during resume routing, so that would reject legitimate saved state
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 79ad37571dbc4213a914727ad6e85abf -->
+
+## 2026-09-22 — ADPT-6 approved: provenance check placed and scoped correctly
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ADPT-6
+
+**Because:** Check sits exactly after the task-match guard and before BLOCKED/UNKNOWN handling per spec; only validates the record just written by the agent that ran (resume path never reaches it, confirmed by reading _run_task's resume branch at lines 185-201 which never touches the while-loop's post-turn checks); empty from_actor and case-insensitive match both handled; fake_agent.py edit is the single permitted line; full suite passes 281/281 with the plain 'uv run pytest' command
+
+**Rejected:**
+
+- trusting the implementer's claimed 281-test run without re-running — reviewer must verify independently, which was done
+
+**Files:** src/whyline_relay/loop.py, tests/fake_agent.py, tests/test_loop_roles.py
+
+<!-- whyline-event: 727fcf5a1fe244df99f5f32986fc3351 -->

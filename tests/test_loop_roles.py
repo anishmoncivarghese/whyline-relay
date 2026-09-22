@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -9,6 +10,7 @@ from whyline_relay import config, loop, plan
 
 
 FAKE = str(Path(__file__).parent / "fake_role_agent.py")
+LEGACY_FAKE = str(Path(__file__).parent / "fake_agent.py")
 TASK = plan.Task(task_id="T-1", text="T-1: Work", checked=False, line_index=0)
 
 
@@ -167,3 +169,169 @@ def test_generic_agent_silence_uses_its_adapter(repo: Path, monkeypatch):
         )
     assert "its last output was" in raised.value.reason
     assert "second" in raised.value.reason
+
+
+def test_implementer_handoff_from_another_agent_pauses(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": command(repo, "claude", "claude", "ready-for-review", "no"),
+            "claude": command(repo, "claude", "claude", "approved", "yes"),
+        },
+    )
+
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            configured,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+
+    assert "claude" in raised.value.reason
+    assert "not 'codex'" in raised.value.reason
+    assert "init --overwrite" in raised.value.reason
+
+
+def test_handoff_actor_comparison_is_case_insensitive(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": command(repo, "CODEX", "claude", "ready-for-review", "no"),
+            "claude": command(repo, "claude", "claude", "approved", "yes"),
+        },
+    )
+
+    outcome = loop.run_task(
+        repo,
+        configured,
+        TASK,
+        base_commit=loop.gitcheck.head_commit(repo),
+        echo=False,
+    )
+
+    assert outcome.committed is True
+
+
+def test_empty_handoff_actor_is_accepted(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    monkeypatch.delenv("FAKE_ACTOR", raising=False)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": [sys.executable, LEGACY_FAKE, "review", str(repo)],
+            "claude": command(repo, "claude", "claude", "approved", "yes"),
+        },
+    )
+
+    outcome = loop.run_task(
+        repo,
+        configured,
+        TASK,
+        base_commit=loop.gitcheck.head_commit(repo),
+        echo=False,
+    )
+
+    assert outcome.committed is True
+
+
+def test_reviewer_handoff_from_another_agent_pauses_without_ticking_plan(
+    repo: Path, monkeypatch
+):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    plan_path = repo / "plan.md"
+    original_plan = "- [ ] T-1: Work\n"
+    plan_path.write_text(original_plan)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": command(repo, "codex", "claude", "ready-for-review", "no"),
+            "claude": command(repo, "codex", "claude", "approved", "yes"),
+        },
+    )
+
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_plan(
+            repo,
+            configured,
+            plan_path,
+            branch="relay/plan",
+            echo=False,
+        )
+
+    assert "not 'claude'" in raised.value.reason
+    assert plan_path.read_text() == original_plan
+
+
+def test_legacy_fake_actor_mismatch_pauses_and_empty_actor_passes(
+    repo: Path, monkeypatch
+):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": [sys.executable, LEGACY_FAKE, "review", str(repo)],
+            "claude": command(repo, "claude", "claude", "approved", "yes"),
+        },
+    )
+    base_commit = loop.gitcheck.head_commit(repo)
+
+    monkeypatch.setenv("FAKE_ACTOR", "someone")
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, configured, TASK, base_commit=base_commit, echo=False)
+    assert "someone" in raised.value.reason
+    assert "not 'codex'" in raised.value.reason
+
+    monkeypatch.delenv("FAKE_ACTOR")
+    outcome = loop.run_task(
+        repo, configured, TASK, base_commit=base_commit, echo=False
+    )
+    assert outcome.committed is True
+
+
+def test_resume_does_not_validate_actor_from_the_existing_handoff(
+    repo: Path, monkeypatch
+):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    configured = settings(repo, config.Roles())
+    configured = replace(
+        configured,
+        agents={
+            "codex": command(repo, "codex", "claude", "ready-for-review", "no"),
+            "claude": command(repo, "claude", "claude", "approved", "yes"),
+        },
+    )
+    handoff_path = repo / ".whyline" / "active-handoff.json"
+    handoff_path.write_text(
+        json.dumps(
+            {
+                "v": 1,
+                "id": "prior1",
+                "type": "Handoff",
+                "task": "T-1",
+                "from_actor": "x",
+                "to_actor": "claude",
+                "status": "ready-for-review",
+                "summary": "fake",
+            }
+        )
+    )
+
+    outcome = loop.run_task(
+        repo,
+        configured,
+        TASK,
+        base_commit=loop.gitcheck.head_commit(repo),
+        echo=False,
+        resume=True,
+    )
+
+    assert outcome.committed is True

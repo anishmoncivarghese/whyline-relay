@@ -13,6 +13,7 @@ from whyline_relay import (
     config,
     gitcheck,
     handoff,
+    invocation,
     plan,
     prompts,
     routing,
@@ -249,6 +250,13 @@ def _run_task(
             raise Paused(
                 f"{agent} handed off for {record.task!r}, but this run is on "
                 f"{task.task_id!r}; the relay will not guess",
+                target,
+            )
+        if record.from_actor and record.from_actor.strip().lower() != agent.lower():
+            raise Paused(
+                f"{agent} recorded its handoff as from {record.from_actor!r}, not {agent!r}. "
+                "Check the prompt templates in .whyline/relay/prompts; after changing "
+                f"[roles], run `{invocation.command('init')} --overwrite`",
                 target,
             )
         if move == routing.BLOCKED:

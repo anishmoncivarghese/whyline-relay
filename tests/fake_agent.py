@@ -1,6 +1,7 @@
 """A fake agent. Prints, optionally writes a handoff, optionally hangs."""
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -57,7 +58,7 @@ def main() -> int:
                 "counter": counter,
                 "type": "Handoff",
                 "task": "OTHER-1" if mode == "wrongtask" else task_id,
-                "from_actor": "fake",
+                "from_actor": os.environ.get("FAKE_ACTOR", ""),
                 "to_actor": to_actor,
                 "status": status,
                 "summary": f"fake {mode}",
