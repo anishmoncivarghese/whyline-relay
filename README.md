@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through an implementer and a reviewer
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2 and backup agents in 0.2.4, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 is the exception: a one-line prompt fix, found and fixed directly, then validated with two real relay runs rather than built through one.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2, backup agents in 0.2.4, and model selection in 0.2.6, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 and 0.2.5 are the exceptions: small fixes found and fixed directly, then validated for real rather than built through the relay.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 
@@ -347,6 +347,26 @@ By default the implementer is `codex` and the reviewer is `claude`; nothing here
 
   A generic agent must be able to run `whyline handoff` and `git` in a shell, from whatever permissions its own tool grants; the relay does not manage its permissions, its login, or how it reports a denial, and `doctor` says so. It inherits the relay's environment, including any API keys the shell has. Writing `adapter = "generic"` is your acceptance of that; there is no way to opt in silently. A tool that cannot take its instructions as a trailing command-line argument (for example, one that only reads a prompt from stdin or a file) cannot be used this way.
 
+### Choosing a model
+
+Since 0.2.6, a name doesn't have to be `codex` or `claude` itself to get their full managed behaviour (login checks, permission-bypass refusal, denial parsing) — it can *alias* one, with its own command and model:
+
+```toml
+[roles]
+implementer = "claude-opus"
+tester      = "claude-haiku"
+
+[agents.claude-opus]
+adapter = "claude"
+model   = "opus"
+
+[agents.claude-haiku]
+adapter = "claude"
+model   = "haiku"
+```
+
+`adapter` here names which built-in the alias uses — `codex` or `claude` — and is checked, PATH-checked, and bypass-checked exactly as if you'd written that name directly; `claude-opus` and `claude-haiku` above are both fully managed `claude`, not `generic`. `model` is optional and is turned into the real flag each tool already has (`codex exec -m/--model`, `claude --model`, accepting an alias like `opus`/`sonnet`/`haiku` or a full model name) — confirmed against each tool's own `--help`, not guessed. It works on the literal built-in names too, with no alias needed: `[agents.claude] model = "haiku"` just adds `--model haiku` to Claude's own default command. Nobody checks whether your account can actually use the model you pick; an unavailable one fails at run time; a `generic` agent can't take `model` at all — put the flag directly in its `command` yourself, the same way you always could.
+
 Whichever agent runs, the handoff record names it: `--from antigravity --to claude` if `antigravity` were configured, for instance, so `.whyline/decisions.md` and the commit history say which model actually did the work. The relay checks this: if a handoff is recorded under a name other than the agent that just ran, it pauses rather than accept it. After changing `[roles]` on a repository set up before 0.2.2 (or with older prompt templates), run `init --overwrite` so the templates use the new names; `doctor` will tell you to if you forget.
 
 Only `codex` and `claude` are built in today. For a third option, see "Using Antigravity today" just below.
@@ -504,6 +524,8 @@ At those averages a plan of 20 such tasks is roughly two hours, about 1.2 millio
 **My project needs network to run its tests.** Codex's sandbox has none, so those tests will fail for Codex. Install dependencies beforehand, or exclude network tests from the default command.
 
 **Can I use a different agent?** Since 0.2.2, yes: swap which built-in agent, `codex` or `claude`, fills which role in `[roles]`, or configure any other headless tool as a `generic` agent — Antigravity (`agy`) is a documented, working example. See [Choosing which agent fills each role](#choosing-which-agent-fills-each-role).
+
+**Can I pick which model an agent uses?** Since 0.2.6, yes — see [Choosing a model](#choosing-a-model). `[agents.claude] model = "opus"` works directly, or give a variant its own name (`claude-opus`, `claude-haiku`) to use different models for different roles while each stays fully managed.
 
 **One of my agents ran out of quota mid-plan.** Since 0.2.4, configure a backup for that role (`[roles.backup]`) and the relay switches to it automatically and keeps going; see [Backup agents](#backup-agents). Without one, it pauses with a message naming the agent and the limit, same as before.
 
