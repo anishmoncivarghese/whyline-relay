@@ -1082,3 +1082,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** docs/antigravity-adapter-consultation.md
 
 <!-- whyline-event: a5aaaab71e474863bb99f7d12734208d -->
+
+## 2026-09-22 — Corrected the published v0.2.2 release notes: the real test count was 311, not 260
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PROMPT-BACKGROUND-GUARD
+
+**Because:** Verified by checking out the v0.2.1 and v0.2.2 tags and running the actual suite (237 and 311 respectively), rather than continuing to trust a number that had been carried over without a final re-check before publishing; 0.1.0 and 0.2.0's counts were also independently re-verified and are correct
+
+**Files:** docs/releases/v0.2.2.md
+
+<!-- whyline-event: bb314eeaa85a456ca117309d29e20bed -->
