@@ -133,3 +133,66 @@ def test_three_stage_pipeline_wrong_recipient_is_unknown_not_a_guess():
     agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
     r = handoff.Handoff(event_id="e1", task="T", to_actor="codex", status="ready", summary="")
     assert pipeline.decide(r, None, p, agents).kind == "unknown"
+
+
+def test_decide_with_current_stage_only_checks_that_stage():
+    # "review"'s status_map transitions must not leak into "draft"'s outcome vocabulary
+    # once the caller says which stage actually ran.
+    p = pipeline.Pipeline(
+        roles={
+            "implementer": pipeline.Role("implementer", agent="codex"),
+            "reviewer": pipeline.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline.Stage("draft", "implementer", "implement", {"ready": "review"}),
+            "review": pipeline.Stage("review", "reviewer", "review", {"approved": "@complete"}),
+        },
+        profiles={"full": pipeline.Profile("full", ("draft", "review"))},
+        default_profile="full",
+    )
+    agents = {"implementer": "codex", "reviewer": "claude"}
+    # "approved" is a real outcome of "review", but draft just ran -- must not match.
+    r = handoff.Handoff(event_id="e1", task="T", to_actor="claude", status="approved", summary="")
+    result = pipeline.decide(r, None, p, agents, current_stage_id="draft", profile_name="full")
+    assert result == pipeline.Decision("unknown", None)
+
+
+def test_decide_next_resolves_relative_to_the_active_profile():
+    # The SAME stage's "@next" means a different target depending on which
+    # profile is running it -- this is why decide() cannot resolve "@next" once
+    # at compile time the way compile_legacy's fixed two stages can.
+    p = pipeline.Pipeline(
+        roles={
+            "implementer": pipeline.Role("implementer", agent="codex"),
+            "tester": pipeline.Role("tester", agent="claude"),
+            "reviewer": pipeline.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline.Stage("draft", "implementer", "implement", {"ready": "@next"}),
+            "test": pipeline.Stage("test", "tester", "test", {"passed": "@next"}),
+            "review": pipeline.Stage("review", "reviewer", "review", {"approved": "@complete"}),
+        },
+        profiles={
+            "full": pipeline.Profile("full", ("draft", "test", "review")),
+            "small": pipeline.Profile("small", ("draft", "review")),
+        },
+        default_profile="full",
+    )
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    r = handoff.Handoff(event_id="e1", task="T", to_actor="claude", status="ready", summary="")
+    full = pipeline.decide(r, None, p, agents, current_stage_id="draft", profile_name="full")
+    small = pipeline.decide(r, None, p, agents, current_stage_id="draft", profile_name="small")
+    assert full == pipeline.Decision("advance", "test")
+    assert small == pipeline.Decision("advance", "review")
+
+
+def test_decide_next_on_the_last_stage_of_its_profile_is_unknown():
+    p = pipeline.Pipeline(
+        roles={"reviewer": pipeline.Role("reviewer", agent="claude")},
+        stages={"review": pipeline.Stage("review", "reviewer", "review", {"done": "@next"})},
+        profiles={"solo": pipeline.Profile("solo", ("review",))},
+        default_profile="solo",
+    )
+    r = handoff.Handoff(event_id="e1", task="T", to_actor="claude", status="done", summary="")
+    result = pipeline.decide(r, None, p, {"reviewer": "claude"}, current_stage_id="review", profile_name="solo")
+    assert result == pipeline.Decision("unknown", None)

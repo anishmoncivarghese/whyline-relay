@@ -1316,3 +1316,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/routing.py
 
 <!-- whyline-event: 82e79eb95dde49f4ab55e9a3a9760a88 -->
+
+## 2026-09-23 — Resolve configured-pipeline transitions from the active stage and profile at runtime
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-1
+
+**Because:** A stage's @next target depends on the selected profile, while omitting current_stage_id must preserve legacy stateless traversal across every stage
+
+**Rejected:**
+
+- Resolve @next during pipeline compilation — the same stage can advance to different targets in different profiles
+
+**Files:** src/whyline_relay/pipeline.py
+
+<!-- whyline-event: 0e6f7862df1147ba9d8ea0ef76c5b2f7 -->
+
+## 2026-09-23 — PCR-1 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-1
+
+**Because:** decide() matches the spec exactly: legacy mode (current_stage_id=None) is behavior-preserving since compile_legacy never emits an @next target, and the new mode correctly scopes candidates to the single named stage and resolves @next against the given profile's own stage order. Full suite passes (381 tests via uv run pytest -q), including the 3 new regression tests, with test_routing.py untouched
+
+**Files:** src/whyline_relay/pipeline.py
+
+<!-- whyline-event: dbb35443b74845e1a97f522fd0b3850c -->
