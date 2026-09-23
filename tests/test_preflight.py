@@ -43,6 +43,101 @@ def successful_runner(calls: list[list[str]] | None = None):
     return run
 
 
+PIPELINE_TOML = '''
+[roles]
+implementer = "codex"
+tester = "claude"
+reviewer = "claude"
+[pipeline]
+default_profile = "full"
+[pipeline.profiles]
+full = ["draft", "test", "review"]
+[pipeline.stages.draft]
+role = "implementer"
+prompt = "implement"
+[pipeline.stages.draft.on]
+ready = "@next"
+[pipeline.stages.test]
+role = "tester"
+prompt = "test"
+[pipeline.stages.test.on]
+passed = "@next"
+failed = "draft"
+[pipeline.stages.review]
+role = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+'''
+
+
+def _pipeline_repo(tmp_path: Path, extra_toml: str = "") -> Path:
+    """A git repo with a real [pipeline] config -- no override for the "test"
+    stage's prompt, so it has no built-in template and no override file: this
+    is the unresolvable-prompt case Task 5's PromptError exists for."""
+    _git(tmp_path, "init", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "T")
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    codex_cmd = f'["{sys.executable}", "codex-role"]'
+    claude_cmd = f'["{sys.executable}", "claude-role"]'
+    (relay / "config.toml").write_text(
+        PIPELINE_TOML
+        + f'\n[agents.codex]\ncommand = {codex_cmd}\n'
+        + f'[agents.claude]\ncommand = {claude_cmd}\n'
+        + extra_toml
+    )
+    (tmp_path / "plan.md").write_text("- [ ] T-1: build it\n  Include tests.\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "setup")
+    return tmp_path
+
+
+def test_a_bypass_flag_on_a_pipeline_agent_is_caught(tmp_path):
+    # Regression proof for the _agents_in_use fix: before it, doctor's bypass
+    # check only ever looked at settings.roles.implementer/.reviewer, which are
+    # meaningless placeholders once [pipeline] is configured -- a pipeline's
+    # real agents (here, "claude", filling both "tester" and "reviewer") went
+    # completely unchecked.
+    root = _pipeline_repo(tmp_path)
+    config_path = root / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text().replace(
+            f'command = ["{sys.executable}", "claude-role"]',
+            f'command = ["{sys.executable}", "claude-role", "--dangerously-skip-permissions"]',
+        )
+    )
+    checks = preflight.run(root, runner=successful_runner())
+    assert any(c.status == "FAIL" and "permission-bypass" in c.message for c in checks)
+
+
+def test_a_stage_naming_an_unresolvable_prompt_fails(tmp_path):
+    root = _pipeline_repo(tmp_path)
+    checks = preflight.run(root, runner=successful_runner())
+    assert any(c.status == "FAIL" and "no prompt named 'test'" in c.message for c in checks)
+
+
+def test_a_task_naming_an_unknown_relay_profile_fails(tmp_path):
+    root = _pipeline_repo(tmp_path)
+    prompt_dir = root / ".whyline" / "relay" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "test.md").write_text("Test {task_id} as {actor}.")
+    (root / "plan.md").write_text("- [ ] T-1: x\n  relay-profile: nonexistent\n")
+    checks = preflight.run(root, root / "plan.md", runner=successful_runner())
+    assert any(
+        c.status == "FAIL" and "relay-profile" in c.message and "nonexistent" in c.message
+        for c in checks
+    )
+
+
+def test_a_task_naming_relay_profile_with_no_pipeline_configured_warns(ready_repo: Path):
+    (ready_repo / "plan.md").write_text("- [ ] T-1: x\n  relay-profile: full\n")
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    assert any(c.status == "warn" and "relay-profile" in c.message for c in checks)
+
+
 def test_all_checks_pass_in_documented_order(ready_repo: Path):
     checks = preflight.run(ready_repo, runner=successful_runner())
 

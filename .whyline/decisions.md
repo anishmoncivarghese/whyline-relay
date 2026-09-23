@@ -1512,3 +1512,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py
 
 <!-- whyline-event: bc80161b0e584e47aac7c50f16c3c3cc -->
+
+## 2026-09-23 — Make preflight derive checks from configured pipeline roles, prompts, and task profiles
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-8
+
+**Because:** Pipeline configs do not use the legacy implementer/reviewer placeholders, so doctor must inspect actual stage agents and validate every stage prompt and selected task profile before launch
+
+**Rejected:**
+
+- Keep legacy role-only checks — pipeline-only agents, missing stage prompts, and invalid profiles would remain silently unchecked
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 2cf9e195cb0b4567b593bfddd54cc90e -->
+
+## 2026-09-23 — Approve PCR-8: doctor now checks a configured pipeline's real agents and stage prompts
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-8
+
+**Because:** Verified _agents_in_use dedupes pipeline roles by agent, the implementer==reviewer warning is correctly guarded behind pipeline is None, stage prompts are resolved via prompts.load/PromptError, and task.profile is validated against pipeline.profiles with the correct warn/FAIL split (no pipeline configured = warn, unknown profile = FAIL); all 4 new tests pass and the full suite (409 tests) passes unedited
+
+**Rejected:**
+
+- Trusting the handoff's test claims without rerunning — reran uv run pytest -q myself per review protocol
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 5ea96e0cd9ca4b779adbfe7543efe890 -->

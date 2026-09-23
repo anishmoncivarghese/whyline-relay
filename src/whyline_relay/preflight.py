@@ -8,7 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, TextIO
 
-from whyline_relay import adapters, config, gitcheck, invocation, plan, prompts, running
+from whyline_relay import (
+    adapters,
+    config,
+    gitcheck,
+    invocation,
+    pipeline as pipeline_module,
+    plan,
+    prompts,
+    running,
+)
 from whyline_relay.adapters import bypass
 
 Status = Literal["ok", "warn", "FAIL"]
@@ -69,6 +78,11 @@ def _agents_in_use(
     settings: config.Config,
 ) -> dict[str, tuple[list[str], str | None]]:
     agents: dict[str, tuple[list[str], str | None]] = {}
+    if settings.pipeline is not None:
+        for role in settings.pipeline.roles.values():
+            if role.agent not in agents:
+                agents[role.agent] = (settings.agents[role.agent], None)
+        return agents
     for role in ("implementer", "reviewer"):
         name = getattr(settings.roles, role)
         if name not in agents:
@@ -210,7 +224,7 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
     roles = settings.roles
     agents = _agents_in_use(settings)
 
-    if roles.implementer == roles.reviewer:
+    if settings.pipeline is None and roles.implementer == roles.reviewer:
         checks.append(
             _result(
                 "warn",
@@ -275,7 +289,9 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
     return checks
 
 
-def _plan_checks(plan_path: Path) -> list[Check]:
+def _plan_checks(
+    plan_path: Path, pipeline: "pipeline_module.Pipeline | None" = None
+) -> list[Check]:
     if not plan_path.is_file():
         return [_result("FAIL", f"plan file does not exist: {plan_path}")]
     try:
@@ -300,6 +316,23 @@ def _plan_checks(plan_path: Path) -> list[Check]:
             )
         if len(task.text.splitlines()) == 1:
             checks.append(_result("warn", f"task {task.task_id!r} has no detail lines"))
+        if task.profile is not None:
+            if pipeline is None:
+                checks.append(
+                    _result(
+                        "warn",
+                        f"task {task.task_id!r} names relay-profile {task.profile!r}, "
+                        "but no [pipeline] is configured; it will be ignored",
+                    )
+                )
+            elif task.profile not in pipeline.profiles:
+                checks.append(
+                    _result(
+                        "FAIL",
+                        f"task {task.task_id!r} names relay-profile {task.profile!r}, "
+                        "which is not in [pipeline.profiles]",
+                    )
+                )
     return checks
 
 
@@ -329,6 +362,19 @@ def run(
     if settings is not None:
         results.extend(_logins(root, settings, runner))
         results.extend(_role_checks(root, settings))
+        if settings.pipeline is not None:
+            for stage in settings.pipeline.stages.values():
+                try:
+                    prompts.load(root, stage.prompt)
+                except prompts.PromptError as error:
+                    results.append(
+                        _result(
+                            "FAIL",
+                            str(error),
+                            f"add .whyline/relay/prompts/{stage.prompt}.md, or name a "
+                            "built-in prompt (implement, review) instead",
+                        )
+                    )
 
     selected_plan = plan_path
     if selected_plan is None:
@@ -337,7 +383,9 @@ def run(
         )
     elif not selected_plan.is_absolute():
         selected_plan = root / selected_plan
-    results.extend(_plan_checks(selected_plan))
+    results.extend(
+        _plan_checks(selected_plan, settings.pipeline if settings is not None else None)
+    )
 
     if allow_dirty:
         results.append(_result("ok", "working-tree check skipped (--allow-dirty)"))
