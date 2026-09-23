@@ -17,6 +17,7 @@ from whyline_relay import (
     gitcheck,
     handoff,
     invocation,
+    pipeline,
     plan,
     prompts,
     routing,
@@ -50,6 +51,21 @@ def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     if len(reason) > 300:
         return reason[:297] + "..."
     return reason
+
+
+def _check_visit_cap(
+    pipe: pipeline.Pipeline,
+    stage_id: str,
+    stage_visits: dict[str, int],
+    task: plan.Task,
+) -> None:
+    cap = pipe.stages[stage_id].max_visits
+    if stage_visits[stage_id] > cap:
+        raise Paused(
+            f"{task.task_id} hit stage {stage_id!r}'s {cap}-visit cap without "
+            'reaching "@complete"',
+            None,
+        )
 
 
 def log_path(
@@ -340,6 +356,200 @@ def _run_task(
         next_move = move
 
 
+def _run_configured_task(
+    root: Path,
+    settings: config.Config,
+    task: plan.Task,
+    *,
+    base_commit: str,
+    echo: bool = True,
+    resume: bool = False,
+    start_round: int = 1,
+    on_turn: Callable[[int, str | None, dict], None] | None = None,
+    runner: failover.Runner = subprocess.run,
+) -> Outcome:
+    """Drive one task through a configured [pipeline], stage by stage.
+
+    Mirrors _run_task's contract and most of its per-turn checks (task
+    mismatch, from_actor, blocked, unknown, no-handoff/timeout) but routes on
+    pipeline.decide() against the stage that just ran, not a fixed pair of
+    roles. [roles.backup] is refused together with [pipeline] at config load
+    (see config.py), so there is no failover branch here: a no-handoff always
+    pauses -- there is never a backup to switch to.
+
+    With `resume`, state.json's saved stage/profile/stage_visits pick the task
+    back up where it paused. State is checkpointed (via `on_turn`) before every
+    agent launch, never after: a crash before that checkpoint lands re-enters
+    the same turn; a crash after it but before the agent's own handoff write
+    also re-enters the same turn (the checkpoint never claims a turn happened
+    until it's about to). A crash after the agent already wrote its handoff is
+    caught here by re-deciding on whatever handoff already exists before the
+    main loop restarts, so it is never re-run and never silently dropped.
+    """
+    pipe = settings.pipeline
+    effective_agents = {name: role.agent for name, role in pipe.roles.items()}
+    round_ = start_round
+    feedback = ""
+    gitcheck.ensure_relay_ignored(root)
+    start_profile = task.profile or pipe.default_profile
+    start_stage_id = pipe.profiles[start_profile].stages[0]
+    whylinecmd.claim(
+        root,
+        task.task_id,
+        pipe.roles[pipe.stages[start_stage_id].role].agent,
+        pipe.stages[start_stage_id].role,
+    )
+    saved = state.load(root) if resume else None
+    if resume and saved is not None and saved.task_id == task.task_id and saved.stage:
+        if saved.pipeline_fingerprint != settings.pipeline_fingerprint:
+            raise Paused(
+                f"{task.task_id} was paused mid-pipeline, but the pipeline has changed "
+                "since then; its saved stage and visit counts no longer match the "
+                "configured graph. Resolve by hand before resuming",
+                None,
+            )
+        profile_name = saved.profile
+        current_stage_id = saved.stage
+        stage_visits = dict(saved.stage_visits)
+        current = handoff.read(root)
+        if current is not None and current.task == task.task_id:
+            resumed = pipeline.decide(
+                current,
+                None,
+                pipe,
+                effective_agents,
+                current_stage_id=current_stage_id,
+                profile_name=profile_name,
+            )
+            if resumed.kind == "advance":
+                current_stage_id = resumed.target_stage
+                stage_visits[current_stage_id] = (
+                    stage_visits.get(current_stage_id, 0) + 1
+                )
+                _check_visit_cap(pipe, current_stage_id, stage_visits, task)
+                feedback = current.summary
+            elif resumed.kind == "complete":
+                return _approved(root, task, base_commit, round_, None)
+            elif resumed.kind == "blocked":
+                raise Paused(
+                    _blocked_reason(current.from_actor or "agent", current), None
+                )
+            # "unknown"/"no-handoff": current_stage_id/stage_visits stand; re-run it.
+    else:
+        profile_name = start_profile
+        current_stage_id = start_stage_id
+        stage_visits = {current_stage_id: 1}
+
+    implementer_agent = (
+        pipe.roles["implementer"].agent if "implementer" in pipe.roles else ""
+    )
+    reviewer_agent = pipe.roles["reviewer"].agent if "reviewer" in pipe.roles else ""
+    while True:
+        stage = pipe.stages[current_stage_id]
+        agent = pipe.roles[stage.role].agent
+        previous = handoff.read(root)
+        previous_id = previous.event_id if previous else None
+        head_before = gitcheck.head_commit(root)
+        stage_state = {
+            "profile": profile_name,
+            "stage": current_stage_id,
+            "stage_visits": dict(stage_visits),
+            "pipeline_fingerprint": settings.pipeline_fingerprint,
+        }
+        if on_turn is not None:
+            on_turn(round_, previous_id, stage_state)
+        target = _run_agent(
+            root,
+            settings,
+            agent,
+            stage.role,
+            stage.prompt,
+            task,
+            round_,
+            feedback,
+            echo,
+            implementer=implementer_agent,
+            reviewer=reviewer_agent,
+            action_label=stage.id,
+            log_suffix=stage.id,
+            actor=agent,
+            stage=current_stage_id,
+            profile=profile_name,
+            runner=runner,
+        )
+        may_commit = "@complete" in stage.transitions.values()
+        if not may_commit and gitcheck.head_commit(root) != head_before:
+            raise Paused(
+                f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
+                'forbids: only a stage that can reach "@complete" may commit. Undo it '
+                f"with `git reset {head_before[:12]}` (your files stay), then resume",
+                target,
+            )
+        record = handoff.read(root)
+        decision = pipeline.decide(
+            record,
+            previous_id,
+            pipe,
+            effective_agents,
+            current_stage_id=current_stage_id,
+            profile_name=profile_name,
+        )
+        if decision.kind == "no-handoff":
+            try:
+                text = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            adapter = config.adapter_for(settings, agent)
+            reason = failover.failover_reason(
+                adapter, text, settings.agents[agent], runner=runner
+            )
+            if reason is not None:
+                existing = failover.read_overrides(root).get(stage.role)
+                raise Paused(
+                    failover.pause_message(agent, stage.role, reason, existing), target
+                )
+            raise Paused(
+                f"{agent} exited without handing off"
+                f"{_no_handoff_detail(target, adapter)}; nothing was routed",
+                target,
+            )
+        if record.task != task.task_id:
+            raise Paused(
+                f"{agent} handed off for {record.task!r}, but this run is on "
+                f"{task.task_id!r}; the relay will not guess",
+                target,
+            )
+        if record.from_actor and record.from_actor.strip().lower() != agent.lower():
+            raise Paused(
+                f"{agent} recorded its handoff as from {record.from_actor!r}, not "
+                f"{agent!r}. Check the prompt templates in .whyline/relay/prompts; "
+                f"after changing [pipeline] or [roles], run "
+                f"`{invocation.command('init')} --overwrite`",
+                target,
+            )
+        if decision.kind == "blocked":
+            raise Paused(_blocked_reason(agent, record), target)
+        if decision.kind == "unknown":
+            raise Paused(
+                f"unrecognised outcome {record.status!r} for stage "
+                f"{current_stage_id!r}; the relay will not guess",
+                target,
+            )
+        if decision.kind == "complete":
+            return _approved(root, task, base_commit, round_, target)
+        feedback = record.summary
+        current_stage_id = decision.target_stage
+        stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
+        _check_visit_cap(pipe, current_stage_id, stage_visits, task)
+        round_ += 1
+        if round_ > settings.max_rounds:
+            raise Paused(
+                f"{task.task_id} hit the {settings.max_rounds}-round cap without "
+                'reaching "@complete"',
+                target,
+            )
+
+
 def run_task(
     root: Path,
     settings: config.Config,
@@ -354,8 +564,9 @@ def run_task(
     runner: failover.Runner = subprocess.run,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
+    driver = _run_configured_task if settings.pipeline is not None else _run_task
     try:
-        return _run_task(
+        return driver(
             root,
             settings,
             task,

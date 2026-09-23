@@ -1484,3 +1484,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, tests/test_loop_single.py
 
 <!-- whyline-event: b2b3b2cbce4745398c2a3fd06fa7999b -->
+
+## 2026-09-23 — Dispatch configured tasks through a stage-aware pipeline driver
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-7
+
+**Because:** Configured pipelines need per-stage routing, visit caps, resumable stage checkpoints, and commit permission based on reachability to @complete while the legacy driver must remain unchanged
+
+**Rejected:**
+
+- Extend the fixed two-role driver — its role/status-map assumptions cannot safely represent arbitrary stage graphs or pipeline resume state
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py, tests/fake_pipeline_agent.py
+
+<!-- whyline-event: 8da0ebe7cd974ecbb7c0de4c1c9fe6f1 -->
+
+## 2026-09-23 — PCR-7 approved: loop.py drives configured pipelines stage by stage with crash-safe resume
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-7
+
+**Because:** Diff matches the spec's _run_configured_task/run_task dispatch exactly; the two deviations from the literal spec text (fake_pipeline_agent.py falling back to parsing the counter out of a pre-existing 'id' field when 'counter' is absent, and the test fixture adding a custom .whyline/relay/prompts/test.md) are both required for the tests to actually pass -- the resume test hand-writes a handoff with no 'counter' key, and the 'tester' stage's prompt name has no built-in template. uv run pytest tests/test_loop_pipeline.py -v: 5 passed. uv run pytest -q: full suite passes, zero failures/errors via -rf
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: bc80161b0e584e47aac7c50f16c3c3cc -->
