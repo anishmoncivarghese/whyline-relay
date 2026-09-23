@@ -1589,3 +1589,63 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
 
 <!-- whyline-event: 22ed51a599ae40368a8c1aecbe3dd056 -->
+
+## 2026-09-23 — Make the relay exclusively own configured-pipeline completion commits
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RCO-2
+
+**Because:** A uniform HEAD guard plus a pre-commit @complete checkpoint prevents every stage from committing and resumes approval crashes without rerunning an agent
+
+**Rejected:**
+
+- Allow terminal stages to commit — this loses centralized ownership and leaves approval-to-commit crash recovery ambiguous
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: cf2c14a7d30a49bea938e59c64f61b2c -->
+
+## 2026-09-23 — RCO-2 changes requested: the resume branch's 'resumed.kind == complete' case still calls _approved directly instead of _commit_and_approve, so a crash between the terminal stage writing its approved handoff and the relay's @complete checkpoint resumes into a permanent Paused (no commit naming the task exists), never retrying the commit
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RCO-2
+
+**Because:** Reproduced: seeded state.json with stage='review' (pre-checkpoint) and an on-disk 'approved' handoff, then resumed with agents.run stubbed to fail if called; loop.run_task raised Paused('T-1 was approved but no commit naming it exists') instead of committing. This is exactly the approval-to-commit crash window the task's global constraints and the implementer's own decision note both call out as the point of this change; the new saved.stage == '@complete' branch only covers the window after that checkpoint lands, not before it
+
+**Rejected:**
+
+- Treat as out of scope since the task's given code snippet for the resume block didn't mention this line — the global constraint (never silently losing the approval on a crash between approval and commit) applies to the whole diff, not just the lines the spec happened to quote
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 913c1cbe3d984db296a7d5cfeaa1e34c -->
+
+## 2026-09-23 — Retry the relay commit when resume finds a terminal approved handoff before the completion checkpoint
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RCO-2
+
+**Because:** The approved handoff is durable evidence that the terminal stage finished, so both sides of the @complete checkpoint must converge on the same relay-owned commit path without rerunning an agent
+
+**Rejected:**
+
+- Call _approved directly — this requires a commit that the relay had not yet had a chance to create and permanently pauses recovery
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 6000882b76ff41999cc206cc4eefa969 -->
+
+## 2026-09-23 — RCO-2 approved: resume path now calls _commit_and_approve for both the pre-checkpoint (stage still names the terminal stage, handoff already approved) and post-checkpoint (stage == @complete) crash windows, closing the gap found in round 1
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RCO-2
+
+**Because:** Verified the new test_crash_after_approval_before_complete_checkpoint_retries_commit reproduces exactly the scenario I found last round (state.json stage='review', on-disk approved handoff) and now resumes straight to a commit retry without re-running any agent; ran uv run pytest tests/test_loop_pipeline.py -v (9 passed) and uv run pytest -q (full suite green) myself
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 971bc356cb6f4b288da1968639ba252d -->

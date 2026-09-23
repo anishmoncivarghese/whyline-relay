@@ -130,7 +130,7 @@ def test_a_three_stage_pipeline_runs_end_to_end_with_a_bounce_back(repo, monkeyp
     pipe = make_pipeline()
     settings = settings_with_pipeline(repo, pipe)
     # draft -> ready (tester); test -> failed (implementer); draft -> ready (tester);
-    # test -> passed (reviewer); review -> commit:approved (task complete)
+    # test -> passed (reviewer); review -> approved (task complete)
     monkeypatch.setattr(
         loop.agents,
         "run",
@@ -140,7 +140,7 @@ def test_a_three_stage_pipeline_runs_end_to_end_with_a_bounce_back(repo, monkeyp
                 "codex:failed",
                 "claude:ready",
                 "claude:passed",
-                "commit:claude:approved",
+                "claude:approved",
             ]
         ),
     )
@@ -170,8 +170,134 @@ def test_a_non_terminal_stage_committing_is_refused(repo, monkeypatch):
     pipe = make_pipeline()
     settings = settings_with_pipeline(repo, pipe)
     monkeypatch.setattr(loop.agents, "run", _scripted_run(["commit:claude:ready"]))
-    with pytest.raises(loop.Paused, match="only a stage that can reach"):
+    with pytest.raises(loop.Paused, match="only the relay itself commits"):
         loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+
+
+def test_a_terminal_stage_committing_is_also_refused(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(["claude:ready", "claude:passed", "commit:claude:approved"]),
+    )
+    with pytest.raises(loop.Paused, match="only the relay itself commits"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+
+
+def test_the_relay_makes_the_commit_not_the_agent(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    # None of these specs run "commit:" -- if a real commit exists afterward,
+    # the relay made it, not any agent turn.
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(["claude:ready", "claude:passed", "claude:approved"]),
+    )
+    outcome = loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert outcome.committed is True
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "(T-1)" in subject
+
+
+def test_crash_between_approval_and_commit_resumes_straight_to_the_commit(
+    repo, monkeypatch
+):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    # Simulate a crash right after the terminal "review" stage handed off "approved"
+    # and the relay checkpointed stage="@complete", but before it made its own
+    # commit: the handoff on disk already says approved; state.json says @complete.
+    (repo / "feature.txt").write_text("x\n")
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        '{"id": "event3", "task": "T-1", "to_actor": "claude", "status": "approved", '
+        '"summary": "feat: the whole feature", "from_actor": ""}'
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=3,
+            base_commit=head(repo),
+            paused_reason="crash",
+            log_path="",
+            profile="full",
+            stage="@complete",
+            stage_visits={"draft": 1, "test": 1, "review": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    called = []
+    monkeypatch.setattr(loop.agents, "run", lambda *a, **k: called.append("ran"))
+    outcome = loop.run_task(
+        repo, settings, TASK, base_commit=head(repo), echo=False, resume=True
+    )
+    assert outcome.committed is True
+    assert called == [], "no agent should run when only the commit itself was pending"
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "feat: the whole feature (T-1)" in subject
+
+
+def test_crash_after_approval_before_complete_checkpoint_retries_commit(
+    repo, monkeypatch
+):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    # Simulate a crash after the terminal stage wrote its approved handoff but
+    # before the relay checkpointed stage="@complete": state still names review.
+    (repo / "feature.txt").write_text("x\n")
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        '{"id": "event3", "task": "T-1", "to_actor": "claude", '
+        '"status": "approved", "summary": "feat: the whole feature", '
+        '"from_actor": ""}'
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=3,
+            base_commit=head(repo),
+            paused_reason="crash",
+            log_path="",
+            profile="full",
+            stage="review",
+            stage_visits={"draft": 1, "test": 1, "review": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    called = []
+    monkeypatch.setattr(loop.agents, "run", lambda *a, **k: called.append("ran"))
+    outcome = loop.run_task(
+        repo, settings, TASK, base_commit=head(repo), echo=False, resume=True
+    )
+    assert outcome.committed is True
+    assert called == [], "an approved terminal stage must not be run again"
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "feat: the whole feature (T-1)" in subject
 
 
 def test_resume_reconstructs_stage_and_advances_past_the_unrouted_handoff(
@@ -205,7 +331,7 @@ def test_resume_reconstructs_stage_and_advances_past_the_unrouted_handoff(
     monkeypatch.setattr(
         loop.agents,
         "run",
-        _scripted_run(["claude:passed", "commit:claude:approved"]),
+        _scripted_run(["claude:passed", "claude:approved"]),
     )
     outcome = loop.run_task(
         repo, settings, TASK, base_commit=head(repo), echo=False, resume=True

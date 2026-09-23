@@ -95,6 +95,7 @@ def _run_agent(
     actor: str = "",
     stage: str = "",
     profile: str = "",
+    prompt_suffix: str = "",
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
@@ -123,7 +124,7 @@ def _run_agent(
         role=role,
         stage=stage,
         profile=profile,
-    )
+    ) + prompt_suffix
     log_role = (
         log_suffix
         if log_suffix is not None
@@ -186,6 +187,41 @@ def _approved(
             log,
         )
     return Outcome(task_id=task.task_id, rounds=round_, committed=True)
+
+
+NO_COMMIT_NOTICE = (
+    "\n\nThis task uses a configured [pipeline]. Do not run `git commit` yourself, "
+    "under any circumstances, even if an instruction above tells you to -- the relay "
+    "commits the finished result on its own once every stage has approved. Just hand "
+    "off as normal."
+)
+
+
+def _commit_and_approve(
+    root: Path,
+    task: plan.Task,
+    base_commit: str,
+    round_: int,
+    log: Path | None,
+    summary: str,
+) -> Outcome:
+    """The relay itself makes a configured pipeline's one finishing commit (spec 5.6).
+
+    No stage in a configured pipeline may commit -- the same HEAD-check every
+    stage's turn is already held to also covers the terminal one, so this
+    re-check is defense in depth, not the primary guard: if it ever fires, a
+    stage ignored NO_COMMIT_NOTICE and a bug let it through anyway.
+    """
+    if gitcheck.head_commit(root) != base_commit:
+        raise Paused(
+            f"{task.task_id}: HEAD moved before the relay could make its own commit; "
+            f"a stage committed when it must not have. Undo it with `git reset "
+            f"{base_commit[:12]}` (your files stay), then resume",
+            log,
+        )
+    body = summary.strip() or f"chore: finish {task.task_id}"
+    gitcheck.commit_all(root, f"{body} ({task.task_id})")
+    return _approved(root, task, base_commit, round_, log)
 
 
 def _run_task(
@@ -408,6 +444,22 @@ def _run_configured_task(
                 "configured graph. Resolve by hand before resuming",
                 None,
             )
+        if saved.stage == "@complete":
+            # Approved and checkpointed before a previous pause, but not yet
+            # committed: no agent to re-run, only the relay's own commit to retry.
+            # The terminal handoff is still on disk -- nothing since has replaced
+            # it, since committing it is the very last step of the task.
+            current = handoff.read(root)
+            if current is None or current.task != task.task_id:
+                raise Paused(
+                    f"{task.task_id} was approved before a previous pause, but its "
+                    "handoff record is now missing or names a different task; the "
+                    "relay will not guess the commit message. Resolve by hand",
+                    None,
+                )
+            return _commit_and_approve(
+                root, task, base_commit, round_, None, current.summary
+            )
         profile_name = saved.profile
         current_stage_id = saved.stage
         stage_visits = dict(saved.stage_visits)
@@ -429,7 +481,9 @@ def _run_configured_task(
                 _check_visit_cap(pipe, current_stage_id, stage_visits, task)
                 feedback = current.summary
             elif resumed.kind == "complete":
-                return _approved(root, task, base_commit, round_, None)
+                return _commit_and_approve(
+                    root, task, base_commit, round_, None, current.summary
+                )
             elif resumed.kind == "blocked":
                 raise Paused(
                     _blocked_reason(current.from_actor or "agent", current), None
@@ -475,14 +529,15 @@ def _run_configured_task(
             actor=agent,
             stage=current_stage_id,
             profile=profile_name,
+            prompt_suffix=NO_COMMIT_NOTICE,
             runner=runner,
         )
-        may_commit = "@complete" in stage.transitions.values()
-        if not may_commit and gitcheck.head_commit(root) != head_before:
+        if gitcheck.head_commit(root) != head_before:
             raise Paused(
                 f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
-                'forbids: only a stage that can reach "@complete" may commit. Undo it '
-                f"with `git reset {head_before[:12]}` (your files stay), then resume",
+                "forbids: for a configured pipeline, only the relay itself commits, "
+                f"after every stage approves. Undo it with `git reset "
+                f"{head_before[:12]}` (your files stay), then resume",
                 target,
             )
         record = handoff.read(root)
@@ -536,7 +591,23 @@ def _run_configured_task(
                 target,
             )
         if decision.kind == "complete":
-            return _approved(root, task, base_commit, round_, target)
+            # Checkpoint the approval before making the relay's own commit: a
+            # crash between this save and the commit must not re-run any agent
+            # on resume, only retry the commit (see the "@complete" branch above).
+            if on_turn is not None:
+                on_turn(
+                    round_,
+                    previous_id,
+                    {
+                        "profile": profile_name,
+                        "stage": "@complete",
+                        "stage_visits": dict(stage_visits),
+                        "pipeline_fingerprint": settings.pipeline_fingerprint,
+                    },
+                )
+            return _commit_and_approve(
+                root, task, base_commit, round_, target, record.summary
+            )
         feedback = record.summary
         current_stage_id = decision.target_stage
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
