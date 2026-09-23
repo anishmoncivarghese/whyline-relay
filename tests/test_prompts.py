@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from whyline_relay import prompts
 
 
@@ -91,3 +93,63 @@ def test_load_prefers_a_user_template(tmp_path: Path):
 
 def test_load_falls_back_to_the_builtin(tmp_path: Path):
     assert prompts.load(tmp_path, "review") == prompts.REVIEW
+
+
+def test_load_raises_a_clear_error_for_an_unknown_prompt_with_no_override(tmp_path):
+    with pytest.raises(prompts.PromptError, match="tester"):
+        prompts.load(tmp_path, "tester")
+
+
+def test_load_finds_a_user_override_for_a_custom_stage_name(tmp_path):
+    prompt_dir = prompts.prompts_dir(tmp_path)
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "tester.md").write_text(
+        "Test {task_id} as {actor}, stage {stage}."
+    )
+    assert (
+        prompts.load(tmp_path, "tester")
+        == "Test {task_id} as {actor}, stage {stage}."
+    )
+
+
+def test_render_substitutes_the_new_placeholders():
+    rendered = prompts.render(
+        "You are {actor}, role {role}, on stage {stage} of profile {profile}.",
+        task_id="T-1",
+        task_text="x",
+        sync_packet="",
+        round_=1,
+        review_feedback="",
+        actor="claude-fast",
+        role="tester",
+        stage="test",
+        profile="full",
+    )
+    assert rendered == "You are claude-fast, role tester, on stage test of profile full."
+
+
+def test_render_output_for_the_builtin_templates_is_unchanged():
+    # New optional kwargs must not appear in output when the caller omits them --
+    # the built-in IMPLEMENT/REVIEW templates never reference
+    # {actor}/{role}/{stage}/{profile}.
+    before = prompts.render(
+        prompts.IMPLEMENT,
+        task_id="T-1",
+        task_text="do it",
+        sync_packet="PACKET",
+        round_=1,
+        review_feedback="",
+    )
+    after = prompts.render(
+        prompts.IMPLEMENT,
+        task_id="T-1",
+        task_text="do it",
+        sync_packet="PACKET",
+        round_=1,
+        review_feedback="",
+        actor="codex",
+        role="implementer",
+        stage="implement",
+        profile="default",
+    )
+    assert before == after

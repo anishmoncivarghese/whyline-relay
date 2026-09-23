@@ -12,7 +12,15 @@ PLACEHOLDERS = (
     "review_feedback",
     "implementer",
     "reviewer",
+    "actor",
+    "role",
+    "stage",
+    "profile",
 )
+
+
+class PromptError(ValueError):
+    """A stage names a prompt with no built-in template and no user override."""
 
 IMPLEMENT = """{sync_packet}
 
@@ -113,12 +121,23 @@ def prompts_dir(root: Path) -> Path:
 
 
 def load(root: Path, name: str) -> str:
-    """Return the user's template for `name`, falling back to the built-in one."""
+    """Return the user's template for `name`, falling back to the built-in one.
+
+    Raises PromptError, not KeyError, when neither exists: a configured
+    pipeline's stage can name any prompt, not only "implement"/"review".
+    """
     candidate = prompts_dir(root) / f"{name}.md"
     try:
         return candidate.read_text(encoding="utf-8")
     except OSError:
+        pass
+    try:
         return TEMPLATES[name]
+    except KeyError:
+        raise PromptError(
+            f"no prompt named {name!r}: no built-in template for it, and "
+            f"{candidate} does not exist"
+        ) from None
 
 
 def render(
@@ -131,6 +150,10 @@ def render(
     review_feedback: str,
     implementer: str = "codex",
     reviewer: str = "claude",
+    actor: str = "",
+    role: str = "",
+    stage: str = "",
+    profile: str = "",
 ) -> str:
     """Substitute the placeholders.
 
@@ -146,6 +169,10 @@ def render(
         "{sync_packet}": sync_packet,
         "{round}": str(round_),
         "{review_feedback}": review_feedback or "(none — this is the first round)",
+        "{actor}": actor,
+        "{role}": role,
+        "{stage}": stage,
+        "{profile}": profile,
     }
     for placeholder, value in values.items():
         rendered = rendered.replace(placeholder, value)

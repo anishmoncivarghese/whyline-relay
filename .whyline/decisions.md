@@ -1428,3 +1428,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/plan.py, tests/test_plan.py
 
 <!-- whyline-event: 95539c27ec654af7a48f4e0db1c73195 -->
+
+## 2026-09-23 — Raise a domain-specific error for unresolved prompts while preserving existing render output
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-5
+
+**Because:** Pipeline stages can name custom prompts, so missing overrides need an actionable PromptError; optional empty metadata values keep all existing callers and built-in templates byte-for-byte compatible
+
+**Rejected:**
+
+- Keep leaking KeyError — it obscures that both the user override and built-in template are missing
+
+**Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
+
+<!-- whyline-event: 84fd660702064c25b3f916586bc6a390 -->
+
+## 2026-09-23 — PCR-5 review: approve — PromptError and actor/role/stage/profile placeholders match spec exactly, tests genuinely cover the new behavior
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-5
+
+**Because:** load() now raises PromptError instead of leaking KeyError for unknown custom stage names, and render() accepts four optional metadata kwargs that default to empty string, byte-for-byte preserving existing IMPLEMENT/REVIEW output; new tests cover the override path, the missing-prompt error, new placeholder substitution, and default-output equivalence; full suite passes unedited (uv run pytest -q, exit 0) and test_prompts.py passes 16/16
+
+**Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
+
+<!-- whyline-event: f99759a848774507b21f8c7293030aff -->
