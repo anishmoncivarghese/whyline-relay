@@ -74,6 +74,29 @@ def test_implement_then_review_then_approve(repo: Path, monkeypatch):
     assert outcome.rounds == 1
 
 
+def test_on_turn_is_called_with_a_stage_state_dict(repo: Path, monkeypatch):
+    settings = settings_using("review", "approve", repo)
+    real_run = loop.agents.run
+
+    def run_then_commit(command, prompt, **kwargs):
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", run_then_commit)
+    seen = []
+
+    def on_turn(round_, previous_id, stage_state):
+        seen.append(stage_state)
+
+    base = loop.gitcheck.head_commit(repo)
+    loop.run_task(
+        repo, settings, TASK, base_commit=base, echo=False, on_turn=on_turn
+    )
+    assert seen and all(state == {} for state in seen)
+
+
 def test_agent_that_writes_no_handoff_pauses(repo: Path):
     settings = settings_using("silent", "approve", repo)
     base = loop.gitcheck.head_commit(repo)

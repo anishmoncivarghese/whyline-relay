@@ -1456,3 +1456,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
 
 <!-- whyline-event: f99759a848774507b21f8c7293030aff -->
+
+## 2026-09-23 — Carry stage state through turn callbacks and pause persistence without changing legacy execution
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-6
+
+**Because:** Configured pipelines need resumable stage metadata in Task 7, while empty stage dictionaries and optional _run_agent defaults preserve every legacy call path and keep the permission-bypass guard unchanged
+
+**Rejected:**
+
+- Keep the two-argument on_turn callback — it cannot expose pipeline stage progress to run_plan for pause persistence
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_single.py
+
+<!-- whyline-event: 259036931d2041c489b1b7ba63ba1614 -->
+
+## 2026-09-23 — PCR-6 approved: on_turn carries stage_state, _run_agent gains optional stage-aware params
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-6
+
+**Because:** Diff matches spec exactly; all optional params default to None/empty preserving every legacy call path; full suite (uv run pytest -q) passes with no failures; new test genuinely exercises the three-arg on_turn contract with empty-dict assertion for legacy runs
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_single.py
+
+<!-- whyline-event: b2b3b2cbce4745398c2a3fd06fa7999b -->

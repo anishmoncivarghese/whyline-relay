@@ -74,6 +74,11 @@ def _run_agent(
     *,
     implementer: str,
     reviewer: str,
+    action_label: str | None = None,
+    log_suffix: str | None = None,
+    actor: str = "",
+    stage: str = "",
+    profile: str = "",
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
@@ -98,10 +103,20 @@ def _run_agent(
         review_feedback=review_feedback,
         implementer=implementer,
         reviewer=reviewer,
+        actor=actor,
+        role=role,
+        stage=stage,
+        profile=profile,
     )
-    log_role = role if implementer == reviewer else ""
+    log_role = (
+        log_suffix
+        if log_suffix is not None
+        else (role if implementer == reviewer else "")
+    )
     target = log_path(root, task.task_id, round_, agent, log_role)
-    action = "implementing" if role == "implementer" else "reviewing"
+    action = action_label or (
+        "implementing" if role == "implementer" else "reviewing"
+    )
     if echo:
         agents.print_status(
             f"==> {agent}: {action} {task.task_id} "
@@ -166,7 +181,7 @@ def _run_task(
     echo: bool = True,
     resume: bool = False,
     start_round: int = 1,
-    on_turn: Callable[[int, str | None], None] | None = None,
+    on_turn: Callable[[int, str | None, dict], None] | None = None,
     runner: failover.Runner = subprocess.run,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
@@ -218,7 +233,7 @@ def _run_task(
         previous_id = previous.event_id if previous else None
         head_before = gitcheck.head_commit(root)
         if on_turn is not None:
-            on_turn(round_, previous_id)
+            on_turn(round_, previous_id, {})
 
         target = _run_agent(
             root,
@@ -334,7 +349,7 @@ def run_task(
     echo: bool = True,
     resume: bool = False,
     start_round: int = 1,
-    on_turn: Callable[[int, str | None], None] | None = None,
+    on_turn: Callable[[int, str | None, dict], None] | None = None,
     _clear_running: bool = True,
     runner: failover.Runner = subprocess.run,
 ) -> Outcome:
@@ -375,6 +390,7 @@ def _save_pause(
     only: str | None,
     progress: dict,
 ) -> None:
+    stage_state = progress.get("stage_state") or {}
     state.save(
         root,
         state.RelayState(
@@ -387,6 +403,10 @@ def _save_pause(
             log_path=str(log or ""),
             only=only or "",
             last_handoff_id=progress["last"] or "",
+            profile=stage_state.get("profile", ""),
+            stage=stage_state.get("stage", ""),
+            stage_visits=stage_state.get("stage_visits", {}),
+            pipeline_fingerprint=stage_state.get("pipeline_fingerprint", ""),
         ),
     )
 
@@ -463,9 +483,10 @@ def _run_plan(
         resuming = None
         progress = {"round": start_round, "last": None}
 
-        def on_turn(round_: int, previous_id: str | None) -> None:
+        def on_turn(round_: int, previous_id: str | None, stage_state: dict) -> None:
             progress["round"] = round_
             progress["last"] = previous_id
+            progress["stage_state"] = stage_state
 
         try:
             outcome = run_task(
