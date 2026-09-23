@@ -1344,3 +1344,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/pipeline.py
 
 <!-- whyline-event: dbb35443b74845e1a97f522fd0b3850c -->
+
+## 2026-09-23 — Keep pipeline resume state additive and backward-compatible
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-2
+
+**Because:** Empty scalar defaults let legacy state.json records load unchanged, while default_factory gives each RelayState its own stage_visits mapping
+
+**Rejected:**
+
+- Require pipeline keys in every state file — older relay state would fail to resume
+
+**Files:** src/whyline_relay/state.py, tests/test_state.py
+
+<!-- whyline-event: 97c21e8fd40a459fafe75503c82dfe81 -->
+
+## 2026-09-23 — PCR-2 review: approve
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-2
+
+**Because:** RelayState gains profile, stage, stage_visits, pipeline_fingerprint as additive defaulted fields exactly per spec; asdict/json round-trips the dict field cleanly and RelayState(**record) fills missing keys for legacy state.json files without raising. Full suite (383 tests, 381 prior + 2 new) passes unedited
+
+**Files:** src/whyline_relay/state.py, tests/test_state.py
+
+<!-- whyline-event: 11ed6f1867d84207b00ed8ebb71ecb57 -->

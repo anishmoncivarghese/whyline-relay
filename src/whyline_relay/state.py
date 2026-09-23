@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from whyline_relay import config
@@ -21,6 +21,11 @@ class RelayState:
     log_path: str
     only: str = ""
     last_handoff_id: str = ""
+    # Configured-pipeline resume only (empty/absent for a legacy, unconfigured run).
+    profile: str = ""
+    stage: str = ""
+    stage_visits: dict[str, int] = field(default_factory=dict)
+    pipeline_fingerprint: str = ""
 
 
 def path(root: Path) -> Path:
