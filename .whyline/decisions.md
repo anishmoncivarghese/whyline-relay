@@ -1400,3 +1400,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py, tests/test_config.py
 
 <!-- whyline-event: 665112736511472fa034775ecd7ca8f7 -->
+
+## 2026-09-23 — Parse relay-profile from normalized task text and preserve backward-compatible Task construction
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-4
+
+**Because:** Searching the assembled dedented text makes an indented Markdown detail directive match as a logical line, while a defaulted optional field leaves existing Task constructors unchanged
+
+**Rejected:**
+
+- Parse raw detail lines before dedenting — this would couple directive recognition to Markdown indentation
+
+**Files:** src/whyline_relay/plan.py, tests/test_plan.py
+
+<!-- whyline-event: c342491f3fac4cce90685d8f75eb0ef3 -->
+
+## 2026-09-23 — PCR-4 review: approve — relay-profile: directive parsing matches spec exactly
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-4
+
+**Because:** RELAY_PROFILE regex searches the dedented, assembled task text so an indented Markdown detail directive matches as a logical line; Task.profile defaults to None so all existing Task(...) call sites are unaffected. Both spec tests (directive parsed, directive without a name yields None) pass, and the full suite (395 tests) passes unedited
+
+**Files:** src/whyline_relay/plan.py, tests/test_plan.py
+
+<!-- whyline-event: 95539c27ec654af7a48f4e0db1c73195 -->

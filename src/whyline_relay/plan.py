@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 CHECKBOX = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\]\s+(?P<body>.*)$")
+RELAY_PROFILE = re.compile(r"(?m)^relay-profile:\s*(\S+)\s*$")
 
 
 class PlanError(ValueError):
@@ -18,6 +19,7 @@ class Task:
     text: str
     checked: bool
     line_index: int
+    profile: str | None = None
 
 
 def _task_id(body: str) -> str:
@@ -61,8 +63,15 @@ def parse(content: str) -> list[Task]:
             detail.append(following)
             cursor += 1
         text = "\n".join([body, *_dedent(detail)])
+        profile_match = RELAY_PROFILE.search(text)
         tasks.append(
-            Task(task_id=task_id, text=text, checked=match.group("mark") != " ", line_index=index)
+            Task(
+                task_id=task_id,
+                text=text,
+                checked=match.group("mark") != " ",
+                line_index=index,
+                profile=profile_match.group(1) if profile_match else None,
+            )
         )
         index = cursor
     return tasks

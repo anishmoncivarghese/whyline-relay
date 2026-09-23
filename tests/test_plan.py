@@ -67,3 +67,21 @@ def test_checkbox_line_without_colon_uses_whole_line_as_id():
     tasks = plan.parse("- [ ] WL-7 do the thing\n")
     assert tasks[0].task_id == "WL-7"
     assert tasks[0].text == "WL-7 do the thing"
+
+
+def test_relay_profile_directive_is_parsed():
+    content = (
+        "- [ ] T-1: build the thing\n"
+        "  relay-profile: full\n"
+        "  more detail here\n"
+        "- [ ] T-2: a plain task\n"
+        "  no directive on this one\n"
+    )
+    tasks = plan.parse(content)
+    assert tasks[0].profile == "full"
+    assert tasks[1].profile is None
+
+
+def test_relay_profile_directive_requires_a_name():
+    content = "- [ ] T-1: build the thing\n  relay-profile:\n"
+    assert plan.parse(content)[0].profile is None
