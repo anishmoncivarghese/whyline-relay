@@ -1544,3 +1544,20 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
 
 <!-- whyline-event: 5ea96e0cd9ca4b779adbfe7543efe890 -->
+
+## 2026-09-23 — Merged PCR-1..8: [pipeline] config exposure + crash-safe resume, built via whyline-relay on its own plan
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-1..8
+
+**Because:** every task empirically pre-verified in a scratch copy against 5 independent acceptance tests before being handed to the relay; the relay's own run produced byte-identical code to that verified reference, full suite (409 tests) and acceptance battery pass with zero real regressions (the only non-passing tests were an out-of-scope suite, a pre-existing baseline failure reproduced on unmodified 0.2.7, and one 0.2.7-era test whose pinned 'not built yet' behavior is now correctly superseded by design)
+
+**Rejected:**
+
+- unify _run_task/_run_configured_task into one generalized function — kept them separate to avoid destabilizing the well-tested legacy path; the cost is some duplicated per-turn checks, judged acceptable
+- relay-side auto-commit ownership (spec D6) — out of scope for this piece; a configured pipeline's terminal-reaching stage still self-commits via the existing HEAD-check mechanism
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py
+
+<!-- whyline-event: 75e4d38c263f41c999280c598633b2a3 -->

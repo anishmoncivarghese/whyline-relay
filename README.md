@@ -17,7 +17,7 @@ Give it a Markdown plan. It runs each task through an implementer and a reviewer
 
 It never types into a terminal for you and never pushes. Each agent runs headlessly (`codex exec`, `claude -p`), one turn at a time. The relay decides whose turn it is by reading [whyline](https://github.com/anishmoncivarghese/whyline)'s handoff record. It does not parse agent output to route.
 
-> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2, backup agents in 0.2.4, and model selection in 0.2.6, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 and 0.2.5 are the exceptions: small fixes found and fixed directly, then validated for real rather than built through the relay.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
+> **Status:** 0.2. Most 0.2.x features, including the pluggable agents in 0.2.2, backup agents in 0.2.4, model selection in 0.2.6, and a configurable multi-stage `[pipeline]` with crash-safe resume in 0.2.8, were built by running this tool on its own plan: an implementer implemented, a reviewer reviewed and committed. (0.2.3 and 0.2.5 are the exceptions: small fixes found and fixed directly, then validated for real rather than built through the relay.) It has run on real tasks on one macOS machine. Treat it as early software and read the [safety section](#permissions-and-safety) before pointing it at anything valuable.
 
 ## Contents
 
@@ -33,6 +33,7 @@ It never types into a terminal for you and never pushes. Each agent runs headles
 - [Configuration](#configuration)
 - [Choosing which agent fills each role](#choosing-which-agent-fills-each-role)
 - [Backup agents](#backup-agents)
+- [Configuring a custom pipeline](#configuring-a-custom-pipeline)
 - [Permissions and safety](#permissions-and-safety)
 - [What it writes](#what-it-writes)
 - [Removing the relay](#removing-the-relay)
@@ -326,7 +327,7 @@ reviewer    = "claude"
 ```
 
 - The prompt is appended to each command as its last argument.
-- **Prompts:** `.whyline/relay/prompts/implement.md` and `review.md` are the wrapper prompts sent each turn. They are yours to edit. Placeholders are `{task_id}`, `{task_text}`, `{sync_packet}`, `{round}`, `{review_feedback}`, and, since 0.2.2, `{implementer}` and `{reviewer}` (the two agent names, so a template stays correct if you change `[roles]`), substituted as plain text (so braces in JSON examples are safe). `--dry-run` shows the assembled prompt for whichever agent implements.
+- **Prompts:** `.whyline/relay/prompts/implement.md` and `review.md` are the wrapper prompts sent each turn. They are yours to edit. Placeholders are `{task_id}`, `{task_text}`, `{sync_packet}`, `{round}`, `{review_feedback}`, and, since 0.2.2, `{implementer}` and `{reviewer}` (the two agent names, so a template stays correct if you change `[roles]`), substituted as plain text (so braces in JSON examples are safe). Since 0.2.8, a custom `[pipeline]` stage's own prompt also gets `{actor}`, `{role}`, `{stage}`, and `{profile}` — see [Configuring a custom pipeline](#configuring-a-custom-pipeline). `--dry-run` shows the assembled prompt for whichever agent implements.
 - **Where instructions reach the agents from:** the task in the plan, the two prompt templates, `AGENTS.md` (whyline's block, which agents read on their own), and, for an agent whose permissions the relay manages, the permissions file.
 
 ## Choosing which agent fills each role
@@ -430,6 +431,62 @@ A backup is validated exactly like a role in `[roles]`: it must be a built-in ag
 **Preflight checks a configured backup too**, not only the primary — on PATH, and, for a built-in agent, logged in — so a backup that can't run is caught before it's ever needed, not discovered mid-plan. A backup that is *also* already someone's primary is reported as that primary; it's already fully checked either way.
 
 **If the backup also fails**, there's no further fallback (one hop only): the run pauses, naming both agents and what each one hit.
+
+## Configuring a custom pipeline
+
+Since 0.2.8, `[pipeline]` can replace the fixed implementer/reviewer pair with any number of named stages, each with its own outcome vocabulary and rejection target — a real tester stage that can send work back to the implementer, for instance, not just approve or request changes:
+
+```toml
+[roles]
+implementer = "codex"
+tester      = "claude"
+reviewer    = "claude"
+
+[pipeline]
+default_profile = "full"
+
+[pipeline.profiles]
+full  = ["draft", "test", "review"]
+quick = ["draft", "review"]           # a task can pick this with relay-profile: quick
+
+[pipeline.stages.draft]
+role   = "implementer"
+prompt = "implement"                  # .whyline/relay/prompts/implement.md, or the built-in
+[pipeline.stages.draft.on]
+ready = "@next"
+
+[pipeline.stages.test]
+role       = "tester"
+prompt     = "test"                   # not built in -- you must write prompts/test.md yourself
+max_visits = 5                        # default 3; a stage bouncing past this pauses the run
+[pipeline.stages.test.on]
+passed = "@next"
+failed = "draft"
+
+[pipeline.stages.review]
+role   = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+```
+
+A stage's `on` table maps the outcome your prompt tells the agent to hand off with to what happens next: another stage's id, `"@next"` (the following stage in whichever profile is actually running — the same stage can mean a different "next" in `full` versus `quick`), `"@complete"` (the task is done), or `"@blocked"` (a human is needed). Every profile must have some path to `"@complete"`, checked at config-load time, not discovered mid-run.
+
+**A task picks its profile with a `relay-profile:` line** in its detail, falling back to `default_profile` if it doesn't:
+
+```markdown
+- [ ] T-2: a task that skips testing
+  relay-profile: quick
+```
+
+**Prompts for anything other than `implement`/`review` are yours to write.** A stage's `prompt` name is looked up under `.whyline/relay/prompts/<name>.md` first, the two built-ins second; naming anything else with no override file is a `doctor` failure, not a runtime surprise. Custom prompts get four more placeholders beyond the usual ones: `{actor}` (the agent running), `{role}`, `{stage}`, and `{profile}`.
+
+**Only a stage that can reach `"@complete"` may commit** — the same HEAD-check the reviewer has always been held to, generalized to whichever stage(s) your graph lets finish the task.
+
+**Crash-safe by design:** a pause mid-pipeline saves exactly which stage and how many times each stage has run; `resume` picks up there, never re-running a stage whose handoff already exists, never silently skipping one either. If `[pipeline]` changes between a pause and a `resume`, the relay refuses to guess and asks you to resolve it by hand.
+
+**Not supported together with `[pipeline]`:** `[roles.backup]` (a configured pipeline has no failover — a stage with no working agent pauses) and a hand-written `[status_map]` (a pipeline's stages define their own outcome labels instead). Both are refused at config-load time with an explanation. There is no `init`/`roles set` wizard for authoring a `[pipeline]` table yet — write it by hand, matching the shape above.
 
 ## Permissions and safety
 
