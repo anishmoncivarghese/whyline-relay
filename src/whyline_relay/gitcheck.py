@@ -163,3 +163,19 @@ def commit_paths(root: Path, paths: list[Path], message: str) -> None:
     if not _git(root, "diff", "--cached", "--name-only", "--", *relative):
         return
     _git(root, "commit", "-m", message, "--", *relative)
+
+
+def commit_all(root: Path, message: str) -> bool:
+    """Stage and commit everything in the tree as one commit.
+
+    For a configured pipeline (spec 5.6): the relay itself makes the one commit
+    that finishes a task, instead of trusting an agent to. Returns False,
+    committing nothing, when there is nothing staged -- a task that touched no
+    files (for example, one that only recorded a decision) is not an error, and
+    repeating this call is always safe.
+    """
+    _git(root, "add", "-A")
+    if not _git(root, "diff", "--cached", "--name-only"):
+        return False
+    _git(root, "commit", "-m", message)
+    return True

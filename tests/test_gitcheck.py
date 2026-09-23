@@ -164,3 +164,24 @@ def test_commit_paths_commits_only_the_named_files(repo: Path):
     before = gitcheck.head_commit(repo)
     gitcheck.commit_paths(repo, [repo / "README.md"], "chore: again")
     assert gitcheck.head_commit(repo) == before
+
+
+def test_commit_all_stages_and_commits_everything(repo: Path):
+    (repo / "README.md").write_text("changed\n")
+    (repo / "other.txt").write_text("x")
+    committed = gitcheck.commit_all(repo, "feat: two files (T-1)")
+    assert committed is True
+    assert gitcheck.dirty_paths(repo) == []
+    assert (
+        gitcheck.commit_message(repo, gitcheck.head_commit(repo))
+        == "feat: two files (T-1)"
+    )
+
+
+def test_commit_all_does_nothing_and_returns_false_when_the_tree_is_clean(
+    repo: Path,
+):
+    before = gitcheck.head_commit(repo)
+    committed = gitcheck.commit_all(repo, "chore: nothing")
+    assert committed is False
+    assert gitcheck.head_commit(repo) == before

@@ -1561,3 +1561,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py
 
 <!-- whyline-event: 75e4d38c263f41c999280c598633b2a3 -->
+
+## 2026-09-23 — Implement commit_all as an idempotent whole-tree relay commit helper
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RCO-1
+
+**Because:** Configured pipelines require the relay to stage every tracked, deleted, and untracked change in one commit, while clean retries must succeed without creating an empty commit
+
+**Rejected:**
+
+- Reuse commit_paths — its path-scoped semantics intentionally leave unrelated changes untouched and cannot represent whole-tree ownership
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: caa16ef128894990b4c77de583c2d3e7 -->
+
+## 2026-09-23 — RCO-1 review: approve. commit_all() matches spec exactly (git add -A, returns False on clean tree, one commit otherwise); both new tests pass and full suite is green (100%, no failures); legacy code untouched
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RCO-1
+
+**Because:** Verified diff against the task spec line-for-line, confirmed dirty_paths/commit_message/head_commit helpers it relies on already exist and are used correctly, and ran uv run pytest -q with no failures
+
+**Files:** src/whyline_relay/gitcheck.py, tests/test_gitcheck.py
+
+<!-- whyline-event: 22ed51a599ae40368a8c1aecbe3dd056 -->
