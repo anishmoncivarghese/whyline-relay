@@ -1372,3 +1372,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/state.py, tests/test_state.py
 
 <!-- whyline-event: 11ed6f1867d84207b00ed8ebb71ecb57 -->
+
+## 2026-09-23 — Validate profile completion before ordinary unknown transition targets
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PCR-3
+
+**Because:** The required malformed-profile case must report that its profile cannot reach @complete, while valid completing profiles must still report unknown stage targets precisely
+
+**Rejected:**
+
+- Validate every unknown target first — this masks the required no-completion diagnostic for a profile whose only transition is invalid
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: d084c94a38a2443abb0ec11f05176b63 -->
+
+## 2026-09-23 — Approve PCR-3: [pipeline] compiles into a validated Pipeline with a stable resume fingerprint
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PCR-3
+
+**Because:** Diff matches the task spec: _load_pipeline compiles stages/profiles/roles with role-existence, @next-position, unknown-target, and per-profile @complete-reachability checks in the order recorded by the prior decision; [roles.backup]/[status_map] mutual-exclusion with [pipeline] is enforced; fingerprint is a stable sha256 of the canonicalized raw table. All 43 config tests plus the full 393-test suite pass unedited
+
+**Files:** src/whyline_relay/config.py, tests/test_config.py
+
+<!-- whyline-event: 665112736511472fa034775ecd7ca8f7 -->

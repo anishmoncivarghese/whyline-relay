@@ -6,6 +6,37 @@ import pytest
 from whyline_relay import config
 
 
+PIPELINE_TOML = '''
+[roles]
+implementer = "codex"
+tester = "claude"
+reviewer = "claude"
+[pipeline]
+default_profile = "full"
+[pipeline.profiles]
+full = ["draft", "test", "review"]
+quick = ["draft", "review"]
+[pipeline.stages.draft]
+role = "implementer"
+prompt = "implement"
+[pipeline.stages.draft.on]
+ready = "@next"
+[pipeline.stages.test]
+role = "tester"
+prompt = "test"
+max_visits = 5
+[pipeline.stages.test.on]
+passed = "@next"
+failed = "draft"
+[pipeline.stages.review]
+role = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+'''
+
+
 def write(root: Path, text: str) -> None:
     target = root / ".whyline" / "relay"
     target.mkdir(parents=True)
@@ -318,3 +349,91 @@ def test_a_claude_variant_is_login_checked_and_bypass_checked_like_claude_itself
     adapter = config.adapter_for(loaded, "claude-opus")
     assert adapter.login_argv == ("claude", "auth", "status")
     assert adapter.manages == Manages(True, True, True)
+
+
+def write_config(tmp_path, text):
+    target = tmp_path / ".whyline" / "relay" / "config.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    return tmp_path
+
+
+def test_a_real_pipeline_parses_correctly(tmp_path):
+    settings = config.load(write_config(tmp_path, PIPELINE_TOML))
+    pipe = settings.pipeline
+    assert pipe is not None
+    assert set(pipe.stages) == {"draft", "test", "review"}
+    assert pipe.stages["test"].max_visits == 5
+    assert pipe.stages["draft"].max_visits == 3  # the default
+    assert pipe.profiles["full"].stages == ("draft", "test", "review")
+    assert pipe.profiles["quick"].stages == ("draft", "review")
+    assert pipe.default_profile == "full"
+    assert pipe.roles["tester"].agent == "claude"
+    assert pipe.legacy is False
+    assert settings.pipeline_fingerprint  # non-empty
+    assert settings.backups == {}
+    assert settings.status_map == config.DEFAULTS["status_map"]
+
+
+def test_fingerprint_is_stable_and_sensitive(tmp_path):
+    a = config.load(write_config(tmp_path, PIPELINE_TOML))
+    b = config.load(write_config(tmp_path, PIPELINE_TOML))
+    assert a.pipeline_fingerprint == b.pipeline_fingerprint
+    changed = PIPELINE_TOML.replace("max_visits = 5", "max_visits = 6")
+    c = config.load(write_config(tmp_path, changed))
+    assert c.pipeline_fingerprint != a.pipeline_fingerprint
+
+
+def test_a_legacy_config_has_no_pipeline_and_an_empty_fingerprint(tmp_path):
+    settings = config.load(
+        write_config(tmp_path, '[roles]\nimplementer = "codex"\n')
+    )
+    assert settings.pipeline is None
+    assert settings.pipeline_fingerprint == ""
+
+
+@pytest.mark.parametrize(
+    "bad_toml, expect_substr",
+    [
+        (
+            PIPELINE_TOML
+            + '\n[roles.backup]\nimplementer = "claude"\n',
+            "[roles.backup] is not supported together with [pipeline]",
+        ),
+        (
+            PIPELINE_TOML + '\n[status_map]\nreview = "needs-review"\n',
+            "[status_map] is not supported together with [pipeline]",
+        ),
+        (
+            PIPELINE_TOML.replace('role = "tester"', 'role = "nope"', 1),
+            "names role 'nope', which is not in [roles]",
+        ),
+        (
+            PIPELINE_TOML.replace('rejected = "draft"', 'rejected = "nowhere"'),
+            "names unknown stage 'nowhere'",
+        ),
+        (
+            '[roles]\nimplementer = "codex"\n[pipeline]\ndefault_profile = "full"\n'
+            '[pipeline.profiles]\nfull = ["only"]\n[pipeline.stages.only]\n'
+            'role = "implementer"\nprompt = "implement"\n[pipeline.stages.only.on]\n'
+            'ready = "@next"\n',
+            'uses "@next" on the last stage of profile',
+        ),
+        (
+            '[roles]\nimplementer = "codex"\n[pipeline]\ndefault_profile = "full"\n'
+            '[pipeline.profiles]\nfull = ["only"]\n[pipeline.stages.only]\n'
+            'role = "implementer"\nprompt = "implement"\n[pipeline.stages.only.on]\n'
+            'ready = "blocked-forever"\n',
+            'has no stage that can reach "@complete"',
+        ),
+        (
+            PIPELINE_TOML.replace(
+                'default_profile = "full"', 'default_profile = "nonexistent"'
+            ),
+            "default_profile must name a profile",
+        ),
+    ],
+)
+def test_pipeline_validation_errors(tmp_path, bad_toml, expect_substr):
+    with pytest.raises(config.ConfigError, match=re.escape(expect_substr)):
+        config.load(write_config(tmp_path, bad_toml))
