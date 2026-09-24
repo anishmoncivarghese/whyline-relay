@@ -1705,3 +1705,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
 
 <!-- whyline-event: c91854eaa52d4c6ba1cc127387223668 -->
+
+## 2026-09-24 — Keep tester and security prompt bodies routing-agnostic
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RTS-2
+
+**Because:** Their domain instructions are reusable across configured stages, while actor and role are rendered dynamically and routing outcomes come from the generated footer
+
+**Rejected:**
+
+- Embed handoff outcomes or recipients in the templates — those values vary by pipeline stage and active profile
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: 9fbadd764c874d25afe3985ad5b9ba5a -->
+
+## 2026-09-24 — RTS-2 review: approve -- TEST/SECURITY templates use {sync_packet}/{round}/{actor}/{role} placeholders with no hardcoded outcomes or --to values, leaving routing to the footer; legacy IMPLEMENT/REVIEW/TEMPLATES untouched except the dict extension; rewritten preflight test correctly exercises 'docgen' as the new unresolvable-prompt case now that 'test' is built in
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RTS-2
+
+**Because:** Verified: full diff review, 59/59 targeted tests and full suite (uv run pytest -q) pass; confirmed via grep that only the TEMPLATES assignment line changed in prompts.py, no legacy body edited; confirmed preflight.py raises PromptError with the exact 'no prompt named' message the new test asserts on
+
+**Files:** src/whyline_relay/prompts.py, tests/test_preflight.py, tests/test_prompts.py
+
+<!-- whyline-event: ee08054d7c5a450d9f1abfcdd5665bfd -->

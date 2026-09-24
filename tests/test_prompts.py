@@ -96,6 +96,29 @@ def test_load_falls_back_to_the_builtin(tmp_path: Path):
     assert prompts.load(tmp_path, "review") == prompts.REVIEW
 
 
+def test_test_and_security_are_built_in_templates(tmp_path):
+    assert prompts.load(tmp_path, "test") == prompts.TEST
+    assert prompts.load(tmp_path, "security") == prompts.SECURITY
+
+
+def test_the_new_templates_use_the_configured_pipeline_placeholders():
+    for template in (prompts.TEST, prompts.SECURITY):
+        rendered = prompts.render(
+            template,
+            task_id="T-1",
+            task_text="do it",
+            sync_packet="PACKET",
+            round_=1,
+            review_feedback="",
+            actor="claude",
+            role="tester",
+            stage="test",
+            profile="full",
+        )
+        assert "{actor}" not in rendered and "{role}" not in rendered
+        assert "claude" in rendered and "tester" in rendered
+
+
 def test_load_raises_a_clear_error_for_an_unknown_prompt_with_no_override(tmp_path):
     with pytest.raises(prompts.PromptError, match="tester"):
         prompts.load(tmp_path, "tester")

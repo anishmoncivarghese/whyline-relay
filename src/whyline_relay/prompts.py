@@ -115,7 +115,77 @@ not exit without running whyline handoff: the relay reads that record to decide
 what happens next, and stops if it is missing.
 """
 
-TEMPLATES = {"implement": IMPLEMENT, "review": REVIEW}
+TEST = """{sync_packet}
+
+You are the tester for this task. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## How to test
+
+Read the implementation's diff. Judge whether its own tests genuinely exercise the
+behavior the task asked for -- not just that the code runs, but that a real defect
+in this change would make at least one test fail. A test that only calls the code
+and asserts nothing meaningful, or that would still pass if the implementation
+were wrong, does not count as coverage.
+
+Run the project's own test command yourself (for example, `uv run pytest -q`), not
+a command copied from the implementer's handoff. If it is denied, do not report
+this task as passing: report the outcome below for a human to decide, naming the
+exact denied command and the permission that must be added.
+
+If the tests are missing or too weak, you may add real ones yourself, but do not
+change the implementation to make a weak test pass -- that is the implementer's
+job, not yours.
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file <path> --actor {actor} --role {role} --task {task_id}
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+SECURITY = """{sync_packet}
+
+You are the security reviewer for this task. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## How to review
+
+Read the diff for this task with an attacker's eye, not the implementer's. Check
+for: unsanitized input reaching a shell command, a query, or a file path; secrets
+or credentials committed, logged, or sent somewhere they should not be; new
+permissions, network access, or file-system reach broader than the task needed;
+deserializing or evaluating untrusted input; and anything that weakens an existing
+check (auth, permission, validation) rather than adding one.
+
+This is not a second correctness review -- the reviewer already did that. Raise
+only a genuine security concern, not a style preference.
+
+Record your judgment:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file <path> --actor {actor} --role {role} --task {task_id}
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+TEMPLATES = {
+    "implement": IMPLEMENT,
+    "review": REVIEW,
+    "test": TEST,
+    "security": SECURITY,
+}
 
 
 def prompts_dir(root: Path) -> Path:

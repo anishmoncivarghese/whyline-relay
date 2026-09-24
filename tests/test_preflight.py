@@ -114,9 +114,40 @@ def test_a_bypass_flag_on_a_pipeline_agent_is_caught(tmp_path):
 
 
 def test_a_stage_naming_an_unresolvable_prompt_fails(tmp_path):
-    root = _pipeline_repo(tmp_path)
-    checks = preflight.run(root, runner=successful_runner())
-    assert any(c.status == "FAIL" and "no prompt named 'test'" in c.message for c in checks)
+    # "test" is now a built-in template (it ships real tester content), so this
+    # names a stage prompt that is neither built in nor overridden by anyone --
+    # a fresh, self-contained [pipeline] rather than PIPELINE_TOML, since a
+    # stage's prompt can't be overridden by concatenating extra_toml (TOML
+    # rejects a second definition of a table PIPELINE_TOML already has).
+    _git(tmp_path, "init", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "T")
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+        "[roles]\n"
+        'implementer = "codex"\n'
+        "[pipeline]\n"
+        'default_profile = "solo"\n'
+        "[pipeline.profiles]\n"
+        'solo = ["only"]\n'
+        "[pipeline.stages.only]\n"
+        'role = "implementer"\n'
+        'prompt = "docgen"\n'
+        "[pipeline.stages.only.on]\n"
+        'ready = "@complete"\n'
+    )
+    (tmp_path / "plan.md").write_text("- [ ] T-1: build it\n  Include tests.\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "setup")
+
+    checks = preflight.run(tmp_path, runner=successful_runner())
+    assert any(
+        c.status == "FAIL" and "no prompt named 'docgen'" in c.message
+        for c in checks
+    )
 
 
 def test_a_task_naming_an_unknown_relay_profile_fails(tmp_path):
