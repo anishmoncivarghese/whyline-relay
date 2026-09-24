@@ -1,6 +1,6 @@
 [project]
 name = "whyline-relay"
-version = "0.2.11"
+version = "0.2.12"
 description = "Runs a planned task list through Codex and Claude, routing on whyline handoffs."
 requires-python = ">=3.11"
 license = "Apache-2.0"

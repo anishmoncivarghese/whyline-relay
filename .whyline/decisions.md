@@ -1914,3 +1914,20 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: e6c7fcf802e342d08372d7c24b8cd733 -->
+
+## 2026-09-24 — Merged RIW-1/2: init's interactive agent/model wizard, built via whyline-relay on its own plan
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RIW-1..2
+
+**Because:** empirically pre-verified in a scratch copy before being handed to the relay, including the two subtlest correctness properties: assume_yes=True must never call confirm for any reason (verified with a confirm that raises on any call), and an explicit --implementer/--reviewer flag skips only that role's own agent question, never its model question, since no flag has ever existed for model selection at init time; the relay's own run produced the exact verified design with zero pauses, full suite (452 tests) and the acceptance battery pass with zero real regressions
+
+**Rejected:**
+
+- read an existing config.toml's [pipeline] table to ask about a configured pipeline's own roles — init has never read an existing config file at all (it only ever generates one from scratch or, with --overwrite, replaces it outright); teaching it to read one first is a separate, larger piece
+- add a CLI flag for model selection at init time (--implementer-model/--reviewer-model) — the interactive wizard is the only way to set a model at init time in this piece, matching D11's literal ask; a non-interactive equivalent is a separate small addition if ever wanted
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: d145d6c0098d4134a1e5ae036ca0ea58 -->
