@@ -1902,3 +1902,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/init.py, tests/test_init.py
 
 <!-- whyline-event: cc44d450d0cb44e5b4f273c1f2f4bd52 -->
+
+## 2026-09-24 — RIW-2 README addition matches spec exactly; documentation-only, no code/tests affected
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RIW-2
+
+**Because:** diff adds the specified interactive-wizard paragraph verbatim, placed immediately after the built-in agent bullet in 'Choosing which agent fills each role' as instructed; git diff --check clean; full test suite still passes with no failures
+
+**Files:** README.md
+
+<!-- whyline-event: e6c7fcf802e342d08372d7c24b8cd733 -->
