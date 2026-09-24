@@ -1677,3 +1677,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py
 
 <!-- whyline-event: d0bb0c75651445cda2ff9fab3d8d1122 -->
+
+## 2026-09-24 — Generate configured-stage handoff commands from live pipeline routing
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RTS-1
+
+**Because:** Outcome targets, @next resolution, and effective agents vary by stage and active profile, so the footer must emit exact commands at render time while keeping prompt bodies routing-agnostic
+
+**Rejected:**
+
+- Hardcode outcomes or recipients in templates — they can become stale and cannot represent profile-relative @next routing
+
+**Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
+
+<!-- whyline-event: 0402f4934a824eb0aad91a4507a73888 -->
+
+## 2026-09-24 — RTS-1 review: approve — stage_footer computes routing (outcomes, @next/@complete/@blocked resolution, recipients) fresh per call with no hardcoded outcome strings or recipients in template bodies
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RTS-1
+
+**Because:** Verified against 3-stage full/quick profile fixtures: @next resolves relative to active profile, @complete states task finished, @blocked asks for a human, and the no-commit notice is stated once and unconditionally; full suite (uv run pytest -q) passes, and 'tester' (not 'test') remains the unresolvable-prompt test case so Task 2's required rewrite is untouched
+
+**Files:** src/whyline_relay/prompts.py, tests/test_prompts.py
+
+<!-- whyline-event: c91854eaa52d4c6ba1cc127387223668 -->

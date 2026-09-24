@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from whyline_relay import pipeline as pipeline_module
 from whyline_relay import prompts
 
 
@@ -153,3 +154,67 @@ def test_render_output_for_the_builtin_templates_is_unchanged():
         profile="default",
     )
     assert before == after
+
+
+def _three_stage_pipeline():
+    return pipeline_module.Pipeline(
+        roles={
+            "implementer": pipeline_module.Role("implementer", agent="codex"),
+            "tester": pipeline_module.Role("tester", agent="claude"),
+            "reviewer": pipeline_module.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline_module.Stage(
+                "draft", "implementer", "implement", {"ready": "@next"}
+            ),
+            "test": pipeline_module.Stage(
+                "test", "tester", "test", {"passed": "@next", "failed": "draft"}
+            ),
+            "review": pipeline_module.Stage(
+                "review",
+                "reviewer",
+                "review",
+                {"approved": "@complete", "rejected": "draft"},
+            ),
+        },
+        profiles={
+            "full": pipeline_module.Profile("full", ("draft", "test", "review")),
+            "quick": pipeline_module.Profile("quick", ("draft", "review")),
+        },
+        default_profile="full",
+    )
+
+
+def test_stage_footer_lists_every_outcome_with_its_exact_recipient():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    footer = prompts.stage_footer(
+        pipe.stages["test"], pipe, "full", agents, "claude", "T-1"
+    )
+    assert "whyline handoff T-1 --from claude --to codex --status failed" in footer
+    assert "whyline handoff T-1 --from claude --to claude --status passed" in footer
+    assert "git commit" in footer  # the do-not-commit notice is always present
+
+
+def test_stage_footer_resolves_next_relative_to_the_active_profile():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    full = prompts.stage_footer(
+        pipe.stages["draft"], pipe, "full", agents, "codex", "T-1"
+    )
+    quick = prompts.stage_footer(
+        pipe.stages["draft"], pipe, "quick", agents, "codex", "T-1"
+    )
+    assert "stage 'test'" in full
+    assert "stage 'test'" not in quick
+    assert "stage 'review'" in quick
+
+
+def test_stage_footer_states_complete_and_blocked_correctly():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    footer = prompts.stage_footer(
+        pipe.stages["review"], pipe, "full", agents, "claude", "T-1"
+    )
+    assert "whyline handoff T-1 --from claude --to claude --status approved" in footer
+    assert "the task is finished" in footer
