@@ -1845,3 +1845,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/cli.py, tests/test_roles_cli.py
 
 <!-- whyline-event: 598dadf8fb5344c88ef2b30816e9e5a5 -->
+
+## 2026-09-24 — RRS-3 README addition matches spec exactly; documentation-only, no code/tests affected
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RRS-3
+
+**Because:** diff adds the specified roles-set paragraph verbatim, placed immediately after the existing roles status/reset documentation in Command reference; git diff --check clean; no code changed so test-exemption applies
+
+**Files:** README.md
+
+<!-- whyline-event: c0ae6dd8a8f74ba5a6dcbeed0fa80ac1 -->
