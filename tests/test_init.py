@@ -187,9 +187,90 @@ def test_init_overwrite_flag_has_the_required_help():
 
 
 def test_declining_writes_nothing(tmp_path: Path):
-    assert init.run(tmp_path, assume_yes=False, confirm=lambda prompt: "n") != 0
+    # Blank answers accept every wizard default (implementer/reviewer agent,
+    # then a model for each); "n" only answers the final write confirmation.
+    answers = iter(["", "", "", "", "n"])
+    assert init.run(
+        tmp_path, assume_yes=False, confirm=lambda prompt: next(answers)
+    ) != 0
     assert not (tmp_path / ".claude").exists()
     assert not (tmp_path / ".whyline" / "relay").exists()
+
+
+def test_wizard_asks_for_each_role_agent_and_model(tmp_path: Path):
+    answers = iter(["claude", "codex", "opus", "", "y"])
+    seen = []
+
+    def confirm(prompt):
+        seen.append(prompt)
+        return next(answers)
+
+    assert init.run(tmp_path, assume_yes=False, confirm=confirm) == 0
+    assert seen == [
+        "Implementer agent [codex]: ",
+        "Reviewer agent [claude]: ",
+        "Model for claude (blank for default): ",
+        "Model for codex (blank for default): ",
+        "Write these? [Y/n] ",
+    ]
+    text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
+    assert 'implementer = "claude"' in text and 'reviewer = "codex"' in text
+    assert "[agents.claude]" in text and 'model = "opus"' in text
+    assert "model" not in text.split("[agents.codex]")[1]
+
+
+def test_wizard_blank_answers_keep_every_default(tmp_path: Path):
+    answers = iter(["", "", "", "", "y"])
+    assert init.run(
+        tmp_path, assume_yes=False, confirm=lambda p: next(answers)
+    ) == 0
+    text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
+    assert 'implementer = "codex"' in text and 'reviewer = "claude"' in text
+    assert "model" not in text
+
+
+def test_wizard_rejects_an_agent_that_is_not_built_in(tmp_path: Path, capsys):
+    code = init.run(tmp_path, assume_yes=False, confirm=lambda p: "gemini")
+    assert code == 1
+    assert "not a built-in agent" in capsys.readouterr().err.lower()
+    assert not (tmp_path / ".whyline" / "relay").exists()
+
+
+def test_flags_still_skip_the_agent_prompts_but_not_the_model_prompt(
+    tmp_path: Path,
+):
+    # --implementer/--reviewer (as cli.py passes them) already answer the agent
+    # questions; the wizard still offers a model for each, since a flag never
+    # existed for that before this piece.
+    answers = iter(["opus", "", "y"])
+    seen = []
+
+    def confirm(prompt):
+        seen.append(prompt)
+        return next(answers)
+
+    code = init.run(
+        tmp_path,
+        assume_yes=False,
+        confirm=confirm,
+        implementer="claude",
+        reviewer="codex",
+    )
+    assert code == 0
+    assert seen == [
+        "Model for claude (blank for default): ",
+        "Model for codex (blank for default): ",
+        "Write these? [Y/n] ",
+    ]
+
+
+def test_yes_never_prompts_even_with_no_flags(tmp_path: Path):
+    def explode(prompt):
+        raise AssertionError(f"assume_yes=True must never prompt: {prompt!r}")
+
+    assert init.run(tmp_path, assume_yes=True, confirm=explode) == 0
+    text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
+    assert "[roles]" not in text  # exactly today's plain-default shape
 
 
 def test_says_codex_hooks_are_not_needed(tmp_path: Path, capsys):

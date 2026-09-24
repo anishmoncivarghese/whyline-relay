@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from whyline_relay import adapters, config, invocation, prompts
 from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
+
+
+def _ask_agent(confirm, role: str, default: str) -> str | None:
+    """Returns None for an answer that isn't a built-in agent name."""
+    try:
+        answer = confirm(f"{role.capitalize()} agent [{default}]: ").strip()
+    except EOFError:  # no terminal to prompt on: keep the default, same as --yes
+        return default
+    if not answer:
+        return default
+    return answer if answer in adapters.BUILTIN else None
+
+
+def _ask_model(confirm, agent: str) -> str | None:
+    try:
+        answer = confirm(f"Model for {agent} (blank for default): ").strip()
+    except EOFError:
+        return None
+    return answer or None
 
 
 def detect_stack(root: Path) -> str:
@@ -31,10 +51,29 @@ def run(
     implementer: str | None = None,
     reviewer: str | None = None,
 ) -> int:
+    interactive = not assume_yes
+    models: dict[str, str] = {}
+    if interactive and implementer is None:
+        implementer = _ask_agent(confirm, "implementer", "codex")
+        if implementer is None:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            print(f"Not a built-in agent ({builtins}).", file=sys.stderr)
+            return 1
+    if interactive and reviewer is None:
+        reviewer = _ask_agent(confirm, "reviewer", "claude")
+        if reviewer is None:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            print(f"Not a built-in agent ({builtins}).", file=sys.stderr)
+            return 1
     roles_given = implementer is not None or reviewer is not None
     implementer = implementer or "codex"
     reviewer = reviewer or "claude"
     agents_in_use = list(dict.fromkeys((implementer, reviewer)))
+    if interactive:
+        for name in agents_in_use:
+            model = _ask_model(confirm, name)
+            if model:
+                models[name] = model
     stack = detect_stack(root)
     permission_files: dict[str, str] = {}
     for name in agents_in_use:
@@ -75,6 +114,8 @@ def run(
                 f"[agents.{name}]\n"
                 f"command = {json.dumps(command)}\n"
             )
+            if name in models:
+                config_text += f'model = "{models[name]}"\n'
             if name != agents_in_use[-1]:
                 config_text += "\n"
     else:

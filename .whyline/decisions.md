@@ -1874,3 +1874,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/roles.py, src/whyline_relay/cli.py
 
 <!-- whyline-event: 7056cf0ea0d84aa8a77ab1284b02bfb7 -->
+
+## 2026-09-24 — Interactive init writes explicit role blocks while --yes preserves the legacy plain-default config
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RIW-1
+
+**Because:** Wizard answers, including blank defaults, represent an interactive role selection and may carry per-agent models; non-interactive defaults must remain byte-for-byte unchanged
+
+**Rejected:**
+
+- Treat blank wizard answers like --yes — that would omit the roles selected by the wizard and provide no place for model choices
+
+**Files:** src/whyline_relay/init.py
+
+<!-- whyline-event: eb5cd94fc53048db98740e5f97af9b5b -->
+
+## 2026-09-24 — Approve RIW-1: wizard asks per-role agent and model questions
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RIW-1
+
+**Because:** Verified _ask_agent/_ask_model match spec exactly (None signals non-built-in agent, blank keeps default/omits model key); run() only adds interactive branches when assume_yes=False and flags are absent, leaving the assume_yes=True and flag-given paths byte-identical; full suite (359 tests incl. 4 new wizard tests + updated test_declining_writes_nothing) passes
+
+**Files:** src/whyline_relay/init.py, tests/test_init.py
+
+<!-- whyline-event: cc44d450d0cb44e5b4f273c1f2f4bd52 -->
