@@ -1761,3 +1761,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
 
 <!-- whyline-event: 2170eab3194a449e9ddbbd6fad8c614e -->
+
+## 2026-09-24 — RTS-4 README replacement matches spec exactly; documentation-only, no code/tests affected
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RTS-4
+
+**Because:** diff swaps the outdated single-prompts paragraph for the built-in test/security prompts paragraph plus the new routing-footer paragraph, verbatim against the task spec; placeholders correctly rendered as {actor}/{role}/{stage}/{profile} matching existing file convention
+
+**Files:** README.md
+
+<!-- whyline-event: 2f0353f4190c4c499cc31a627dcfa732 -->
