@@ -1857,3 +1857,20 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: c0ae6dd8a8f74ba5a6dcbeed0fa80ac1 -->
+
+## 2026-09-24 — Merged RRS-1..3: whyline-relay roles set, plus pipeline-aware roles status/reset, built via whyline-relay on its own plan
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RRS-1..3
+
+**Because:** empirically pre-verified in a scratch copy against 9 acceptance/unit tests before being handed to the relay, catching a real bug in the process: an explicit --agent with no --model was still triggering an interactive model prompt, which would hang a scripted/CI call -- fixed to only prompt for model when the call is genuinely fully-interactive (agent also omitted); config.toml is edited with a minimal targeted text upsert, not a TOML library, since the project has zero runtime dependencies -- verified against 8 real config.toml shapes and re-parsed with tomllib to confirm validity
+
+**Rejected:**
+
+- let roles set invent a brand-new aliased agent name (e.g. claude-opus) from --agent NAME --model MODEL when NAME isn't yet configured — ambiguous without knowing which builtin adapter to alias; scoped to only accepting an already-known name
+- add a TOML-writing dependency (tomli-w or similar) for a safer round-trip edit — against the project's deliberate zero-runtime-dependency constraint; a targeted text upsert touching only the changed line(s) is sufficient for what roles set ever needs to change
+
+**Files:** src/whyline_relay/roles.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 7056cf0ea0d84aa8a77ab1284b02bfb7 -->
