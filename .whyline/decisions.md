@@ -1661,3 +1661,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: c40f4d2bd9dd4251be8e4980f8d53065 -->
+
+## 2026-09-24 — Merged RCO-1..3: relay-side commit ownership for configured pipelines, built via whyline-relay on its own plan
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RCO-1..3
+
+**Because:** empirically pre-verified in a scratch copy against 5 independent acceptance tests before being handed to the relay, including the trickiest new property (crash between approval and commit resumes straight to the commit with zero agent re-runs); the relay's own run produced byte-identical code, full suite (356 tests) and the acceptance battery pass with zero real regressions; one real pause during the run was a Claude usage-limit hit mid-review, not a design defect -- the commit it had already made was correct, and resume recovered cleanly with no duplicate work
+
+**Rejected:**
+
+- let the terminal stage keep committing (0.2.8's shape) — spec 5.6 explicitly removes an entire class of bug (a committing agent's own judgment being wrong) by having the relay itself make the one finishing commit
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: d0bb0c75651445cda2ff9fab3d8d1122 -->
