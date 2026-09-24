@@ -1773,3 +1773,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: 2f0353f4190c4c499cc31a627dcfa732 -->
+
+## 2026-09-24 — Merged RTS-1..4: built-in tester/security-review prompts and the relay-generated routing footer, built via whyline-relay on its own plan
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RTS-1..4
+
+**Because:** empirically pre-verified in a scratch copy against 5 independent acceptance tests before being handed to the relay -- footer output checked for correctness across multiple stages/profiles/outcomes, and a real end-to-end run using the built-in tester prompt with zero override files proven via the actual loop; the relay's own run produced correct code, full suite (421 tests, up from 415 -- Codex/Claude added real coverage during review) and the acceptance battery pass with zero real regressions beyond two already-known non-issues plus one more pre-existing acceptance test whose pinned 'test is unresolvable' premise this piece correctly supersedes
+
+**Rejected:**
+
+- hardcode routing commands into the built-in test/security prompt bodies — would require the prompt author to know the pipeline's exact outcome vocabulary and agent assignments in advance, exactly the staleness risk spec 5.7 identifies; the protocol footer generates them fresh every turn instead
+
+**Files:** src/whyline_relay/prompts.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: f13d9f4715fb46569010b0e2963877e9 -->
