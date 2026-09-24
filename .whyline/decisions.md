@@ -1789,3 +1789,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py, src/whyline_relay/loop.py
 
 <!-- whyline-event: f13d9f4715fb46569010b0e2963877e9 -->
+
+## 2026-09-24 — Use the requested role name throughout pipeline-aware status and permanent role edits
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RRS-1
+
+**Because:** Configured pipelines can define arbitrary roles, so status labels, prompts, TOML keys, and summaries must derive from the selected role
+
+**Rejected:**
+
+- Hard-code implementer as in the implementation sketch — it would silently update or report the wrong role for reviewer and custom pipeline roles
+
+**Files:** src/whyline_relay/roles.py
+
+<!-- whyline-event: 48701d480fed49bd8577dd92b03b98da -->
+
+## 2026-09-24 — Approve RRS-1: current_roles/status/set_role implementation matches spec and passes full suite
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RRS-1
+
+**Because:** status and set_role correctly use the requested role name (not hardcoded 'reviewer', per prior decision), validation rules match config.load()'s exact agent/model rules, --agent-only calls never prompt, text-upsert edits touch only the target line/table, and tests cover legacy, pipeline, and error paths; full suite passes 12/12 new tests plus no regressions
+
+**Files:** src/whyline_relay/roles.py, tests/test_roles.py
+
+<!-- whyline-event: c330ea8e7a354122a84c55d086d64d2f -->
