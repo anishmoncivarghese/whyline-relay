@@ -199,10 +199,25 @@ def build_parser() -> argparse.ArgumentParser:
         "role",
         nargs="?",
         default=None,
-        choices=("implementer", "reviewer"),
         help="Reset only this role (default: every role).",
     )
     roles_reset.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    roles_set = roles_sub.add_parser(
+        "set", help="Permanently point a role at an agent"
+    )
+    roles_set.add_argument(
+        "role",
+        help="The role to change (implementer, reviewer, or a configured pipeline role)",
+    )
+    roles_set.add_argument("--agent", default=None, help="The agent name to use")
+    roles_set.add_argument(
+        "--model",
+        default=None,
+        help="Optional model, for a built-in agent name (codex or claude)",
+    )
+    roles_set.add_argument(
         "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
 
@@ -363,8 +378,26 @@ def cmd_roles(args: argparse.Namespace) -> int:
     settings = config.load(root)
     if args.roles_command == "status":
         print(roles.status(root, settings))
-    else:
-        print(roles.reset(root, args.role))
+        return EXIT_OK
+    if args.roles_command == "set":
+        try:
+            print(
+                roles.set_role(
+                    root, settings, args.role, agent=args.agent, model=args.model
+                )
+            )
+        except roles.RoleSetError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return EXIT_ERROR
+        return EXIT_OK
+    if args.role is not None and args.role not in roles.current_roles(settings):
+        valid = ", ".join(sorted(roles.current_roles(settings)))
+        print(
+            f"Error: {args.role!r} is not a configured role ({valid})",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    print(roles.reset(root, args.role))
     return EXIT_OK
 
 

@@ -1817,3 +1817,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/roles.py, tests/test_roles.py
 
 <!-- whyline-event: c330ea8e7a354122a84c55d086d64d2f -->
+
+## 2026-09-24 — Validate reset role names at runtime from the loaded configuration
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RRS-2
+
+**Because:** Configured pipelines can define arbitrary role names, so argparse cannot know the valid set until config.load() and roles.current_roles() run
+
+**Rejected:**
+
+- Keep fixed argparse choices — this would reject valid custom pipeline roles before command dispatch
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 64197ec4b2ee4893a935dcdc8b6ff4ce -->
+
+## 2026-09-24 — RRS-2 approved: roles set wired into the CLI, roles reset validates dynamically against current_roles()
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RRS-2
+
+**Because:** cmd_roles dispatches set to roles.set_role and maps RoleSetError to EXIT_ERROR with a stderr message; reset drops its fixed argparse choices and instead checks membership in roles.current_roles(settings) at runtime, so pipeline-defined roles like 'tester' are accepted while unknown roles are rejected with a clear error; non-interactive safety (--agent without --model never prompts) is preserved by roles.set_role itself, unchanged by this task; 5 new tests cover set success (plain and with --model), set's unknown-agent error, and reset's dynamic accept/reject; full suite passes with no regressions
+
+**Files:** src/whyline_relay/cli.py, tests/test_roles_cli.py
+
+<!-- whyline-event: 598dadf8fb5344c88ef2b30816e9e5a5 -->
