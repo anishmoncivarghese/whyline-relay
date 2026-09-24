@@ -337,6 +337,9 @@ reviewer    = "claude"
 By default the implementer is `codex` and the reviewer is `claude`; nothing here changes unless you set `[roles]`. Since 0.2.2, either role can be:
 
 - **A built-in agent**, `codex` or `claude`, in either role. `init --implementer claude --reviewer codex` sets both up, writing only the permission file the agents in use need (here, still `claude-settings.json`, since Claude fills a role either way). The same agent can fill both roles (`implementer = "claude"` and `reviewer = "claude"`); `doctor` then warns that the review is not independent, but does not stop you.
+
+Run `init` with neither flag, in a real terminal, and it asks instead: which agent for implementer and reviewer (blank keeps `codex`/`claude`), then, since 0.2.12, an optional model for each — the same interactive wizard `roles set` already gave you for changing a role later. `init --yes` (used by every scripted or CI setup) never asks anything and keeps producing exactly what it always has.
+
 - **A generic agent** — any other headless command, run the same way the built-ins are: with the prompt appended as its last argument. Configure it explicitly; there is no default and no guessing:
 
   ```toml
