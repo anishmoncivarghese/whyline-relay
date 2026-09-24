@@ -482,7 +482,7 @@ A stage's `on` table maps the outcome your prompt tells the agent to hand off wi
 
 **Prompts for anything other than `implement`/`review` are yours to write.** A stage's `prompt` name is looked up under `.whyline/relay/prompts/<name>.md` first, the two built-ins second; naming anything else with no override file is a `doctor` failure, not a runtime surprise. Custom prompts get four more placeholders beyond the usual ones: `{actor}` (the agent running), `{role}`, `{stage}`, and `{profile}`.
 
-**Only a stage that can reach `"@complete"` may commit** — the same HEAD-check the reviewer has always been held to, generalized to whichever stage(s) your graph lets finish the task.
+**No stage commits — the relay does.** Every stage's turn is HEAD-checked, including the terminal one: an agent that runs `git commit` itself is paused with an exact recovery command. Once the terminal stage hands off its accepted outcome, the relay stages everything and makes the one commit that finishes the task itself, using that handoff's `--summary` as the message. This removes an entire class of bug (a committing agent's own judgment being wrong) rather than only guarding against it.
 
 **Crash-safe by design:** a pause mid-pipeline saves exactly which stage and how many times each stage has run; `resume` picks up there, never re-running a stage whose handoff already exists, never silently skipping one either. If `[pipeline]` changes between a pause and a `resume`, the relay refuses to guess and asks you to resolve it by hand.
 

@@ -1649,3 +1649,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py
 
 <!-- whyline-event: 971bc356cb6f4b288da1968639ba252d -->
+
+## 2026-09-24 — RCO-3 README replacement matches spec exactly; documentation-only, no code/tests affected
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RCO-3
+
+**Because:** diff is a single-paragraph swap of the outdated commit-ownership claim for the relay-owned commit description, verbatim against the task spec; full suite still passes (356 tests, 100%)
+
+**Files:** README.md
+
+<!-- whyline-event: c40f4d2bd9dd4251be8e4980f8d53065 -->
