@@ -285,6 +285,8 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 
 **`roles status`** shows each role's configured agent, and, if a backup has taken over, which one and why. **`roles reset [ROLE]`** clears a role's backup switch (or every role's, with no argument), reverting to the configured agent. Both take `--repo REPO`. See [Backup agents](#backup-agents).
 
+**`whyline-relay roles set <ROLE> [--agent NAME] [--model NAME]`** permanently points a role at an agent — a real edit to `config.toml`, unlike `roles reset`, which only clears a temporary failover switch. Works for any role the current config defines: `implementer`/`reviewer` normally, or a configured `[pipeline]`'s own role names. Called with no `--agent`/`--model`, it prompts for both interactively (blank keeps the current agent; a model prompt only appears for a built-in agent name). Refuses an agent name that isn't a built-in or an already-configured one, the same validation `config.toml` itself is held to.
+
 ## Using it from another program
 
 Call `whyline_relay.cli.main` with the command arguments and the name users invoked:
