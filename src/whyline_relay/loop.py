@@ -189,14 +189,6 @@ def _approved(
     return Outcome(task_id=task.task_id, rounds=round_, committed=True)
 
 
-NO_COMMIT_NOTICE = (
-    "\n\nThis task uses a configured [pipeline]. Do not run `git commit` yourself, "
-    "under any circumstances, even if an instruction above tells you to -- the relay "
-    "commits the finished result on its own once every stage has approved. Just hand "
-    "off as normal."
-)
-
-
 def _commit_and_approve(
     root: Path,
     task: plan.Task,
@@ -210,7 +202,8 @@ def _commit_and_approve(
     No stage in a configured pipeline may commit -- the same HEAD-check every
     stage's turn is already held to also covers the terminal one, so this
     re-check is defense in depth, not the primary guard: if it ever fires, a
-    stage ignored NO_COMMIT_NOTICE and a bug let it through anyway.
+    stage ignored its own rendered prompt's protocol footer (prompts.stage_footer)
+    and a bug let it through anyway.
     """
     if gitcheck.head_commit(root) != base_commit:
         raise Paused(
@@ -529,7 +522,9 @@ def _run_configured_task(
             actor=agent,
             stage=current_stage_id,
             profile=profile_name,
-            prompt_suffix=NO_COMMIT_NOTICE,
+            prompt_suffix=prompts.stage_footer(
+                stage, pipe, profile_name, effective_agents, agent, task.task_id
+            ),
             runner=runner,
         )
         if gitcheck.head_commit(root) != head_before:

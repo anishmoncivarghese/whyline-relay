@@ -1733,3 +1733,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py, tests/test_preflight.py, tests/test_prompts.py
 
 <!-- whyline-event: ee08054d7c5a450d9f1abfcdd5665bfd -->
+
+## 2026-09-24 — Render the routing footer at each configured-pipeline agent turn
+
+**Actor:** codex
+**Role:** implementer
+**Task:** RTS-3
+
+**Because:** Routing outcomes, recipients, profile, actor, and task identity are stage-specific runtime data, while legacy turns must remain footer-free
+
+**Rejected:**
+
+- Keep a shared no-commit suffix — it cannot express stage-specific routing mechanics required by the configured pipeline
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: c3b01a1f91b749e4b6126f92013f1e61 -->
+
+## 2026-09-24 — RTS-3 approved: configured-pipeline turns now render prompts.stage_footer instead of the static NO_COMMIT_NOTICE
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RTS-3
+
+**Because:** Diff matches the plan exactly: NO_COMMIT_NOTICE removed, docstring updated, _run_agent call site now computes a stage-specific footer via prompts.stage_footer(stage, pipe, profile_name, effective_agents, agent, task.task_id) with all variables correctly in scope; new test removes the fixture's test.md override to prove the built-in TEST template plus generated footer alone drives correct routing with no per-repo authoring; it exercises real handoff/gitcheck plumbing via _scripted_run rather than mocking routing; full suite passes at 421/421 with no changes to legacy implement.md/review.md paths
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 2170eab3194a449e9ddbbd6fad8c614e -->

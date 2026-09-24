@@ -156,6 +156,19 @@ def test_a_three_stage_pipeline_runs_end_to_end_with_a_bounce_back(repo, monkeyp
     assert "(T-1)" in subject
 
 
+def test_a_tester_stage_using_the_built_in_prompt_routes_correctly(repo, monkeypatch):
+    (repo / ".whyline" / "relay" / "prompts" / "test.md").unlink()
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(["claude:ready", "claude:passed", "claude:approved"]),
+    )
+    outcome = loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert outcome.committed is True
+
+
 def test_a_stage_hitting_its_visit_cap_pauses_instead_of_looping(repo, monkeypatch):
     pipe = make_pipeline(max_visits=1)
     settings = settings_with_pipeline(repo, pipe)
