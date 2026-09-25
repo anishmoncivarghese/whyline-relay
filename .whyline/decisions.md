@@ -2183,3 +2183,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: d93b7bff556c4d46bbef3dbb0d3d6100 -->
+
+## 2026-09-25 — Merged the planner workflow (PLN-1..9) into main after a full scratch-verification pass and real relay run
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-MERGE
+
+**Because:** Every task was independently rebuilt in a throwaway probe first (35 new tests, 4 real bugs caught: a template heading mismatch that also broke fake_pipeline_agent.py's task-id extraction, missing whyline-note placeholders in the new prompts, a shared-vs-fresh scripted-response test bug, and a --discard/running-check ordering gap), then the real whyline-relay run completed all 9 tasks cleanly (one pause: claude tried a piped test command and was denied -- an agent instruction-following slip the REVIEW prompt already warns against, not a code defect -- resolved by resuming with --allow-dirty since the tree only held the implementer's legitimate in-progress work). The cherry-picked tree was diff-verified byte-for-byte against the sandbox before merging, and the full suite plus a real subprocess end-to-end run (fake codex/claude executables, the real whyline CLI) both passed against the actual merged implementation, not just the reference probe.
+
+**Rejected:**
+
+- Trusting the plan document's original design without empirical rebuild — an earlier draft of the design had blocked reachable via a graceful in-process branch with no transition ever mapping to it, and PlanState missing stage_visits -- both would have shipped broken if not caught by grounding against the real code before writing the plan
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: 6bee42219d434d90a78cfdd642db096a -->
