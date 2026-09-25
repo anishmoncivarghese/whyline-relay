@@ -15,6 +15,7 @@ from whyline_relay import (
     invocation,
     pipeline as pipeline_module,
     plan,
+    planner,
     prompts,
     running,
 )
@@ -316,6 +317,15 @@ def _plan_checks(
             )
         if len(task.text.splitlines()) == 1:
             checks.append(_result("warn", f"task {task.task_id!r} has no detail lines"))
+        if task.task_id == planner.PLAN_TASK_ID:
+            checks.append(
+                _result(
+                    "warn",
+                    f"task {task.task_id!r} uses the reserved id the planner uses for its "
+                    "own handoffs; a real plan.md task with this id can be silently "
+                    "confused with a plan-drafting session",
+                )
+            )
         if task.profile is not None:
             if pipeline is None:
                 checks.append(

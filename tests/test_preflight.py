@@ -544,6 +544,15 @@ def test_plan_style_warnings_are_per_task_and_do_not_count_as_failures(ready_rep
     assert preflight.failures(warnings) == 0
 
 
+def test_a_task_named_after_the_reserved_plan_id_warns(ready_repo: Path):
+    (ready_repo / "plan.md").write_text("- [ ] __plan__: x\n  y.\n")
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    assert any(
+        c.status == "warn" and "__plan__" in c.message and "reserved" in c.message
+        for c in checks
+    )
+
+
 def test_dirty_tree_fails_unless_allowed(ready_repo: Path):
     (ready_repo / "scratch.txt").write_text("dirty")
     blocked = preflight.run(ready_repo, runner=successful_runner())

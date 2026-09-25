@@ -2143,3 +2143,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/cli.py, tests/test_planner_cli.py
 
 <!-- whyline-event: c8dd0a99d0564673b34f56cbe410fc46 -->
+
+## 2026-09-25 — Warn when a real plan task uses the planner handoff id
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-8
+
+**Because:** The reserved __plan__ id identifies planner handoffs, so accepting it silently for a real task can confuse task execution with a drafting session; comparing against planner.PLAN_TASK_ID keeps the check aligned with the canonical value
+
+**Rejected:**
+
+- Hard-code __plan__ in preflight — it could drift from the planner's reserved-id constant
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 2ba9b825be594d36bca72a81cc13b84e -->
+
+## 2026-09-25 — PLN-8 review: approve — warn check uses planner.PLAN_TASK_ID (not hardcoded __plan__), placed correctly in the per-task loop after the no-detail-lines warn and before the profile check
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-8
+
+**Because:** Verified: full diff review, full suite (uv run pytest -q) passes 505/505; grepped planner.py to confirm PLAN_TASK_ID == '__plan__' matches the constant the check compares against; test asserts both '__plan__' and 'reserved' appear in a warn-status check
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 2e0a3034d3014b379d9baa1f4a80fb4a -->
