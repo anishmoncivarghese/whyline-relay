@@ -187,6 +187,19 @@ Passing the same `--branch` keeps the work stacked. Without it, each plan gets i
 
 Run `whyline-relay plan-format` to print the format rules and a paste-ready prompt. To copy only the prompt into another tool, use `whyline-relay plan-format --prompt`.
 
+### Drafting a plan instead of writing one by hand
+
+`whyline-relay plan "<free-text description>"` drafts a `plan.md` for you: one agent (`[planner].draft`, defaulting to your implementer) writes a candidate plan, a second agent (`[planner].review`, defaulting to your reviewer) checks it for structural problems only — never whether it's the *right* plan, which stays your call — and bounces it back for another draft if something's missing (`[planner].max_visits`, default 3). Once it passes, you're shown the draft and asked to approve it, request changes with feedback (unbounded — keep iterating as long as you like), or discard it. Approving writes and commits the real `plan.md` and offers to run `whyline-relay start` on it immediately.
+
+```toml
+[planner]
+draft = "codex"     # defaults to your implementer's agent if omitted
+review = "claude"   # defaults to your reviewer's agent if omitted
+max_visits = 3
+```
+
+A plan session checkpoints the same way a running task does — `whyline-relay resume` picks an interrupted draft/review loop, or an unanswered approval gate, back up; `whyline-relay plan --discard` abandons one without resuming it.
+
 ## Running it
 
 Run `whyline-relay start` in a terminal of its own, not inside an agent session. The relay launches Codex and Claude itself; you do not open them.

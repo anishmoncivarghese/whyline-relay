@@ -2171,3 +2171,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
 
 <!-- whyline-event: 2e0a3034d3014b379d9baa1f4a80fb4a -->
+
+## 2026-09-25 — PLN-9 README addition matches spec exactly; documentation-only, no code/tests affected
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-9
+
+**Because:** diff adds the specified plan-drafting subsection verbatim, placed immediately after the existing plan-format documentation as instructed; content verified against config.py (max_visits default 3, draft/review role defaults) and cli.py (--discard, resume dispatch); full test suite passes (505 tests, 100%)
+
+**Files:** README.md
+
+<!-- whyline-event: d93b7bff556c4d46bbef3dbb0d3d6100 -->
