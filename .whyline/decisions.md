@@ -2199,3 +2199,60 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/planner.py
 
 <!-- whyline-event: 6bee42219d434d90a78cfdd642db096a -->
+
+## 2026-09-25 — Read .whyline/model.json directly as read-only JSON
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RMI-1
+
+**Because:** whyline-relay only reads the file, whyline CLI is the single writer, and there is no whyline CLI command to invoke for reading
+
+**Rejected:**
+
+- Import whyline library — whyline-relay avoids library coupling to whyline
+- Shell out to whyline command — whyline CLI has no command for reading model.json
+
+**Files:** src/whyline_relay/whyline_model.py
+
+<!-- whyline-event: b65ee72d17f74d629a7ce11e6928e23c -->
+
+## 2026-09-25 — RMI-1 review: request malformed top-level validation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RMI-1
+
+**Because:** read() returns valid non-object JSON unchanged, violating the dict interface and the requirement that malformed model files be treated as absent; add a regression test and return {} unless the decoded value is a dict
+
+**Files:** src/whyline_relay/whyline_model.py, tests/test_whyline_model.py
+
+<!-- whyline-event: 8373c1a3545144d7a91cf50fb3e31ed1 -->
+
+## 2026-09-25 — Treat non-dict JSON in model.json as absent
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RMI-1
+
+**Because:** Valid JSON values like lists or primitives violate the mapping interface expected by callers and represent malformed model configuration
+
+**Rejected:**
+
+- Raise TypeError — callers expect a missing or malformed model file to read as absent without crashing
+
+**Files:** src/whyline_relay/whyline_model.py, tests/test_whyline_model.py
+
+<!-- whyline-event: 7845911f57294f64a678e370ea922859 -->
+
+## 2026-09-25 — RMI-1 review round 2: approve malformed model handling
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RMI-1
+
+**Because:** read() now preserves its dict contract for every valid JSON top-level type, the regression tests exercise all non-object JSON categories, and both focused and full suites pass
+
+**Files:** src/whyline_relay/whyline_model.py, tests/test_whyline_model.py
+
+<!-- whyline-event: a68dde67619c4458a4d3a8c999f022e6 -->
