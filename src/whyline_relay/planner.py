@@ -15,9 +15,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from whyline_relay import config, failover, gitcheck, handoff
+from whyline_relay import config, failover, gitcheck, handoff, invocation
 from whyline_relay import pipeline as pipeline_module
-from whyline_relay import loop, plan, prompts, state, whylinecmd
+from whyline_relay import plan, prompts, state, whylinecmd
+from whyline_relay import loop
 
 
 PLAN_TASK_ID = "__plan__"
@@ -229,3 +230,127 @@ def _run_pipeline(
         round_ += 1
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
         loop.check_visit_cap(pipe, current_stage_id, stage_visits, task)
+
+
+def start(
+    root: Path,
+    settings: config.Config,
+    description: str,
+    *,
+    echo: bool = True,
+    confirm=input,
+    runner: failover.Runner = subprocess.run,
+) -> str:
+    """Start a brand-new plan session: draft, auto-review, then the human gate."""
+    if state.load_plan(root) is not None:
+        raise PlanAlreadyInProgress(
+            "a plan draft is already in progress; run "
+            f"`{invocation.command('resume')}` or `{invocation.command('plan --discard')}`"
+        )
+    _run_pipeline(root, settings, description, echo=echo, runner=runner)
+    return _human_gate(
+        root, settings, description, confirm=confirm, echo=echo, runner=runner
+    )
+
+
+def resume(
+    root: Path,
+    settings: config.Config,
+    saved: state.PlanState,
+    *,
+    echo: bool = True,
+    confirm=input,
+    runner: failover.Runner = subprocess.run,
+) -> str:
+    """Resume an in-flight plan session from its checkpoint."""
+    if saved.stage != "@complete":
+        _run_pipeline(
+            root,
+            settings,
+            saved.description,
+            current_stage_id=saved.stage,
+            round_=saved.round,
+            stage_visits=saved.stage_visits,
+            feedback=saved.feedback,
+            consult_handoff=True,
+            echo=echo,
+            runner=runner,
+        )
+    return _human_gate(
+        root, settings, saved.description, confirm=confirm, echo=echo, runner=runner
+    )
+
+
+def discard(root: Path) -> str:
+    saved = state.load_plan(root)
+    if saved is None:
+        return "Nothing to discard."
+    state.clear_plan(root)
+    return f"Discarded. The draft is still at {saved.draft_path}, if you want it."
+
+
+def _human_gate(
+    root: Path,
+    settings: config.Config,
+    description: str,
+    *,
+    confirm=input,
+    echo: bool = True,
+    runner: failover.Runner = subprocess.run,
+) -> str:
+    """The three-way human approval gate, reached once the inner pipeline has
+    checkpointed "@complete". Reads the draft from disk, not from memory, so a
+    resumed session sees exactly the draft a crash interrupted (spec 5.4).
+    """
+    draft = draft_path(root)
+    text = draft.read_text(encoding="utf-8")
+    print(text)
+    try:
+        answer = confirm("Approve, [r]equest changes, or [d]iscard? [A/r/d] ").strip().lower()
+    except EOFError:
+        answer = "d"
+    if answer.startswith("r"):
+        try:
+            feedback = confirm("What should change? ").strip()
+        except EOFError:
+            feedback = ""
+        _run_pipeline(
+            root,
+            settings,
+            description,
+            current_stage_id="draft",
+            round_=1,
+            stage_visits={"draft": 1},
+            feedback=feedback,
+            echo=echo,
+            runner=runner,
+        )
+        return _human_gate(
+            root, settings, description, confirm=confirm, echo=echo, runner=runner
+        )
+    if answer.startswith("d"):
+        state.clear_plan(root)
+        return f"Discarded. The draft is still at {draft}, if you want it."
+    target = root / settings.plan
+    if target.exists():
+        try:
+            overwrite = confirm(f"{target} already exists. Replace it? [y/N] ").strip().lower()
+        except EOFError:
+            overwrite = "n"
+        if not overwrite.startswith("y"):
+            return f"Not approved: {target} already exists and was not replaced."
+    target.write_text(text, encoding="utf-8")
+    gitcheck.commit_paths(
+        root, [target], f"docs: add plan drafted by {settings.planner.draft}"
+    )
+    state.clear_plan(root)
+    try:
+        start_now = confirm("Start whyline-relay on this plan now? [y/N] ").strip().lower()
+    except EOFError:
+        start_now = "n"
+    if not start_now.startswith("y"):
+        return f"Wrote {target}. Run `{invocation.command('start')}` when ready."
+    branch = f"{settings.branch_prefix}{target.stem}"
+    gitcheck.ensure_branch(root, branch)
+    outcomes = loop.run_plan(root, settings, target, branch=branch, only=None)
+    return f"Plan complete: {len(outcomes)} task(s) approved and committed."

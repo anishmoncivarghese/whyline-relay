@@ -2083,3 +2083,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/planner.py
 
 <!-- whyline-event: b1d54da729fb4f42b013578fd932f711 -->
+
+## 2026-09-25 — Reset unattended stage visit counts for each human-requested redraft
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-6
+
+**Because:** Human request-changes rounds are explicitly unbounded, while each fresh draft/review pipeline must still enforce max_visits internally
+
+**Rejected:**
+
+- Carry prior stage visit counts into the redraft — repeated human feedback could incorrectly trip the unattended-loop cap
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: 7500c57bf08542c8a5dedece3643d297 -->
+
+## 2026-09-25 — PLN-6 review: approve -- start/resume/discard/_human_gate are verbatim to spec, no pipeline stage commits/ticks/HEAD-checks, only the human gate commits plan.md after approval, and all 5 new tests plus the full suite pass
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-6
+
+**Because:** Implementation matches the task's prescribed code exactly (only import grouping differs, as with PLN-5); confirmed commit_paths/ensure_branch/invocation.command signatures match the calls; the human request-changes gate recurses unbounded by design per spec, matching the constraint that human rounds are never subject to max_visits
+
+**Rejected:**
+
+- Flag the unbounded _human_gate recursion as a defect -- it is the literal spec-mandated behavior (human rounds are explicitly exempt from max_visits), not an accidental omission
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: 420977e1a1cd4562a91a6961341b7fe4 -->

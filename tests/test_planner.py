@@ -73,6 +73,13 @@ def _scripted_run(specs: list[str]):
     return run
 
 
+def _confirm(answers: list[str]):
+    def confirm(prompt: str) -> str:
+        return answers.pop(0)
+
+    return confirm
+
+
 def test_a_fresh_session_advances_from_draft_to_complete(repo, monkeypatch):
     settings = settings_with_planner(repo)
     # "claude:ready" -- the draft stage (agent codex) hands "ready" to whoever
@@ -193,3 +200,193 @@ def test_a_human_driven_redraft_ignores_the_stale_approved_handoff(repo, monkeyp
         echo=False,
     )
     assert state.load_plan(repo).stage == "@complete"
+
+
+def test_start_refuses_when_a_session_is_already_checkpointed(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    state.save_plan(
+        repo,
+        state.PlanState(
+            description=DESCRIPTION,
+            stage="draft",
+            round=1,
+            stage_visits={"draft": 1},
+            agent="",
+            feedback="",
+            draft_path=str(planner.draft_path(repo)),
+            paused_reason="",
+            log_path="",
+        ),
+    )
+    with pytest.raises(planner.PlanAlreadyInProgress):
+        planner.start(repo, settings, DESCRIPTION)
+
+
+def test_approving_writes_and_commits_plan_md_without_starting(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    # Built once, outside the wrapper: _scripted_run's list is consumed with
+    # .pop(0), so it must be the *same* object across both turns. Building a
+    # fresh two-element list inside `run` on every call (a first draft of this
+    # test did exactly that) makes every turn pop "claude:ready" again, so the
+    # second (review) turn wrongly receives "ready" instead of "approved" --
+    # caught empirically as "unrecognised outcome 'ready' for stage 'review'".
+    scripted = _scripted_run(["claude:ready", "claude:approved"])
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+    ):
+        if agent_name == "codex":
+            planner.draft_path(repo).write_text("- [ ] T-1: build it\n  Do the thing.\n")
+        return scripted(
+            command,
+            prompt,
+            cwd=cwd,
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            which=which,
+            echo=echo,
+            agent_name=agent_name,
+        )
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    result = planner.start(repo, settings, DESCRIPTION, confirm=_confirm(["a", "n"]))
+    assert "Wrote" in result
+    assert (repo / "plan.md").read_text() == "- [ ] T-1: build it\n  Do the thing.\n"
+    assert state.load_plan(repo) is None
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "plan" in log.lower()
+
+
+def test_discarding_clears_the_checkpoint_and_keeps_the_draft_file(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    scripted = _scripted_run(["claude:ready", "claude:approved"])
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+    ):
+        if agent_name == "codex":
+            planner.draft_path(repo).write_text("- [ ] T-1: x\n  y.\n")
+        return scripted(
+            command,
+            prompt,
+            cwd=cwd,
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            which=which,
+            echo=echo,
+            agent_name=agent_name,
+        )
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    result = planner.start(repo, settings, DESCRIPTION, confirm=_confirm(["d"]))
+    assert "Discarded" in result
+    assert state.load_plan(repo) is None
+    assert planner.draft_path(repo).exists()
+    assert not (repo / "plan.md").exists()
+
+
+def test_requesting_changes_redrafts_before_the_gate_reappears(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    calls = {"n": 0}
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+    ):
+        calls["n"] += 1
+        spec = [
+            "claude:ready",
+            "claude:approved",
+            "claude:ready",
+            "claude:approved",
+        ][calls["n"] - 1]
+        if agent_name == "codex":
+            planner.draft_path(repo).write_text(
+                f"- [ ] T-1: round {calls['n']}\n  y.\n"
+            )
+        return _scripted_run([spec])(
+            command,
+            prompt,
+            cwd=cwd,
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            which=which,
+            echo=echo,
+            agent_name=agent_name,
+        )
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    result = planner.start(
+        repo,
+        settings,
+        DESCRIPTION,
+        confirm=_confirm(["r", "make it shorter", "a", "n"]),
+    )
+    assert "Wrote" in result
+    # calls["n"] only advances the draft file's content on the draft (codex)
+    # turn: 1 (session 1's draft) writes "round 1", 2 is session 1's review
+    # turn (no write), 3 is session 2's draft turn after "request changes"
+    # (writes "round 3"), 4 is session 2's review turn. The approved content
+    # is whatever the draft stage wrote last -- "round 3" -- proving a real
+    # second draft round happened, not a repeat of the first.
+    assert "round 3" in (repo / "plan.md").read_text()
+    assert "round 1" not in (repo / "plan.md").read_text()
+
+
+def test_discard_with_no_session_says_so(repo):
+    assert planner.discard(repo) == "Nothing to discard."
+
+
+def test_resuming_at_complete_reprints_the_draft_without_rerunning_any_agent(
+    repo, monkeypatch
+):
+    settings = settings_with_planner(repo)
+    planner.draft_path(repo).parent.mkdir(parents=True, exist_ok=True)
+    planner.draft_path(repo).write_text("- [ ] T-1: x\n  y.\n")
+    saved = state.PlanState(
+        description=DESCRIPTION,
+        stage="@complete",
+        round=2,
+        stage_visits={"draft": 1, "review": 1},
+        agent="",
+        feedback="",
+        draft_path=str(planner.draft_path(repo)),
+        paused_reason="",
+        log_path="",
+    )
+    state.save_plan(repo, saved)
+
+    def run(*a, **k):
+        raise AssertionError("no agent should run when resuming at @complete")
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    result = planner.resume(repo, settings, saved, confirm=_confirm(["d"]))
+    assert "Discarded" in result
