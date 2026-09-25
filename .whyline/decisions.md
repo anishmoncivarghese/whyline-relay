@@ -2345,3 +2345,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/adapters/bypass.py
 
 <!-- whyline-event: 211041d814a5401dbe8a0fcb2d702998 -->
+
+## 2026-09-25 — Add dedicated generic-agent preflight warning for Grok
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** GRR-1
+
+**Because:** Grok lacks a non-interactive login-status check and denial detail reporting, so doctor should provide specific actionable guidance
+
+**Rejected:**
+
+- Create a full grok adapter module — grok adapter is out of scope and generic adapter is sufficient for preflight
+- Keep generic agent warning — fails to inform users about lack of non-interactive auth checks
+
+**Files:** src/whyline_relay/preflight.py
+
+<!-- whyline-event: ec0542553b0c443dbe91e8a8bafd65d5 -->
+
+## 2026-09-25 — GRR-1 review: approve Grok-specific generic-agent preflight warning
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** GRR-1
+
+**Because:** The branch matches the requested behavior, focused tests cover Grok-specific wording and unchanged generic-agent behavior, git diff --check is clean, and the plain full suite exits successfully
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 3fde9d3ecf5b4443a62c327266896e51 -->

@@ -469,6 +469,54 @@ def test_antigravity_as_a_generic_agent_gets_a_specific_warning(
     assert "548" in matches[0].message or "headless" in matches[0].message
 
 
+def test_grok_as_a_generic_agent_gets_a_specific_warning(ready_repo: Path, monkeypatch):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nreviewer = "grok"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "grok" else name,
+    )
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+    matches = [c for c in checks if "grok" in c.message and c.status == "warn"]
+    assert len(matches) == 1
+    # "login" alone isn't distinctive enough to prove this -- the old, generic
+    # message ("...permissions, login or denials") already contains it. Check
+    # for text unique to the new, grok-specific wording instead.
+    assert "non-interactive" in matches[0].message
+
+
+def test_a_non_grok_non_antigravity_generic_agent_keeps_the_original_message(
+    ready_repo: Path, monkeypatch
+):
+    # Regression proof: adding grok's own branch must not change the message
+    # any other generic agent (here, "aider") still gets.
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nreviewer = "aider"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--message"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "aider" else name,
+    )
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+    matches = [c for c in checks if "aider is a generic agent" in c.message]
+    assert matches == [
+        preflight.Check(
+            "warn",
+            "aider is a generic agent: the relay does not manage its permissions, login or denials",
+        )
+    ]
+
+
+
 @pytest.mark.parametrize("template", ["stale", "fresh", "missing"])
 def test_non_default_roles_validate_existing_prompt_templates(
     ready_repo: Path, template: str

@@ -258,6 +258,16 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
                     "does not manage its permissions, login or denials",
                 )
             )
+        elif adapter.name == "generic" and agent == "grok":
+            checks.append(
+                _result(
+                    "warn",
+                    "grok is a generic agent, and it has no non-interactive "
+                    "login-status check or specific denial detail -- see README, "
+                    "'Using Grok today'. The relay does not manage its "
+                    "permissions, login or denials",
+                )
+            )
         elif adapter.name == "generic":
             checks.append(
                 _result(
