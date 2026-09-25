@@ -247,7 +247,18 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
                     "remove it from .whyline/relay/config.toml",
                 )
             )
-        if adapter.name == "generic":
+        if adapter.name == "generic" and agent == "antigravity":
+            checks.append(
+                _result(
+                    "warn",
+                    "antigravity is a generic agent, and its headless permission "
+                    "enforcement is known to be unreliable -- see README, 'Using "
+                    "Antigravity today', and "
+                    "github.com/google-antigravity/antigravity-cli#548. The relay "
+                    "does not manage its permissions, login or denials",
+                )
+            )
+        elif adapter.name == "generic":
             checks.append(
                 _result(
                     "warn",

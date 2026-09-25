@@ -2288,3 +2288,32 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/init.py, src/whyline_relay/roles.py, tests/test_init.py, tests/test_roles.py
 
 <!-- whyline-event: 2f92130f87694a048acbaeea3b9cfbba -->
+
+## 2026-09-25 — Add specific preflight warning and README documentation for Antigravity generic agent
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RMI-3
+
+**Because:** Antigravity headless permission enforcement is known to be unreliable (tracked in upstream issue #548), so doctor should provide actionable guidance and issue links while maintaining generic fallback for other agents
+
+**Rejected:**
+
+- Leave generic warning unchanged — users configuring agy would lack visibility into known headless permission limitations
+- Hard failure on antigravity — would break existing intentional configurations using agy via generic adapter
+
+**Files:** src/whyline_relay/preflight.py, README.md, tests/test_preflight.py
+
+<!-- whyline-event: b5705e1b7e9b445991b6bbf9c1aee84a -->
+
+## 2026-09-25 — RMI-3 review: approve Antigravity-specific preflight warning and README issue link
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RMI-3
+
+**Because:** The implementation matches the requested branch behavior, preserves the standard generic-agent warning for other agents, adds focused regression coverage, and the plain full suite passes
+
+**Files:** src/whyline_relay/preflight.py, README.md, tests/test_preflight.py
+
+<!-- whyline-event: d332797373114c8ebef79de852f1dc7c -->

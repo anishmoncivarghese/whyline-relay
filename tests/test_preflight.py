@@ -449,6 +449,26 @@ def test_generic_agent_is_checked_and_warned_without_login(
     assert calls == [["whyline", "sync"]]
 
 
+def test_antigravity_as_a_generic_agent_gets_a_specific_warning(
+    ready_repo: Path, monkeypatch
+):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nreviewer = "antigravity"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        '[agents.antigravity]\nadapter = "generic"\ncommand = ["agy", "-p"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "agy" else name,
+    )
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+    matches = [c for c in checks if "antigravity" in c.message and c.status == "warn"]
+    assert len(matches) == 1
+    assert "548" in matches[0].message or "headless" in matches[0].message
+
+
 @pytest.mark.parametrize("template", ["stale", "fresh", "missing"])
 def test_non_default_roles_validate_existing_prompt_templates(
     ready_repo: Path, template: str

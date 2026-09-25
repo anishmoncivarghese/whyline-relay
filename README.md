@@ -392,7 +392,7 @@ Only `codex` and `claude` are built in today. For a third option, see "Using Ant
 
 ### Using Antigravity (`agy`) today, via the generic adapter
 
-Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no way to scope its permissions to a repository or an invocation, no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path — three real gaps that would make a "built-in" label dishonest about what the relay actually manages for it. Configure it like this:
+Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no way to scope its permissions to a repository or an invocation, no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path — three real gaps that would make a "built-in" label dishonest about what the relay actually manages for it. This is also tracked upstream at [google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548) — headless mode's own permission enforcement is known to be unreliable; `doctor` links here directly if you configure Antigravity this way. Configure it like this:
 
 ```toml
 [roles]
