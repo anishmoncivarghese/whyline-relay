@@ -2317,3 +2317,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, README.md, tests/test_preflight.py
 
 <!-- whyline-event: d332797373114c8ebef79de852f1dc7c -->
+
+## 2026-09-25 — Merged the model pre-fill integration (RMI-1..3) into main, built with Antigravity as implementer and Codex as reviewer
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RMI-MERGE
+
+**Because:** Second consecutive piece built with Antigravity implementing under the accepted-risk global permissions wildcard; again zero pauses across all 3 tasks. Cherry-picked tree diff-verified byte-for-byte against the sandbox; full suite green.
+
+**Files:** src/whyline_relay/whyline_model.py
+
+<!-- whyline-event: da6f7e6e3071461ca57674c8c67605ae -->
