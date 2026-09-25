@@ -9,6 +9,8 @@ from pathlib import Path
 RELAY_IGNORE = (
     ".whyline/relay/logs/",
     ".whyline/relay/state.json*",
+    ".whyline/relay/plan-state.json*",
+    ".whyline/relay/draft-plan.md",
     ".whyline/relay/STOP",
     ".whyline/relay/running.json",
     ".whyline/relay/active-roles.json",

@@ -28,6 +28,19 @@ class RelayState:
     pipeline_fingerprint: str = ""
 
 
+@dataclass(frozen=True)
+class PlanState:
+    description: str
+    stage: str
+    round: int
+    stage_visits: dict[str, int]
+    agent: str
+    feedback: str
+    draft_path: str
+    paused_reason: str
+    log_path: str
+
+
 def path(root: Path) -> Path:
     return config.relay_dir(root) / "state.json"
 
@@ -51,3 +64,29 @@ def load(root: Path) -> RelayState | None:
 
 def clear(root: Path) -> None:
     path(root).unlink(missing_ok=True)
+
+
+def plan_path(root: Path) -> Path:
+    return config.relay_dir(root) / "plan-state.json"
+
+
+def save_plan(root: Path, value: PlanState) -> None:
+    """Write atomically, exactly like save() -- a half-written checkpoint would
+    strand a `resume` the same way for either kind of state."""
+    target = plan_path(root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(asdict(value), indent=2), encoding="utf-8")
+    os.replace(temporary, target)
+
+
+def load_plan(root: Path) -> PlanState | None:
+    try:
+        record = json.loads(plan_path(root).read_text(encoding="utf-8"))
+        return PlanState(**record)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def clear_plan(root: Path) -> None:
+    plan_path(root).unlink(missing_ok=True)

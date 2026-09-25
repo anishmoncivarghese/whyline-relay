@@ -1959,3 +1959,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py
 
 <!-- whyline-event: 0c439d308d3b458da8a721a66fa6f3d2 -->
+
+## 2026-09-25 — Keep planner progress in a separate atomic checkpoint
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-2
+
+**Because:** Planner resume state must survive partial writes without overwriting or coupling to the task relay checkpoint
+
+**Rejected:**
+
+- Reuse state.json — it would mix independent planner and relay lifecycles and violate the specified path separation
+
+**Files:** src/whyline_relay/state.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: 3ffd10f27af64973bfe2ea187cba0c4d -->
+
+## 2026-09-25 — Approved PLN-2: PlanState checkpoint mirrors RelayState pattern exactly
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-2
+
+**Because:** Atomic write/graceful-corruption pattern already proven for state.json; reusing it for plan-state.json keeps the two lifecycles independent as required, and full suite (353 tests) passes with no regressions
+
+**Rejected:**
+
+- Reuse save()/load() generically for both dataclasses — would couple planner and relay lifecycles and complicate corrupt-file handling for no benefit at this size
+
+**Files:** src/whyline_relay/state.py, src/whyline_relay/gitcheck.py, tests/test_state.py
+
+<!-- whyline-event: 3af818b5344947eba9cf5a0784d1200d -->
