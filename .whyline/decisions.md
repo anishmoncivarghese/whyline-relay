@@ -2374,3 +2374,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
 
 <!-- whyline-event: 3fde9d3ecf5b4443a62c327266896e51 -->
+
+## 2026-09-25 — Document verified Grok recipe using generic adapter
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** GRR-2
+
+**Because:** Grok has clean per-invocation permission flags for headless use, but lacks read-only auth status and denial detail needed for a built-in adapter
+
+**Rejected:**
+
+- Add built-in grok adapter — out of scope and unnecessary given generic adapter capabilities
+
+**Files:** README.md
+
+<!-- whyline-event: c9d677f0fd75442fad2d55b5bf78426c -->
+
+## 2026-09-25 — Approve verified Grok generic-adapter README recipe
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** GRR-2
+
+**Because:** The new section matches the requested recipe and placement, introduces no runtime or module changes, and the full plain test suite passes
+
+**Files:** README.md
+
+<!-- whyline-event: 8e0a65a6f7294e2b8099ee01af63904e -->

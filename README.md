@@ -430,6 +430,37 @@ test command and its result — you will report both in your handoff.
 
 **One more thing worth knowing:** `--new-project`, needed to pin each headless call to the right directory (without it, one call was measured operating on a stale prior project and reading the wrong file entirely), leaves a conversation directory behind under `~/.gemini/antigravity-cli/brain/<uuid>/` every single task, with no built-in cleanup.
 
+### Using Grok (`grok`, "Grok Build") today, via the generic adapter
+
+xAI's Grok Build CLI (`grok`) has genuinely better headless-mode fundamentals than Antigravity did when it was added — real per-invocation `--allow`/`--deny` permission flags, not one file global to the machine — verified directly: a full realistic implement turn (editing a file, *creating* a new one, running a verification command, recording a real `whyline note`, committing) and a full realistic reviewer turn (reading a diff, summarizing it accurately) both completed correctly with the recipe below, and an explicit `--deny` rule correctly beat a broader `--allow` for the same command, even with a project's own `.claude/settings.local.json` separately allowing it. It is still not a built-in, on purpose: `grok login` only ever starts a live device-code OAuth flow (there is no read-only status check `doctor` could run), and a denied action only reports `stopReason: "cancelled"`, never which command or file it needed — the same two gaps that keep Antigravity a generic agent too. Configure it like this:
+
+```toml
+[roles]
+implementer = "codex"   # or reviewer; either role works
+reviewer    = "grok"
+
+[agents.grok]
+adapter = "generic"
+command = [
+  "grok", "--output-format", "json", "--permission-mode", "dontAsk",
+  "--deny", "Bash(git push:*)", "--deny", "Bash(rm -rf:*)",
+  "--allow", "Edit", "--allow", "Bash(git add:*)", "--allow", "Bash(git commit:*)",
+  "--allow", "Bash(git diff:*)", "--allow", "Bash(git status:*)", "--allow", "Bash(git log:*)",
+  "--allow", "Bash(whyline:*)", "--allow", "Bash(python3:*)",
+  "-p"
+]
+```
+
+**`-p` must be the last item in the command**, for the same reason as Antigravity's own recipe: the relay always appends the prompt as the command's final argument, and `grok -p` greedily consumes whatever token comes right after it.
+
+**`Edit` alone covers creating new files, not just editing existing ones** — verified directly, so there is no need to also grant a separate `Write` rule for ordinary implementation work.
+
+**Swap `Bash(python3:*)` for your own stack's test command** (`Bash(npm test:*)`, etc.) — this is a hand-written recipe, not a stack-aware built-in adapter; adjust the allow-list for your project yourself.
+
+**A generic agent can't take a configured `model` at all** — put a model flag directly in `command` yourself if you want one pinned, the same rule every generic agent already follows.
+
+**Not yet tested: a logged-out or first-run session might hang** rather than failing promptly, since there is no login-status check to catch this ahead of time and the relay's own subprocess call inherits stdin. Left as a known, unverified risk rather than assumed safe.
+
 ## Backup agents
 
 Since 0.2.4, a role can name one backup agent, used automatically when the role's active agent hits a detected usage limit or stops being authenticated:
