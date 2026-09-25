@@ -39,6 +39,13 @@ class Roles:
     reviewer: str = "claude"
 
 
+@dataclass(frozen=True)
+class PlannerConfig:
+    draft: str = "codex"
+    review: str = "claude"
+    max_visits: int = 3
+
+
 def _pipeline_fingerprint(raw_pipeline: dict) -> str:
     """A short hash of the whole [pipeline] table, for crash-safe resume.
 
@@ -210,6 +217,7 @@ class Config:
     backups: dict[str, str] = field(default_factory=dict)
     pipeline: "pipeline_module.Pipeline | None" = None
     pipeline_fingerprint: str = ""
+    planner: PlannerConfig = field(default_factory=PlannerConfig)
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -356,6 +364,35 @@ def load(root: Path) -> Config:
         status_map = {**DEFAULTS["status_map"], **(raw.get("status_map") or {})}
         roles_obj = Roles(**role_names)
 
+    raw_planner = raw.get("planner") or {}
+    role_agents = list(role_names.values())
+    default_draft, default_review = role_agents[0], role_agents[-1]
+
+    def _planner_agent(key: str, default: str) -> str:
+        value = raw_planner.get(key, default)
+        if not isinstance(value, str):
+            raise ConfigError(f"[planner] {key} must be a string")
+        if value not in adapters.BUILTIN and value not in configured_adapters:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            raise ConfigError(
+                f"[planner] {key} names {value!r}, which is not a built-in agent "
+                f"({builtins}) or a configured generic agent"
+            )
+        return value
+
+    planner_max_visits = raw_planner.get("max_visits", 3)
+    if (
+        not isinstance(planner_max_visits, int)
+        or isinstance(planner_max_visits, bool)
+        or planner_max_visits < 1
+    ):
+        raise ConfigError("[planner] max_visits must be a positive integer")
+    planner_cfg = PlannerConfig(
+        draft=_planner_agent("draft", default_draft),
+        review=_planner_agent("review", default_review),
+        max_visits=planner_max_visits,
+    )
+
     return Config(
         plan=raw.get("plan", DEFAULTS["plan"]),
         max_rounds=int(raw.get("max_rounds", DEFAULTS["max_rounds"])),
@@ -368,4 +405,5 @@ def load(root: Path) -> Config:
         backups=dict(backup_values),
         pipeline=compiled_pipeline,
         pipeline_fingerprint=pipeline_fp,
+        planner=planner_cfg,
     )

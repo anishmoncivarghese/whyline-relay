@@ -68,6 +68,44 @@ def test_no_config_file_means_the_default_roles(tmp_path: Path):
     assert config.load(tmp_path).roles == config.Roles("codex", "claude")
 
 
+def test_no_planner_table_defaults_to_the_legacy_roles(tmp_path: Path):
+    settings = config.load(tmp_path)
+    assert settings.planner == config.PlannerConfig(draft="codex", review="claude")
+
+
+def test_no_planner_table_with_a_configured_pipeline_defaults_to_first_and_last_role(
+    tmp_path,
+):
+    write(tmp_path, PIPELINE_TOML)
+    settings = config.load(tmp_path)
+    # PIPELINE_TOML's [roles] declares implementer, tester, reviewer in that order.
+    assert settings.planner == config.PlannerConfig(draft="codex", review="claude")
+
+
+def test_a_planner_table_overrides_draft_review_and_max_visits(tmp_path: Path):
+    write(
+        tmp_path,
+        '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+        '[planner]\ndraft = "claude"\nreview = "codex"\nmax_visits = 5\n',
+    )
+    settings = config.load(tmp_path)
+    assert settings.planner == config.PlannerConfig(
+        draft="claude", review="codex", max_visits=5
+    )
+
+
+def test_planner_draft_naming_an_unknown_agent_is_refused(tmp_path: Path):
+    write(tmp_path, '[planner]\ndraft = "nonexistent"\n')
+    with pytest.raises(config.ConfigError, match="not a built-in agent"):
+        config.load(tmp_path)
+
+
+def test_planner_max_visits_must_be_a_positive_integer(tmp_path: Path):
+    write(tmp_path, "[planner]\nmax_visits = 0\n")
+    with pytest.raises(config.ConfigError, match="positive integer"):
+        config.load(tmp_path)
+
+
 def test_a_generic_agent_needs_adapter_and_command(tmp_path: Path):
     write(tmp_path, '[agents.aider]\ncommand = ["aider", "--message"]\n')
     with pytest.raises(config.ConfigError, match=r"agent 'aider' is not built in"):

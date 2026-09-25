@@ -1991,3 +1991,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/state.py, src/whyline_relay/gitcheck.py, tests/test_state.py
 
 <!-- whyline-event: 3af818b5344947eba9cf5a0784d1200d -->
+
+## 2026-09-25 — Derive planner defaults from the ordered configured roles
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-3
+
+**Because:** The same role_names mapping exists for both legacy and pipeline configs, yielding implementer/reviewer for legacy configs and the first/last declared agents for configured pipelines
+
+**Rejected:**
+
+- Hard-code codex and claude — this would ignore custom pipeline role ordering and violate the planner fallback contract
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 696fb37afaa748e6a9c95edce2929d9b -->
+
+## 2026-09-25 — Approve PLN-3: [planner] table adds PlannerConfig with draft/review/max_visits, always populated from legacy roles or first/last configured pipeline role
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-3
+
+**Because:** Diff matches spec verbatim: PlannerConfig dataclass, Config.planner field with default_factory, load() derives defaults from role_names (populated identically by both legacy and pipeline branches) before falling back to an explicit [planner] table; agent validation reuses the existing built-in-or-configured-generic check; max_visits validation mirrors the existing pipeline stage max_visits pattern. All 5 new tests plus full 502-test suite pass unedited
+
+**Rejected:**
+
+- Hard-code implementer/reviewer role names instead of deriving from role_names — would break for configured pipelines with custom role names
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 4fbce80b5af54059836f7151dbcd8b50 -->
