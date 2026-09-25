@@ -180,11 +180,76 @@ Record your judgment:
 Exactly one of the outcomes listed below.
 """
 
+PLAN_DRAFT = """{sync_packet}
+
+You are drafting an implementation plan from a feature description. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to draft
+
+Write a plan file at `.whyline/relay/draft-plan.md` -- not `plan.md` -- following the
+format `whyline-relay plan-format` documents: a Markdown checklist, one
+`- [ ] TASK-ID: title` line per task, with detail lines indented underneath. Every
+task needs a unique id, a title, and at least one real detail line describing what
+to do and how to verify it. Do not write placeholder text like "TBD" or "fill in
+details" anywhere -- every task must be something an engineer could start on
+immediately, with no further clarification needed.
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --file .whyline/relay/draft-plan.md --actor {actor} --role {role} --task {task_id}
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+PLAN_REVIEW = """{sync_packet}
+
+You are checking a drafted plan's structure only. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## What to check
+
+Read `.whyline/relay/draft-plan.md`. Check only structure, never whether these are
+the *right* tasks for the goal -- that judgment belongs to a human, not you. Confirm:
+the file exists and parses as the documented checklist format; every task has a
+unique, present id; every task has at least one real detail line, not just a bare
+title; nothing reads as placeholder text ("TBD", "fill in", "similar to the above",
+etc.).
+
+If everything checks out, approve it. If something is genuinely missing or broken,
+send it back with concrete, specific feedback about exactly what to fix -- not a
+vague "make it better."
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file .whyline/relay/draft-plan.md --actor {actor} --role {role} --task {task_id}
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
 TEMPLATES = {
     "implement": IMPLEMENT,
     "review": REVIEW,
     "test": TEST,
     "security": SECURITY,
+    "plan-draft": PLAN_DRAFT,
+    "plan-review": PLAN_REVIEW,
 }
 
 

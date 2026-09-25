@@ -101,6 +101,29 @@ def test_test_and_security_are_built_in_templates(tmp_path):
     assert prompts.load(tmp_path, "security") == prompts.SECURITY
 
 
+def test_plan_draft_and_plan_review_are_built_in_templates(tmp_path):
+    assert prompts.load(tmp_path, "plan-draft") == prompts.PLAN_DRAFT
+    assert prompts.load(tmp_path, "plan-review") == prompts.PLAN_REVIEW
+
+
+def test_the_planner_templates_use_the_configured_pipeline_placeholders():
+    for template in (prompts.PLAN_DRAFT, prompts.PLAN_REVIEW):
+        rendered = prompts.render(
+            template,
+            task_id="__plan__",
+            task_text="add a health-check endpoint",
+            sync_packet="PACKET",
+            round_=1,
+            review_feedback="",
+            actor="codex",
+            role="draft",
+            stage="draft",
+            profile="default",
+        )
+        assert "{actor}" not in rendered and "{role}" not in rendered
+        assert "codex" in rendered and "draft-plan.md" in rendered
+
+
 def test_the_new_templates_use_the_configured_pipeline_placeholders():
     for template in (prompts.TEST, prompts.SECURITY):
         rendered = prompts.render(

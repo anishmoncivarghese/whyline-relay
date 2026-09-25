@@ -2023,3 +2023,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py
 
 <!-- whyline-event: 4fbce80b5af54059836f7151dbcd8b50 -->
+
+## 2026-09-25 — Use pipeline identity placeholders in planner templates
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-4
+
+**Because:** Planner stages can be assigned custom actors and roles, while the exact Task heading preserves reserved __plan__ handoff extraction
+
+**Rejected:**
+
+- Hard-code implementer identity — it would render the wrong configured planner role and omit the active actor
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: 305c9a1a5c0246d5a444239767c63557 -->
+
+## 2026-09-25 — PLN-4 review: approve -- PLAN_DRAFT/PLAN_REVIEW use the exact '## Task' placeholder heading and actor/role placeholders, matching TEST/SECURITY's shape and fake_pipeline_agent.py's handoff-id regex
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-4
+
+**Because:** Full suite (uv run pytest -q) passes at 192/192; templates never mention commit or tick-plan, satisfying the draft-review pipeline's no-commit constraint; the task text's embedded Step-3 code sample baked a literal sync banner into the constants, which did not match the actual diff -- the real diff correctly uses the sync_packet placeholder, verified against the working-tree diff rather than the task text
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: b962b054dee543f0a8e3019fc2c7381d -->
