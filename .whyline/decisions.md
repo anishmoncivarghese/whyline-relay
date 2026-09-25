@@ -2051,3 +2051,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/prompts.py
 
 <!-- whyline-event: b962b054dee543f0a8e3019fc2c7381d -->
+
+## 2026-09-25 — Consult existing planner handoffs only during explicit crash resume
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-5
+
+**Because:** A landed handoff must advance a resumed stage, while a human-requested redraft must launch a fresh draft turn instead of reusing the prior approved handoff
+
+**Rejected:**
+
+- Always consult the active handoff — stale approval would immediately complete a human-requested redraft
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: a14c2fe2efb84a878d9ceaff05910f6a -->
+
+## 2026-09-25 — PLN-5 review: approve -- planner.py's draft/review pipeline matches the spec, never commits/ticks/HEAD-checks any stage, and all 6 new tests plus the full 462-test suite pass
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-5
+
+**Because:** Implementation is verbatim to the task's prescribed code (only import grouping differs); traced the crash-resume round-numbering risk codex flagged against loop.py's already-approved _run_configured_task resume path (lines 456-484) and found the same non-incrementing pattern there -- cosmetic only, doesn't affect routing, visit caps, or log identity
+
+**Rejected:**
+
+- Flag the round-numbering as a blocking defect — it mirrors pre-approved production behavior in _run_configured_task, not a regression introduced here
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: b1d54da729fb4f42b013578fd932f711 -->
