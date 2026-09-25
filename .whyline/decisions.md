@@ -2402,3 +2402,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: 8e0a65a6f7294e2b8099ee01af63904e -->
+
+## 2026-09-25 — Grok gets a doctor-specific generic-agent warning, mirroring Antigravity's, rather than staying under the generic message
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** GRR
+
+**Because:** empirically verified: no non-interactive login-status check, denial detail limited to stopReason: cancelled -- same two gaps Antigravity has, worth calling out by name so a user configuring it knows what doctor can't check
+
+**Rejected:**
+
+- leaving grok under the generic elif branch — less actionable, doesn't point at the README recipe
+
+**Files:** src/whyline_relay/preflight.py, docs/releases/v0.2.15.md
+
+<!-- whyline-event: 3f8cb06229d34e3fa5aadb6b113259ff -->
