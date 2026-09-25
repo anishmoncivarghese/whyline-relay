@@ -61,6 +61,14 @@ def settings_with_pipeline(
 TASK = plan.Task(task_id="T-1", text="T-1: build it", checked=False, line_index=0)
 
 
+def test_run_agent_and_check_visit_cap_are_public():
+    # Both were already shared internally by _run_task and _run_configured_task;
+    # this plan adds a third caller (planner.py, Task 6) in a different module,
+    # which needs them importable without a leading underscore.
+    assert callable(loop.run_agent)
+    assert callable(loop.check_visit_cap)
+
+
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch) -> Path:
     def git(*args: str) -> None:

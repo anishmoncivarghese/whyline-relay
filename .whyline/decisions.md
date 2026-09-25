@@ -1931,3 +1931,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/init.py
 
 <!-- whyline-event: d145d6c0098d4134a1e5ae036ca0ea58 -->
+
+## 2026-09-25 — Promote loop agent runner and visit-cap checker as public APIs without compatibility aliases
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-1
+
+**Because:** Planner needs cross-module imports, and all existing internal callers can use the public names directly with unchanged behavior
+
+**Rejected:**
+
+- Keep underscored aliases — unnecessary API duplication for an intentional rename with no existing external caller requirement
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: fdd3dc37626e425aa38316b5f4ce86e2 -->
+
+## 2026-09-25 — Approved PLN-1 rename of _run_agent/_check_visit_cap to public API
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-1
+
+**Because:** Diff is a pure rename matching all six specified call sites exactly, no compatibility aliases added per prior decision, full test suite passes with no failures
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 0c439d308d3b458da8a721a66fa6f3d2 -->

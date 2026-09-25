@@ -53,7 +53,7 @@ def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     return reason
 
 
-def _check_visit_cap(
+def check_visit_cap(
     pipe: pipeline.Pipeline,
     stage_id: str,
     stage_visits: dict[str, int],
@@ -77,7 +77,7 @@ def log_path(
     )
 
 
-def _run_agent(
+def run_agent(
     root: Path,
     settings: config.Config,
     agent: str,
@@ -280,7 +280,7 @@ def _run_task(
         if on_turn is not None:
             on_turn(round_, previous_id, {})
 
-        target = _run_agent(
+        target = run_agent(
             root,
             settings,
             agent,
@@ -471,7 +471,7 @@ def _run_configured_task(
                 stage_visits[current_stage_id] = (
                     stage_visits.get(current_stage_id, 0) + 1
                 )
-                _check_visit_cap(pipe, current_stage_id, stage_visits, task)
+                check_visit_cap(pipe, current_stage_id, stage_visits, task)
                 feedback = current.summary
             elif resumed.kind == "complete":
                 return _commit_and_approve(
@@ -505,7 +505,7 @@ def _run_configured_task(
         }
         if on_turn is not None:
             on_turn(round_, previous_id, stage_state)
-        target = _run_agent(
+        target = run_agent(
             root,
             settings,
             agent,
@@ -606,7 +606,7 @@ def _run_configured_task(
         feedback = record.summary
         current_stage_id = decision.target_stage
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
-        _check_visit_cap(pipe, current_stage_id, stage_visits, task)
+        check_visit_cap(pipe, current_stage_id, stage_visits, task)
         round_ += 1
         if round_ > settings.max_rounds:
             raise Paused(
