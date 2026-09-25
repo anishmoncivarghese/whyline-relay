@@ -2115,3 +2115,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/planner.py
 
 <!-- whyline-event: 420977e1a1cd4562a91a6961341b7fe4 -->
+
+## 2026-09-25 — Route resume to a saved planning session before task execution state
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PLN-7
+
+**Because:** A plan checkpoint represents the active workflow and must resume through planner.resume without entering task-run preflight or dispatch
+
+**Rejected:**
+
+- Load task state first — it could bypass an in-flight planning checkpoint or report Nothing to resume
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 1dff55bd07b0484b99c1046f2232067d -->
+
+## 2026-09-25 — PLN-7 approved: whyline-relay plan/plan --discard CLI, and resume dispatches to planner.resume before falling back to task resume
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** PLN-7
+
+**Because:** cmd_plan and the new cmd_resume branch match the task spec exactly: live-relay check before --discard/start (consistent with start/resume/stop precedent), PlanAlreadyInProgress and loop.Paused handled the same way as other commands, and state.load_plan gates dispatch to planner.resume without touching task-run preflight; interfaces (planner.start/resume/discard/PlanAlreadyInProgress, state.load_plan/save_plan/PlanState) match Task 6/2's actual signatures; full suite (472 tests) passes with no regressions
+
+**Files:** src/whyline_relay/cli.py, tests/test_planner_cli.py
+
+<!-- whyline-event: c8dd0a99d0564673b34f56cbe410fc46 -->

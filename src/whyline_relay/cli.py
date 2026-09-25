@@ -23,6 +23,7 @@ from whyline_relay import (
     notify,
     plan,
     planhelp,
+    planner,
     preflight,
     prompts,
     remove,
@@ -227,6 +228,21 @@ def build_parser() -> argparse.ArgumentParser:
     plan_format.add_argument(
         "--prompt", action="store_true", help="Print only the paste-ready prompt."
     )
+
+    plan_parser = subparsers.add_parser(
+        "plan", help="Draft a plan.md from a free-text description"
+    )
+    plan_parser.add_argument(
+        "description", nargs="?", default=None, help="What to build, in plain language."
+    )
+    plan_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    plan_parser.add_argument(
+        "--discard",
+        action="store_true",
+        help="Clear an in-flight plan session without resuming it.",
+    )
     return parser
 
 
@@ -265,6 +281,18 @@ def cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
+    plan_state = state.load_plan(root)
+    if plan_state is not None:
+        settings = config.load(root)
+        try:
+            summary = planner.resume(root, settings, plan_state)
+        except loop.Paused as paused:
+            return _report_pause(paused)
+        except (gitcheck.GitError, whylinecmd.WhylineUnavailable) as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_ERROR
+        print(summary)
+        return EXIT_OK
     saved = state.load(root)
     if saved is None:
         print("Nothing to resume.", file=sys.stderr)
@@ -408,6 +436,41 @@ def cmd_plan_format(args: argparse.Namespace) -> int:
         print(planhelp.rules())
         print("\nPrompt to give an AI that drafts your plan:")
         print(planhelp.prompt())
+    return EXIT_OK
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        # Checked before --discard too: discarding a checkpoint out from under
+        # a genuinely live turn (a subprocess mid-flight) could race with it --
+        # every other command that touches saved state (start, resume, stop)
+        # checks this first, before anything else.
+        print(
+            f"Refusing to touch the plan checkpoint: another relay is running "
+            f"here (pid {active.pid}). Run `{invocation.command('stop')}` first.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if args.discard:
+        print(planner.discard(root))
+        return EXIT_OK
+    if args.description is None:
+        print("a description is required (or pass --discard)", file=sys.stderr)
+        return EXIT_ERROR
+    settings = config.load(root)
+    try:
+        summary = planner.start(root, settings, args.description)
+    except planner.PlanAlreadyInProgress as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    except loop.Paused as paused:
+        return _report_pause(paused)
+    except (gitcheck.GitError, whylinecmd.WhylineUnavailable) as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    print(summary)
     return EXIT_OK
 
 
@@ -565,6 +628,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "roles": cmd_roles,
             "doctor": cmd_doctor,
             "plan-format": cmd_plan_format,
+            "plan": cmd_plan,
         }
         try:
             return commands[args.command](args)
