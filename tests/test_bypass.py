@@ -144,3 +144,77 @@ def test_start_skip_checks_still_refuses_before_launching(
 
     assert code != cli.EXIT_OK
     assert CODEX_FLAG in capsys.readouterr().err
+
+
+AGY_FLAG = "--dangerously-skip-permissions"
+GROK_MODE_FLAG = "--permission-mode"
+GROK_MODE_OFF = "bypassPermissions"
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (["agy", AGY_FLAG], [AGY_FLAG]),
+        (["agy", f"{AGY_FLAG}=yes"], [f"{AGY_FLAG}=yes"]),
+        (["agy", "-p"], []),
+    ],
+)
+def test_a_known_binary_configured_as_generic_is_still_checked_for_its_own_flag(
+    command: list[str], expected: list[str]
+):
+    # adapter_name is always "generic" here -- there is no registered adapter
+    # to look up FLAGS by name for. The binary itself (command[0]) is what we
+    # actually know a bypass flag for, so the check runs off that instead.
+    assert bypass.find("generic", command) == expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (
+            ["grok", GROK_MODE_FLAG, GROK_MODE_OFF, "-p"],
+            [f"{GROK_MODE_FLAG} {GROK_MODE_OFF}"],
+        ),
+        (
+            ["grok", f"{GROK_MODE_FLAG}={GROK_MODE_OFF}", "-p"],
+            [f"{GROK_MODE_FLAG}={GROK_MODE_OFF}"],
+        ),
+        (["grok", GROK_MODE_FLAG, "dontAsk", "-p"], []),
+    ],
+)
+def test_grok_configured_as_generic_is_checked_for_its_bypass_mode(
+    command: list[str], expected: list[str]
+):
+    assert bypass.find("generic", command) == expected
+
+
+def test_an_unknown_binary_configured_as_generic_is_still_not_inspected():
+    # A tool this project has never measured has no known flag vocabulary to
+    # check against -- this is the same, unchanged case test_generic_commands
+    # _are_not_inspected already covers for a command with no real binary at
+    # position 0.
+    assert bypass.find("generic", ["aider", "--message", CLAUDE_FLAG]) == []
+
+
+def test_preflight_refuses_antigravity_configured_as_generic_with_its_bypass_flag(
+    tmp_path: Path,
+):
+    _git(tmp_path, "init", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "T")
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        '[roles]\nimplementer = "codex"\nreviewer = "antigravity"\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        '[agents.antigravity]\nadapter = "generic"\n'
+        f'command = ["agy", "-p", "{AGY_FLAG}"]\n'
+    )
+    (tmp_path / "plan.md").write_text("- [ ] T-1: build it\n  Include tests.\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "setup")
+
+    completed = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
+    checks = preflight.run(tmp_path, runner=completed)
+    refusal = next(check for check in checks if AGY_FLAG in check.message)
+    assert refusal.status == "FAIL"
