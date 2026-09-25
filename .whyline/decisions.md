@@ -2329,3 +2329,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/whyline_model.py
 
 <!-- whyline-event: da6f7e6e3071461ca57674c8c67605ae -->
+
+## 2026-09-25 — bypass.find() now also checks a generic agent's binary name (command[0]) against a small known-flags mapping, not just adapter_name
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** BYPASS-GENERIC-FIX
+
+**Because:** adapter_name is always 'generic' for any tool with no registered adapter, so the guard previously returned [] unconditionally for Antigravity (agy) too, even though its bypass flag (--dangerously-skip-permissions) is known -- a documented generic recipe could carry it past doctor/start undetected. Independently found by both Codex and Antigravity while reviewing a proposed Grok adapter.
+
+**Rejected:**
+
+- Requiring a full registered adapter before any bypass-flag check applies — leaves a real, exploitable gap for every currently-generic tool (Antigravity today, potentially Grok later) in the meantime
+
+**Files:** src/whyline_relay/adapters/bypass.py
+
+<!-- whyline-event: 211041d814a5401dbe8a0fcb2d702998 -->
