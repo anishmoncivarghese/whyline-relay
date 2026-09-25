@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from whyline_relay import adapters, config, invocation, prompts
+from whyline_relay import adapters, config, invocation, prompts, whyline_model
 from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
 
 
@@ -21,12 +21,19 @@ def _ask_agent(confirm, role: str, default: str) -> str | None:
     return answer if answer in adapters.BUILTIN else None
 
 
-def _ask_model(confirm, agent: str) -> str | None:
+def _ask_model(confirm, root: Path, agent: str) -> str | None:
+    preset = whyline_model.read(root).get(agent)
+    prompt = (
+        f"Model for {agent} [{preset}] (blank to accept, or type another): "
+        if preset
+        else f"Model for {agent} (blank for default): "
+    )
     try:
-        answer = confirm(f"Model for {agent} (blank for default): ").strip()
+        answer = confirm(prompt).strip()
     except EOFError:
-        return None
-    return answer or None
+        return preset
+    return answer or preset
+
 
 
 def detect_stack(root: Path) -> str:
@@ -71,7 +78,7 @@ def run(
     agents_in_use = list(dict.fromkeys((implementer, reviewer)))
     if interactive:
         for name in agents_in_use:
-            model = _ask_model(confirm, name)
+            model = _ask_model(confirm, root, name)
             if model:
                 models[name] = model
     stack = detect_stack(root)

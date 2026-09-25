@@ -309,3 +309,41 @@ def test_the_permissions_file_is_the_relays_own_and_leaves_claude_settings_alone
         (tmp_path / ".whyline" / "relay" / "claude-settings.json").read_text()
     )
     assert "Bash(git commit:*)" in command["permissions"]["allow"]
+
+
+def test_ask_model_prefills_from_whyline_model_json(tmp_path):
+    from whyline_relay import init
+    target = tmp_path / ".whyline" / "model.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"codex": "gpt-5-codex"}')
+    answers = iter([""])
+    result = init._ask_model(lambda prompt: next(answers), tmp_path, "codex")
+    assert result == "gpt-5-codex"
+
+
+def test_ask_model_with_a_preset_can_still_be_overridden(tmp_path):
+    from whyline_relay import init
+    target = tmp_path / ".whyline" / "model.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"codex": "gpt-5-codex"}')
+    answers = iter(["haiku"])
+    result = init._ask_model(lambda prompt: next(answers), tmp_path, "codex")
+    assert result == "haiku"
+
+
+def test_ask_model_with_no_preset_behaves_exactly_as_before(tmp_path):
+    from whyline_relay import init
+    answers = iter([""])
+    result = init._ask_model(lambda prompt: next(answers), tmp_path, "codex")
+    assert result is None
+
+
+def test_ask_model_eof_with_a_preset_falls_back_to_it(tmp_path):
+    from whyline_relay import init
+    target = tmp_path / ".whyline" / "model.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"codex": "gpt-5-codex"}')
+    def raise_eof(prompt):
+        raise EOFError
+    result = init._ask_model(raise_eof, tmp_path, "codex")
+    assert result == "gpt-5-codex"

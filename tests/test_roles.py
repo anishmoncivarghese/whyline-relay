@@ -209,3 +209,42 @@ def test_set_role_with_agent_given_and_no_model_never_prompts(tmp_path):
         confirm=confirm_must_not_be_called,
     )
     assert message == "implementer set to codex"
+
+
+def test_set_role_prefills_the_model_prompt_from_whyline_model_json(tmp_path):
+    from whyline_relay import config, roles
+    target = tmp_path / ".whyline" / "model.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"codex": "gpt-5-codex"}')
+    (tmp_path / ".whyline" / "relay").mkdir(parents=True)
+    config_path = tmp_path / ".whyline" / "relay" / "config.toml"
+    config_path.write_text("")
+    settings = config.load(tmp_path)
+    answers = iter(["codex", ""])
+    result = roles.set_role(
+        tmp_path, settings, "implementer", agent=None, model=None,
+        confirm=lambda prompt: next(answers),
+    )
+    assert "gpt-5-codex" in config_path.read_text()
+    assert result == "implementer set to codex (model gpt-5-codex)"
+def test_set_role_eof_with_a_preset_falls_back_to_it(tmp_path):
+    from whyline_relay import config, roles
+    target = tmp_path / ".whyline" / "model.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"codex": "gpt-5-codex"}')
+    (tmp_path / ".whyline" / "relay").mkdir(parents=True)
+    config_path = tmp_path / ".whyline" / "relay" / "config.toml"
+    config_path.write_text("")
+    settings = config.load(tmp_path)
+
+    def confirm(prompt):
+        if "Agent for implementer" in prompt:
+            return "codex"
+        raise EOFError
+
+    result = roles.set_role(
+        tmp_path, settings, "implementer", agent=None, model=None,
+        confirm=confirm,
+    )
+    assert "gpt-5-codex" in config_path.read_text()
+    assert result == "implementer set to codex (model gpt-5-codex)"

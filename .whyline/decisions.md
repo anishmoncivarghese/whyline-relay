@@ -2256,3 +2256,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/whyline_model.py, tests/test_whyline_model.py
 
 <!-- whyline-event: a68dde67619c4458a4d3a8c999f022e6 -->
+
+## 2026-09-25 — Pre-fill model prompt from whyline model.json in init and roles set
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RMI-2
+
+**Because:** Interactive model prompts can default to repo-level whyline model settings on blank input or EOF while still allowing overrides
+
+**Rejected:**
+
+- Read model.json once at CLI startup — Keeping read(root) at prompt time maintains statelessness and consistency across init and roles set
+
+**Files:** src/whyline_relay/init.py, src/whyline_relay/roles.py
+
+<!-- whyline-event: c13abfe72c644097ad5ea25d54889f50 -->
+
+## 2026-09-25 — Approve RMI-2 model prompt pre-fill implementation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RMI-2
+
+**Because:** Both init and roles set consume whyline_model.read only for interactive built-in-agent model prompts; blank input and EOF accept a preset, explicit input overrides it, missing presets preserve prior behavior, and the full suite passes
+
+**Rejected:**
+
+- Request changes — implementation and tests match the specified behavior with no unsafe writes or regressions found
+
+**Files:** src/whyline_relay/init.py, src/whyline_relay/roles.py, tests/test_init.py, tests/test_roles.py
+
+<!-- whyline-event: 2f92130f87694a048acbaeea3b9cfbba -->

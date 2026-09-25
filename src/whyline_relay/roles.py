@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from whyline_relay import adapters, config, failover
+from whyline_relay import adapters, config, failover, whyline_model
 
 
 class RoleSetError(ValueError):
@@ -142,11 +142,17 @@ def set_role(
         )
 
     if interactive and model is None and agent in adapters.BUILTIN:
+        preset = whyline_model.read(root).get(agent)
+        prompt = (
+            f"Model for {agent} [{preset}] (blank to accept, or type another): "
+            if preset
+            else f"Model for {agent} (blank for default): "
+        )
         try:
-            answer = confirm(f"Model for {agent} (blank for default): ").strip()
+            answer = confirm(prompt).strip()
         except EOFError:
             answer = ""
-        model = answer or None
+        model = answer or preset
 
     if model is not None and agent not in adapters.BUILTIN:
         builtins = ", ".join(sorted(adapters.BUILTIN))
