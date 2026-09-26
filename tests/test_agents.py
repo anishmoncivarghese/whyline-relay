@@ -24,7 +24,7 @@ def test_which_is_not_bound_as_a_default_argument():
 
 def test_run_streams_output_to_the_log(tmp_path: Path):
     log = tmp_path / "run.log"
-    code = agents.run(
+    result = agents.run(
         [sys.executable, FAKE, "review", str(tmp_path)],
         "the prompt",
         cwd=tmp_path,
@@ -33,12 +33,12 @@ def test_run_streams_output_to_the_log(tmp_path: Path):
         which=lambda name: name,
         echo=False,
     )
-    assert code == 0
+    assert result.exit_code == 0
     assert "fake-agent review received" in log.read_text()
 
 
 def test_run_returns_the_agents_exit_code(tmp_path: Path):
-    code = agents.run(
+    result = agents.run(
         [sys.executable, FAKE, "fail", str(tmp_path)],
         "p",
         cwd=tmp_path,
@@ -47,7 +47,62 @@ def test_run_returns_the_agents_exit_code(tmp_path: Path):
         which=lambda name: name,
         echo=False,
     )
-    assert code == 1
+    assert result.exit_code == 1
+
+
+def test_run_returns_a_runresult_with_no_output_by_default(tmp_path: Path):
+    result = agents.run(
+        [sys.executable, FAKE, "review", str(tmp_path)],
+        "the prompt",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        echo=False,
+    )
+    assert isinstance(result, agents.RunResult)
+    assert result.exit_code == 0
+    assert result.output is None
+
+
+def test_run_captures_stdout_when_capture_is_true(tmp_path: Path):
+    result = agents.run(
+        [sys.executable, FAKE, "review", str(tmp_path)],
+        "the prompt",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        echo=False,
+        capture=True,
+    )
+    assert result.exit_code == 0
+    assert "fake-agent review received" in result.output
+
+
+def test_capture_suppresses_raw_echo_but_not_the_heartbeat(
+    tmp_path: Path, monkeypatch, capsys
+):
+    monkeypatch.setenv("WHYLINE_RELAY_HEARTBEAT_SECONDS", "0.05")
+    result = agents.run(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('started', flush=True); time.sleep(0.18)",
+        ],
+        "p",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        agent_name="claude",
+        capture=True,
+    )
+    output = capsys.readouterr().out
+    assert "started" not in output
+    heartbeat = r"\[\d{2}:\d{2}:\d{2}\] \.\.\. claude still running \(\d+s\)"
+    assert len(re.findall(heartbeat, output)) >= 2
+    assert "started\n" in result.output
 
 
 def test_missing_binary_raises_before_launching(tmp_path: Path):
@@ -95,7 +150,7 @@ def test_heartbeat_reports_silence_until_the_agent_ends(
 ):
     log = tmp_path / "run.log"
     monkeypatch.setenv("WHYLINE_RELAY_HEARTBEAT_SECONDS", "0.05")
-    code = agents.run(
+    result = agents.run(
         [
             sys.executable,
             "-c",
@@ -109,7 +164,7 @@ def test_heartbeat_reports_silence_until_the_agent_ends(
         agent_name="claude",
     )
     output = capsys.readouterr().out
-    assert code == 0
+    assert result.exit_code == 0
     assert "started\n" in output
     heartbeat = r"\[\d{2}:\d{2}:\d{2}\] \.\.\. claude still running \(\d+s\)"
     assert len(re.findall(heartbeat, output)) >= 2
@@ -136,7 +191,7 @@ def test_echo_false_suppresses_heartbeat(tmp_path: Path, monkeypatch, capsys):
 def test_non_utf8_output_does_not_crash_the_relay(tmp_path: Path):
     """An agent can print bytes that are not valid UTF-8. That must not kill the relay."""
     log = tmp_path / "run.log"
-    code = agents.run(
+    result = agents.run(
         [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'ok \\xff\\xfe done\\n')"],
         "p",
         cwd=tmp_path,
@@ -145,7 +200,7 @@ def test_non_utf8_output_does_not_crash_the_relay(tmp_path: Path):
         which=lambda name: name,
         echo=False,
     )
-    assert code == 0
+    assert result.exit_code == 0
     assert "ok" in log.read_text() and "done" in log.read_text()
 
 

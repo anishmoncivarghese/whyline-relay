@@ -17,6 +17,11 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
+
+class RunResult(NamedTuple):
+    exit_code: int
+    output: str | None
 
 # After SIGTERM, how long an agent gets to exit before it is sent SIGKILL. Read at call
 # time so a test can shorten it.
@@ -96,8 +101,9 @@ def run(
     which=None,
     echo: bool = True,
     agent_name: str | None = None,
-) -> int:
-    """Run one agent to completion. Returns its exit code.
+    capture: bool = False,
+) -> RunResult:
+    """Run one agent to completion. Returns a RunResult.
 
     Raises AgentMissing if the binary is absent, AgentTimeout if it overruns.
     """
@@ -113,6 +119,7 @@ def run(
     last_output = started
     heartbeat_stopped = False
     heartbeat_condition = threading.Condition()
+    buffer: list[str] = [] if capture else None
 
     process = subprocess.Popen(
         argv,
@@ -172,13 +179,16 @@ def run(
             for line in process.stdout or ():
                 log.write(line)
                 log.flush()
+                if capture:
+                    buffer.append(line)
                 if echo:
                     with heartbeat_condition:
                         last_output = time.monotonic()
                         heartbeat_condition.notify()
-                    with _terminal_lock:
-                        sys.stdout.write(line)
-                        sys.stdout.flush()
+                    if not capture:
+                        with _terminal_lock:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
         code = process.wait()
     except BaseException:
         # Ctrl+C, or anything else that unwinds us: the agent must not outlive
@@ -202,7 +212,7 @@ def run(
         raise AgentTimeout(
             f"{argv[0]} exceeded {timeout_seconds}s and was terminated"
         )
-    return code
+    return RunResult(code, "".join(buffer) if capture else None)
 
 
 def terminate(process: subprocess.Popen) -> None:
