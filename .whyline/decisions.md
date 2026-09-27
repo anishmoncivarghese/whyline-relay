@@ -2684,3 +2684,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/setup.py, tests/test_setup.py
 
 <!-- whyline-event: ea3fb67bf2a44f669c9ab9a37ae6a0ec -->
+
+## 2026-09-27 — Auto-commit setup artifacts before doctor gate and prompt start confirmation
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RSW-2
+
+**Because:** preflight checks working tree cleanliness which would otherwise fail on uncommitted config.toml and prompts/test.md
+
+**Rejected:**
+
+- Run doctor before commit — fails preflight working-tree dirty check on wizard's own generated files
+
+**Files:** src/whyline_relay/setup.py
+
+<!-- whyline-event: 55fec9730bd14e4aae01b57dd60d43f9 -->
+
+## 2026-09-27 — RSW-2 review: approve setup auto-commit, doctor gate, and confirmed start
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RSW-2
+
+**Because:** the flow commits generated setup before preflight, reuses the existing doctor checks unchanged, blocks on FAIL, gates warnings, only execs start after confirmation, and all 591 tests pass
+
+**Rejected:**
+
+- Request changes — no functional, coverage, integration, or safety defect was found
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup.py
+
+<!-- whyline-event: bcb2a4482af2449e82504b1ec39b754a -->

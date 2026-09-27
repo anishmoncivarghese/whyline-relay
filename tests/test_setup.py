@@ -1,6 +1,7 @@
+import subprocess
 from pathlib import Path
 
-from whyline_relay import config, setup
+from whyline_relay import config, preflight, setup
 
 
 def test_choose_plan_source_existing_default_when_plan_exists(tmp_path: Path):
@@ -116,3 +117,116 @@ def test_run_role_wizard_config_parses_as_a_valid_pipeline(tmp_path: Path):
     loaded = config.load(tmp_path)
     assert loaded.pipeline is not None
     assert set(loaded.pipeline.stages) == {"draft", "test", "review"}
+
+
+def _init_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+    (root / "README.md").write_text("hi\n")
+    (root / "plan.md").write_text("- [ ] TASK-1: x\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+
+
+def test_run_commits_setup_before_running_doctor(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    answers = iter(["existing", "codex", "claude", "claude", "n"])
+    seen_dirty_at_doctor_time = []
+
+    def fake_runner(*a, **k):
+        # doctor's own login-status checks call this; report "logged in"
+        return subprocess.CompletedProcess(a, 0, "", "")
+
+    def fake_preflight_run(root, *a, **k):
+        from whyline_relay import gitcheck
+
+        seen_dirty_at_doctor_time.append(gitcheck.is_dirty(root))
+        return [preflight.Check("ok", "all good")]
+
+    monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
+    code = setup.run(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        exec_fn=lambda binary, argv: (_ for _ in ()).throw(
+            AssertionError("should not start -- test answers 'n'")
+        ),
+        which=lambda name: "/bin/x",
+        runner=fake_runner,
+    )
+    assert seen_dirty_at_doctor_time == [False]
+    assert code == 0
+
+
+def test_run_refuses_to_offer_start_on_a_fail(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    answers = iter(["existing", "codex", "claude", "claude"])
+
+    def fake_preflight_run(root, *a, **k):
+        return [preflight.Check("FAIL", "grok is not on PATH", "install grok")]
+
+    monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
+    code = setup.run(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        exec_fn=lambda binary, argv: (_ for _ in ()).throw(
+            AssertionError("should never be offered on a FAIL")
+        ),
+        which=lambda name: "/bin/x",
+    )
+    assert code == 1
+
+def test_run_asks_before_proceeding_on_a_warn_and_honors_no(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    answers = iter(["existing", "codex", "claude", "claude", "n"])
+
+    def fake_preflight_run(root, *a, **k):
+        return [preflight.Check("warn", "grok has no login check")]
+
+    monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
+    code = setup.run(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        exec_fn=lambda binary, argv: (_ for _ in ()).throw(
+            AssertionError("declined -- must not exec")
+        ),
+        which=lambda name: "/bin/x",
+    )
+    assert code == 0
+
+
+def test_run_execs_into_start_when_clean_and_confirmed(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    answers = iter(["existing", "codex", "claude", "claude", ""])  # "" accepts [Y]
+
+    def fake_preflight_run(root, *a, **k):
+        return [preflight.Check("ok", "all good")]
+
+    monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
+    calls = []
+    code = setup.run(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        exec_fn=lambda binary, argv: calls.append((binary, argv)),
+        which=lambda name: "/bin/x",
+    )
+    assert calls == [("whyline-relay", ["whyline-relay", "start"])]
+    assert code == 0
+
+
+def test_run_stops_early_when_no_plan_source_resolved(tmp_path: Path):
+    answers = iter(["existing"])  # no plan.md exists, "existing" is refused
+    code = setup.run(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        exec_fn=lambda binary, argv: (_ for _ in ()).throw(
+            AssertionError("must not reach the wizard with no plan")
+        ),
+        which=lambda name: "/bin/x",
+    )
+    assert code == 1

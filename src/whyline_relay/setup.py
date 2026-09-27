@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import sys
 from pathlib import Path
 
-from whyline_relay import config, planner
+from whyline_relay import config, gitcheck, planner, preflight
 
 TEST_PROMPT_TEMPLATE = """\x7bsync_packet\x7d
 
@@ -152,3 +155,56 @@ def run_role_wizard(root: Path, *, input_fn=None, print_fn=None) -> dict[str, st
     print_fn(f"Wrote {test_prompt_path.relative_to(root)}.")
 
     return {"implementer": implementer, "tester": tester, "reviewer": reviewer}
+
+
+def _which(name: str) -> str | None:
+    return shutil.which(name)
+
+
+def _exec(binary: str, argv: list[str]) -> None:
+    os.execvp(binary, argv)
+
+
+def run(
+    root: Path,
+    *,
+    input_fn=None,
+    print_fn=None,
+    exec_fn=None,
+    which=None,
+    runner=None,
+) -> int:
+    """The whole `whyline-relay setup` flow: plan source, roles, an
+    auto-committed setup, doctor's gate, then an offer to start."""
+    input_fn = input_fn if input_fn is not None else input
+    print_fn = print_fn if print_fn is not None else print
+    exec_fn = exec_fn if exec_fn is not None else _exec
+    which = which if which is not None else _which
+
+    settings = config.load(root)
+    if not choose_plan_source(root, settings, input_fn=input_fn, print_fn=print_fn):
+        return 1
+
+    run_role_wizard(root, input_fn=input_fn, print_fn=print_fn)
+
+    if gitcheck.commit_all(root, "setup: assign implementer/tester/reviewer roles"):
+        print_fn("Committed setup.")
+
+    preflight_kwargs = {} if runner is None else {"runner": runner}
+    checks = preflight.run(root, **preflight_kwargs)
+    preflight.print_checks(checks, stream=sys.stdout, include_ok=True, summary=True)
+
+    if preflight.failures(checks):
+        print_fn("Fix the FAILs above before starting.")
+        return 1
+
+    has_warnings = any(check.status == "warn" for check in checks)
+    if has_warnings:
+        proceed = input_fn("Proceed anyway? [y/N]: ").strip().lower()
+        if proceed != "y":
+            return 0
+
+    start_choice = input_fn("Ready to start? [Y/n]: ").strip().lower()
+    if start_choice in ("", "y", "yes"):
+        exec_fn("whyline-relay", ["whyline-relay", "start"])
+    return 0
