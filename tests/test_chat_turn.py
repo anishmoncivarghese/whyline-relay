@@ -71,6 +71,10 @@ def test_run_turn_commits_when_the_agent_leaves_the_tree_dirty(tmp_path: Path):
     )
     assert record["files_changed"] == 1
     assert "new.txt" in record["diff_stat"]
+    persisted = chatlog.load(tmp_path)[-1]
+    assert record["timestamp"] == persisted["timestamp"]
+    assert "diff_stat" not in persisted
+    assert "rate_limited" not in persisted
     log = subprocess.run(
         ["git", "log", "-1", "--format=%s"], cwd=tmp_path, check=True, capture_output=True, text=True
     ).stdout
@@ -139,3 +143,23 @@ def test_run_turn_includes_recent_history_in_the_prompt(tmp_path: Path):
     )
     assert "earlier question" in seen_prompts[0]
     assert "new question" in seen_prompts[0]
+
+
+def test_run_turn_returns_the_persisted_chat_record(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    persisted = chatlog.load(tmp_path)[-1]
+    assert set(persisted) == {
+        "agent", "prompt", "response", "timestamp", "files_changed", "ok",
+    }
+    assert {key: record[key] for key in persisted} == persisted
+    assert record["rate_limited"] is False
+    assert "diff_stat" not in record

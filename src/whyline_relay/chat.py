@@ -144,18 +144,14 @@ def run_turn(
     committed = gitcheck.commit_all(root, f"chat: {agent} turn")
     diff_stat = gitcheck.commit_stat(root) if committed else ""
     files_changed = max(len(diff_stat.splitlines()) - 1, 0) if diff_stat else 0
-    chatlog.append(
+    # append generates the timestamp and returns the record it persisted.
+    # rate_limited and diff_stat are return-only, so they are added after
+    # the write and never become part of the chatlog line.
+    record = chatlog.append(
         root, agent=agent, prompt=prompt, response=response,
         files_changed=files_changed, ok=ok,
     )
-    record = {
-        "agent": agent,
-        "prompt": prompt,
-        "response": response,
-        "files_changed": files_changed,
-        "ok": ok,
-        "rate_limited": rate_limited,
-    }
+    record["rate_limited"] = rate_limited
     if committed:
         record["diff_stat"] = diff_stat
     return record

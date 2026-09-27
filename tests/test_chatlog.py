@@ -5,7 +5,7 @@ from whyline_relay import chatlog
 
 
 def test_append_creates_the_file_and_writes_one_json_line(tmp_path: Path):
-    chatlog.append(
+    written = chatlog.append(
         tmp_path, agent="claude", prompt="hi", response="hello",
         files_changed=0, ok=True,
     )
@@ -13,6 +13,7 @@ def test_append_creates_the_file_and_writes_one_json_line(tmp_path: Path):
     lines = path.read_text().splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
+    assert written == record
     assert record["agent"] == "claude"
     assert record["prompt"] == "hi"
     assert record["response"] == "hello"

@@ -33,7 +33,7 @@ def append(
     response: str,
     files_changed: int,
     ok: bool,
-) -> None:
+) -> dict:
     path = _path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -46,6 +46,7 @@ def append(
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
+    return record
 
 
 def load(root: Path) -> list[dict]:
