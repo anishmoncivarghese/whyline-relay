@@ -3118,3 +3118,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/failover.py, tests/test_failover.py
 
 <!-- whyline-event: 8130b1de16ce48e29eea92593dd1b046 -->
+
+## 2026-09-27 — Preserve chronological attempt order in ActiveOverride.tried
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-3
+
+**Because:** ActiveOverride.tried represents the sequence of failed attempts, and preserving insertion order allows callers and assertions to inspect the actual attempt order rather than an arbitrary alphabetical sort
+
+**Rejected:**
+
+- Sort tried alphabetically — reorders attempts and breaks chronological order
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 9cfb916ccedc415a9afd87b40c437f9d -->
+
+## 2026-09-27 — Approve BC-3 backup-chain walking and exhaustion handling
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-3
+
+**Because:** The runner advances through each untried configured backup, preserves chronological failure state, retains the legacy message for an empty chain, and passes focused and full test suites
+
+**Rejected:**
+
+- Request changes — implementation and coverage match the specified behavior with no functional defects found
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_failover.py
+
+<!-- whyline-event: 9a473acbef634667b6d7be376e38e738 -->

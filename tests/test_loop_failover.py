@@ -229,3 +229,96 @@ def test_dry_run_shows_the_effective_backup_agent(tmp_path, monkeypatch, capsys)
         "claude"
         in capsys.readouterr().out.split("Would run:")[1].splitlines()[0]
     )
+
+
+def test_a_chain_of_two_backups_walks_past_the_first_when_it_also_fails(
+    repo, tmp_path
+):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    also_limited = tmp_path / "also_limited.py"
+    also_limited.write_text(RATE_LIMITED)
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, str(limited)],
+            "claude": [
+                sys.executable, FAKE, str(repo), "claude", "claude",
+                "approved", "yes",
+            ],
+            "aider": [sys.executable, str(also_limited)],
+            "cline": [
+                sys.executable, FAKE, str(repo), "cline", "claude",
+                "ready-for-review", "no",
+            ],
+        },
+        status_map=base.status_map,
+        adapters={"aider": "generic", "cline": "generic"},
+        backup_chain=["aider", "cline"],
+    )
+    base_commit = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
+    assert outcome.committed
+    overrides = failover.read_overrides(repo)
+    assert overrides["implementer"].agent == "cline"
+    assert overrides["implementer"].tried == ["codex", "aider"]
+
+
+def test_chain_exhaustion_pauses_with_a_distinct_message(repo, tmp_path):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    also_limited = tmp_path / "also_limited.py"
+    also_limited.write_text(RATE_LIMITED)
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, str(limited)],
+            "claude": [
+                sys.executable, FAKE, str(repo), "claude", "claude",
+                "approved", "yes",
+            ],
+            "aider": [sys.executable, str(also_limited)],
+        },
+        status_map=base.status_map,
+        adapters={"aider": "generic"},
+        backup_chain=["aider"],
+    )
+    base_commit = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as excinfo:
+        loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
+    assert "every backup in the chain is unavailable" in str(excinfo.value)
+    assert "codex" in str(excinfo.value)
+    assert "aider" in str(excinfo.value)
+
+
+def test_no_chain_configured_pauses_exactly_as_before(repo, tmp_path):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, str(limited)],
+            "claude": [
+                sys.executable, FAKE, str(repo), "claude", "claude",
+                "approved", "yes",
+            ],
+        },
+        status_map=base.status_map,
+    )
+    base_commit = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as excinfo:
+        loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
+    assert "hit a usage or rate limit" in str(excinfo.value)
+    assert "every backup in the chain is unavailable" not in str(excinfo.value)

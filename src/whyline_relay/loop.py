@@ -328,11 +328,12 @@ def _run_task(
                 adapter, text, settings.agents[agent], runner=runner
             )
             if reason is not None:
-                # One hop to the first chain entry. Walking the rest of the
-                # chain is a later change; a single entry matches the old
-                # one-backup switch these callers already rely on.
-                backup = settings.backup_chain[0] if settings.backup_chain else None
-                if backup is not None and backup != agent:
+                existing = failover.read_overrides(root).get(role)
+                tried = list(existing.tried) if existing is not None else []
+                if agent not in tried:
+                    tried.append(agent)
+                backup = failover.next_backup(settings.backup_chain, set(tried))
+                if backup is not None:
                     verb, _ = failover.REASON_TEXT[reason]
                     failover.write_override(
                         root,
@@ -342,6 +343,7 @@ def _run_task(
                             backup_for=agent,
                             reason=reason,
                             since=datetime.now().astimezone().isoformat(),
+                            tried=tried,
                         ),
                     )
                     if echo:
@@ -350,9 +352,14 @@ def _run_task(
                             f"({agent} {verb})"
                         )
                     continue
-                existing = failover.read_overrides(root).get(role)
+                if not settings.backup_chain:
+                    raise Paused(
+                        failover.pause_message(agent, role, reason, existing), target
+                    )
                 raise Paused(
-                    failover.pause_message(agent, role, reason, existing), target
+                    f"every backup in the chain is unavailable for {role} "
+                    f"({', '.join(sorted(tried))} all failed)",
+                    target,
                 )
             raise Paused(
                 f"{agent} exited without handing off"
