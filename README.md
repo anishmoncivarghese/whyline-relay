@@ -486,6 +486,27 @@ after so you always see what changed before typing your next line.
 Meta-commands: `/agents` (what's installed vs. configured), `/history`
 (replay the saved transcript), `/clear` (wipe history, asks first), `/exit`.
 
+**Automatic backup, the same idea the implementer/reviewer pipeline has had
+since 0.2.4:**
+
+```toml
+[chat.backup]
+claude = "codex"
+codex  = "grok"
+# agy/grok have no backup here -- a rate limit or auth loss on them just
+# reports and stops, exactly like today
+```
+
+When the agent you're addressing (default or `/prefix`) hits a detected
+usage limit or stops being authenticated, chat writes an override, tells you
+what happened, and immediately re-runs your exact message on the backup --
+no retyping. The switch is sticky: every later turn addressing that same
+agent name resolves straight to the backup, silently, until you
+`/reset-backup [agent]` or `/default` to something else. `/backups` shows
+what's currently active. One hop only -- if the backup also fails, chat
+reports it and stops, the same "no further fallback" rule the pipeline's own
+backup already follows.
+
 ```
 $ whyline-relay chat
 Detected: claude, codex, agy. Not found: grok.

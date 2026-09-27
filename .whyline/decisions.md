@@ -2574,3 +2574,15 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, tests/test_chat_repl.py
 
 <!-- whyline-event: b81349ef298e4f8cb5eaaee89b6f28b5 -->
+
+## 2026-09-27 — Approve chat automatic-backup README documentation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CF-5
+
+**Because:** The new paragraph matches the requested configuration and behavior wording, is placed immediately before the worked chat example, changes no runtime code, and the full plain test suite passes
+
+**Files:** README.md
+
+<!-- whyline-event: 47a37d660c4440e1ad4d0b23d4203498 -->
