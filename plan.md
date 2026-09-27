@@ -563,7 +563,7 @@
 
 
 
-- [ ] RSW-3: `cli.py` — wire the `setup` subcommand
+- [x] RSW-3: `cli.py` — wire the `setup` subcommand
 
   Global constraints:
   - No new runtime dependency.
