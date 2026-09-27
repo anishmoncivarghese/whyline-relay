@@ -25,7 +25,7 @@ from whyline_relay import (
     state,
     whylinecmd,
 )
-from whyline_relay.adapters import bypass
+from whyline_relay.adapters import bypass, grok
 
 
 class Paused(RuntimeError):
@@ -164,7 +164,9 @@ def run_agent(
     return target
 
 
-def _no_handoff_detail(target: Path, adapter: adapters.Adapter) -> str:
+def _no_handoff_detail(
+    target: Path, adapter: adapters.Adapter, command: list[str]
+) -> str:
     """Why an agent that handed nothing off probably stopped, for the human only.
 
     Never used to route. The agent adapter interprets its own output format.
@@ -173,6 +175,9 @@ def _no_handoff_detail(target: Path, adapter: adapters.Adapter) -> str:
         text = target.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+    structured = grok.cancellation_detail(adapter, text, command)
+    if structured:
+        return structured
     return adapter.diagnose(text)
 
 
@@ -348,7 +353,8 @@ def _run_task(
                 )
             raise Paused(
                 f"{agent} exited without handing off"
-                f"{_no_handoff_detail(target, adapter)}; nothing was routed",
+                f"{_no_handoff_detail(target, adapter, settings.agents[agent])}; "
+                "nothing was routed",
                 target,
             )
         if record.task != task.task_id:
@@ -560,7 +566,8 @@ def _run_configured_task(
                 )
             raise Paused(
                 f"{agent} exited without handing off"
-                f"{_no_handoff_detail(target, adapter)}; nothing was routed",
+                f"{_no_handoff_detail(target, adapter, settings.agents[agent])}; "
+                "nothing was routed",
                 target,
             )
         if record.task != task.task_id:

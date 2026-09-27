@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 from whyline_relay import failover
@@ -121,6 +122,49 @@ def test_failover_reason_generic_agent_never_reports_auth():
     assert (
         failover.failover_reason(ADAPTER, "totally ordinary text", ["aider"])
         is None
+    )
+
+
+def test_cancelled_grok_reasoning_cannot_fake_a_rate_limit():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    captured = json.dumps(
+        {
+            "text": "I will inspect the repository first.",
+            "stopReason": "cancelled",
+            "thought": "The task asks me to document a usage limit and rate limit.",
+        },
+        indent=2,
+    )
+    assert failover.rate_limited(ADAPTER, captured, ["grok", "-p"]) is False
+    assert failover.failover_reason(ADAPTER, captured, ["grok", "-p"]) is None
+
+
+def test_non_cancelled_grok_final_text_can_report_a_real_rate_limit():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    captured = json.dumps(
+        {
+            "text": "You have exceeded your usage limit. Try again later.",
+            "stopReason": "end_turn",
+            "thought": "The request failed before any tools ran.",
+        }
+    )
+    assert failover.rate_limited(ADAPTER, captured, ["grok", "-p"]) is True
+    assert (
+        failover.failover_reason(ADAPTER, captured, ["grok", "-p"])
+        == "rate-limit"
+    )
+
+
+def test_other_generic_agents_keep_legacy_text_rate_limit_detection():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    assert (
+        failover.failover_reason(
+            ADAPTER, "You have exceeded your usage limit.", ["aider"]
+        )
+        == "rate-limit"
     )
 
 

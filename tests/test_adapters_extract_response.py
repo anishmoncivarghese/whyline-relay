@@ -45,6 +45,14 @@ def test_generic_verified_agy_and_grok_shapes():
     assert adapters.GENERIC.extract_response(agy_output).strip() == "pong"
 
 
+def test_generic_extracts_a_pretty_printed_grok_result():
+    captured = json.dumps(
+        {"text": "pong", "stopReason": "end_turn", "thought": "done"},
+        indent=2,
+    )
+    assert adapters.GENERIC.extract_response(captured) == "pong"
+
+
 def test_generic_falls_back_to_last_line_detail_when_no_known_field():
     captured = '{"unrelated_field": "x"}\n'
     assert adapters.GENERIC.extract_response(captured) == '{"unrelated_field": "x"}'

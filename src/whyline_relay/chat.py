@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from whyline_relay import adapters, agents, chatlog, config, failover, gitcheck, init, invocation
+from whyline_relay.adapters import grok
 
 CHAT_AGENTS = ("claude", "codex", "agy", "grok")
 
@@ -164,7 +165,7 @@ def _execute_agent_call(
     else:
         raw = result.output or ""
     response = adapter.extract_response(raw)
-    ok = result.exit_code == 0
+    ok = result.exit_code == 0 and not grok.cancelled(adapter, raw, turn_command)
     # commit_all stages everything and no-ops (returns False) when the tree
     # is already clean -- safe to call unconditionally rather than checking
     # is_dirty first, and it's the only reliable way to see a brand-new
@@ -258,7 +259,9 @@ def run_turn(
             failover_notice = failover.pause_message(
                 resolved, requested, reason, override
             )
-    rate_limited = agents.rate_limited(attempt["raw"])
+    rate_limited = failover.rate_limited(
+        attempt["adapter"], attempt["raw"], attempt["command"]
+    )
     # append generates the timestamp and returns the record it persisted.
     # rate_limited, diff_stat, and failover_notice are return-only, so they
     # are added after the write and never become part of the chatlog line.

@@ -29,9 +29,20 @@ class Adapter:
     uses_output_file: bool
 
 
-def extract_or_fallback(text: str, field_names: tuple[str, ...]) -> str:
-    """Try each field name in order against the last JSON line; else return
-    the raw last non-blank line. Shared by claude and generic."""
+def json_object(text: str) -> dict | None:
+    """Return a JSON object from a complete document or its last JSON line.
+
+    Headless tools are inconsistent here: Claude emits one compact JSON line,
+    while Grok's ``--output-format json`` currently pretty-prints one object.
+    """
+    stripped = text.strip()
+    if stripped:
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
     lines = [line for line in text.splitlines() if line.strip()]
     if lines and lines[-1].strip().startswith("{"):
         try:
@@ -39,10 +50,22 @@ def extract_or_fallback(text: str, field_names: tuple[str, ...]) -> str:
         except ValueError:
             parsed = None
         if isinstance(parsed, dict):
-            for field in field_names:
-                value = parsed.get(field)
-                if isinstance(value, str):
-                    return value
+            return parsed
+    return None
+
+
+def extract_or_fallback(text: str, field_names: tuple[str, ...]) -> str:
+    """Try fields against a complete object or last JSON line, then raw text.
+
+    Shared by claude and generic.
+    """
+    parsed = json_object(text)
+    if parsed is not None:
+        for field in field_names:
+            value = parsed.get(field)
+            if isinstance(value, str):
+                return value
+    lines = [line for line in text.splitlines() if line.strip()]
     if lines:
         return "".join(ch for ch in lines[-1].strip() if ch.isprintable())
     return ""

@@ -10,6 +10,7 @@ from typing import Callable
 
 from whyline_relay import agents, config
 from whyline_relay.adapters.base import Adapter
+from whyline_relay.adapters import grok
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -150,7 +151,7 @@ def failover_reason(
     a stand-in command (a test fixture, or a deliberately different wrapper) must never
     have someone else's login checked against it.
     """
-    if agents.rate_limited(text):
+    if rate_limited(adapter, text, command):
         return "rate-limit"
     checkable = (
         adapter.login_argv is not None and Path(command[0]).name == adapter.binary
@@ -158,6 +159,11 @@ def failover_reason(
     if checkable and not still_logged_in(adapter, runner):
         return "auth"
     return None
+
+
+def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:
+    """Detect quota output without treating Grok's private reasoning as fact."""
+    return agents.rate_limited(grok.rate_limit_text(adapter, text, command))
 
 
 def pause_message(

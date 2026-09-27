@@ -171,6 +171,38 @@ def test_generic_agent_silence_uses_its_adapter(repo: Path, monkeypatch):
     assert "second" in raised.value.reason
 
 
+def test_cancelled_grok_turn_names_its_permission_policy(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    grok = repo / "grok"
+    grok.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "print(json.dumps({\n"
+        "    'text': 'I will inspect the repository first.',\n"
+        "    'stopReason': 'cancelled',\n"
+        "    'thought': 'The task discusses a usage limit.',\n"
+        "}, indent=2))\n"
+    )
+    grok.chmod(0o755)
+    configured = settings(repo, config.Roles("grok", "codex"))
+    configured = replace(
+        configured,
+        agents={**configured.agents, "grok": [str(grok), "-p"]},
+        adapters={"grok": "generic"},
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            configured,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+    assert 'Grok reported stopReason "cancelled"' in raised.value.reason
+    assert "permission policy" in raised.value.reason
+    assert "hit a usage or rate limit" not in raised.value.reason
+
+
 def test_implementer_handoff_from_another_agent_pauses(repo: Path, monkeypatch):
     monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
     configured = settings(repo, config.Roles())

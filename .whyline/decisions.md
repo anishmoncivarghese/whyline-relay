@@ -2603,3 +2603,20 @@ Append-only. Written by whyline; readable without it.
 **Files:** docs/releases/v0.2.17.md
 
 <!-- whyline-event: 6c2ea36b0608413e81ced0d172c60e2f -->
+
+## 2026-09-27 — Treat structured Grok cancellation as an ambiguous permission failure, never as quota evidence from private reasoning
+
+**Actor:** codex
+**Role:** implementer
+**Task:** GROK-CANCEL-1
+
+**Because:** Grok emits stopReason=cancelled for denied headless actions while echoing task language in thought; routing on those prose markers caused CF-5 to be falsely labelled rate-limited and could silently switch agents
+
+**Rejected:**
+
+- Search the whole Grok JSON for rate-limit markers — thought repeats untrusted task prose and is not an outcome signal
+- Treat every cancelled Grok result as a real rate limit — cancellation does not distinguish quota from permission denial and would make automatic routing unsafe
+
+**Files:** src/whyline_relay/adapters/grok.py, src/whyline_relay/failover.py, src/whyline_relay/loop.py, src/whyline_relay/chat.py
+
+<!-- whyline-event: fe566c17c9484266bdf75da5203eeb35 -->

@@ -138,6 +138,44 @@ def test_run_turn_flags_a_rate_limited_response(tmp_path: Path):
     assert record["rate_limited"] is True
 
 
+def test_run_turn_does_not_flag_cancelled_grok_reasoning_as_rate_limited(
+    tmp_path: Path,
+):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n'
+    )
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+
+        return RunResult(
+            0,
+            json.dumps(
+                {
+                    "text": "I will inspect the repository first.",
+                    "stopReason": "cancelled",
+                    "thought": "The task discusses a usage limit.",
+                },
+                indent=2,
+            ),
+        )
+
+    record = chat.run_turn(
+        tmp_path,
+        agent="grok",
+        prompt="document failover",
+        settings=settings,
+        run_fn=fake_run_fn,
+    )
+    assert record["response"] == "I will inspect the repository first."
+    assert record["ok"] is False
+    assert record["rate_limited"] is False
+
+
 def test_run_turn_includes_recent_history_in_the_prompt(tmp_path: Path):
     _init_repo(tmp_path)
     settings = config.load(tmp_path)
