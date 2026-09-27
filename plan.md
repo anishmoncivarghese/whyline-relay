@@ -325,7 +325,7 @@
 
 
 
-- [ ] RSW-2: `setup.py` — auto-commit, the doctor gate, and the start confirmation
+- [x] RSW-2: `setup.py` — auto-commit, the doctor gate, and the start confirmation
 
   Global constraints:
   - No new runtime dependency.
