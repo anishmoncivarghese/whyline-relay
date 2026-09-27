@@ -820,7 +820,7 @@
 
   ---
 
-- [ ] CB-4: `brainstorm.py` — review passes and the final synthesis
+- [x] CB-4: `brainstorm.py` — review passes and the final synthesis
 
   Global constraints:
   - No new runtime dependency.
