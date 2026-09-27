@@ -248,3 +248,28 @@ def test_set_role_eof_with_a_preset_falls_back_to_it(tmp_path):
     )
     assert "gpt-5-codex" in config_path.read_text()
     assert result == "implementer set to codex (model gpt-5-codex)"
+
+
+def test_status_shows_tried_history_when_present(tmp_path):
+    from whyline_relay import config, failover, roles
+    settings = config.load(tmp_path)
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride(
+            "grok", "codex", "rate-limit", "2026-01-01T00:00:00",
+            tried=["codex", "claude"],
+        ),
+    )
+    output = roles.status(tmp_path, settings)
+    assert "tried: codex, claude" in output
+
+
+def test_status_omits_tried_when_there_is_only_the_current_backup(tmp_path):
+    from whyline_relay import config, failover, roles
+    settings = config.load(tmp_path)
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride("grok", "codex", "rate-limit", "2026-01-01T00:00:00"),
+    )
+    output = roles.status(tmp_path, settings)
+    assert "tried:" not in output

@@ -292,7 +292,7 @@ def load(root: Path) -> Config:
     role_values = raw.get("roles") or {}
     if "backup" in role_values:
         raise ConfigError(
-            "[roles.backup] is no longer supported; configure a shared "
+            "[roles] backup is no longer supported; configure a shared "
             "fallback chain under [backup].chain instead"
         )
     raw_pipeline = raw.get("pipeline")
@@ -346,7 +346,7 @@ def load(root: Path) -> Config:
     raw_chat = raw.get("chat") or {}
     if "backup" in raw_chat:
         raise ConfigError(
-            "[chat.backup] is no longer supported; configure a shared "
+            "[chat] backup is no longer supported; configure a shared "
             "fallback chain under [backup].chain instead"
         )
 

@@ -83,11 +83,14 @@ def _agents_in_use(
         for role in settings.pipeline.roles.values():
             if role.agent not in agents:
                 agents[role.agent] = (settings.agents[role.agent], None)
-        return agents
-    for role in ("implementer", "reviewer"):
-        name = getattr(settings.roles, role)
+    else:
+        for role in ("implementer", "reviewer"):
+            name = getattr(settings.roles, role)
+            if name not in agents:
+                agents[name] = (settings.agents[name], None)
+    for name in settings.backup_chain:
         if name not in agents:
-            agents[name] = (settings.agents[name], None)
+            agents[name] = (settings.agents[name], "the chain")
     return agents
 
 

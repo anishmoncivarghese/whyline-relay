@@ -254,6 +254,112 @@ def test_every_distinct_configured_program_is_checked(ready_repo: Path, monkeypa
     ]
 
 
+def test_missing_backup_program_names_its_role(ready_repo: Path, monkeypatch):
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[backup]\nchain = ["aider"]\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--message"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: None if name == "aider" else name,
+    )
+
+    checks = preflight.run(
+        ready_repo, allow_dirty=True, runner=successful_runner()
+    )
+
+    assert any(
+        check
+        == preflight.Check(
+            "FAIL",
+            "aider (backup for the chain) is not on PATH",
+            "install aider and make sure it is on PATH",
+        )
+        for check in checks
+    )
+
+
+def test_failed_backup_login_names_its_role(ready_repo: Path, monkeypatch):
+    backup = ready_repo / "claude"
+    backup.write_text("#!/bin/sh\nexit 0\n")
+    backup.chmod(0o755)
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nimplementer = "codex"\nreviewer = "codex"\n'
+        '[backup]\nchain = ["claude"]\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{backup}", "-p"]\n'
+    )
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: name)
+
+    def runner(argv, **kwargs):
+        return _completed(argv, 0 if argv[0] == "whyline" else 1)
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=runner)
+
+    assert any(
+        check
+        == preflight.Check(
+            "FAIL",
+            "claude (backup for the chain) is not logged in",
+            "claude auth login",
+        )
+        for check in checks
+    )
+
+
+def test_the_summary_line_labels_a_backup_as_a_backup_not_a_primary(
+    ready_repo: Path, monkeypatch
+):
+    """Regression: the per-role summary loop derived its label from `agent ==
+    roles.implementer` alone, so a backup-only agent (never a primary) was
+    described as if it were currently filling that role.
+    """
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[roles]\nimplementer = "claude"\nreviewer = "claude"\n'
+        '[backup]\nchain = ["codex"]\n'
+        f'[agents.codex]\ncommand = ["{sys.executable}", "codex-role"]\n'
+        f'[agents.claude]\ncommand = ["{sys.executable}", "claude-role"]\n'
+    )
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: name)
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    messages = [check.message for check in checks]
+    assert not any(msg.startswith("reviewer: codex") for msg in messages), messages
+    assert any(msg.startswith("the chain backup: ") for msg in messages), messages
+
+
+def test_a_pipeline_configured_backup_chain_is_also_checked(
+    ready_repo: Path, monkeypatch
+):
+    (ready_repo / ".whyline" / "relay" / "config.toml").write_text(
+        '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+        '[pipeline]\ndefault_profile = "default"\n'
+        '[pipeline.profiles]\ndefault = ["implement"]\n'
+        '[pipeline.stages.implement]\nrole = "implementer"\nprompt = "implement"\n'
+        '[pipeline.stages.implement.on]\ndone = "@complete"\n'
+        '[backup]\nchain = ["aider"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: None if name == "aider" else name,
+    )
+    checks = preflight.run(
+        ready_repo,
+        runner=lambda *a, **k: subprocess.CompletedProcess(a, 1),
+    )
+    messages = [c.message for c in checks]
+    assert any("aider" in m and "not on PATH" in m for m in messages), messages
+
+
 def test_codex_and_claude_logins_are_checked(ready_repo: Path, monkeypatch):
     target = ready_repo / ".whyline" / "relay" / "config.toml"
     target.write_text(
