@@ -422,7 +422,7 @@
 
   ---
 
-- [ ] CF-3: `chat.py` — the failover-aware turn pipeline
+- [x] CF-3: `chat.py` — the failover-aware turn pipeline
 
   Global constraints:
   - No new runtime dependency.
