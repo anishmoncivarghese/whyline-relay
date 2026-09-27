@@ -237,7 +237,7 @@
 
   ---
 
-- [ ] CF-2: `config.py` — the `[chat.backup]` table
+- [x] CF-2: `config.py` — the `[chat.backup]` table
 
   Global constraints:
   - No new runtime dependency.
