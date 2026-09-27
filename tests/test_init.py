@@ -77,7 +77,7 @@ def test_run_writes_settings_templates_and_config(tmp_path: Path, capsys):
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "review.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "config.toml").exists()
     assert (tmp_path / ".whyline" / "relay" / ".gitignore").read_text() == (
-        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\n"
+        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\nbrainstorm-tmp/\n"
     )
     for relative in GENERATED:
         assert f"Wrote {relative}." in out
@@ -362,7 +362,7 @@ def test_ensure_relay_gitignore_creates_it_when_absent(tmp_path: Path):
     init.ensure_relay_gitignore(tmp_path)
     content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
     assert content == (
-        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\n"
+        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\nbrainstorm-tmp/\n"
     )
 
 
@@ -374,3 +374,11 @@ def test_ensure_relay_gitignore_leaves_an_existing_one_alone(tmp_path: Path):
     (target / ".gitignore").write_text("custom\n")
     init.ensure_relay_gitignore(tmp_path)
     assert (target / ".gitignore").read_text() == "custom\n"
+
+
+def test_relay_gitignore_covers_brainstorm_temp_files(tmp_path: Path):
+    from whyline_relay import init
+
+    init.ensure_relay_gitignore(tmp_path)
+    content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
+    assert "brainstorm-tmp/" in content

@@ -17,6 +17,7 @@ RELAY_GITIGNORE_LINES = (
     "running.json",
     "chat.json",
     "chat-history.jsonl",
+    "brainstorm-tmp/",
 )
 
 

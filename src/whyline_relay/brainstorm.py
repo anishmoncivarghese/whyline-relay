@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from whyline_relay import chat, config
+from whyline_relay import agents, chat, config, gitcheck
 
 MODEL_OPTIONS = (
     ("1", "claude", "Claude"),
@@ -142,3 +142,71 @@ def ask_brainstorm_setup(
         "passes": passes,
         "final_agent": final_agent,
     }
+
+
+def temp_path(root: Path, agent: str) -> Path:
+    return config.relay_dir(root) / "brainstorm-tmp" / f"{agent}.md"
+
+
+def shared_path(root: Path, topic: str) -> Path:
+    return root / "docs" / "brainstorm" / f"{slugify(topic)}.md"
+
+
+def run_pass_zero(
+    root: Path,
+    models: list[tuple[str, str]],
+    topic: str,
+    *,
+    settings: "config.Config",
+    run_fn=None,
+    runner=None,
+    print_fn=None,
+) -> None:
+    """Each model researches independently into its own temp file. A model
+    that can't run is skipped (spec B7) -- it simply leaves no temp file,
+    which merge_pass_zero already treats as absent, not an error."""
+    print_fn = print_fn if print_fn is not None else print
+    for agent_key, label in models:
+        prompt = (
+            f'Research "{topic}" independently. Write your findings to '
+            f"{temp_path(root, agent_key)} as plain markdown. This is your "
+            "own independent pass -- you haven't seen, and shouldn't need, "
+            "any other model's perspective yet."
+        )
+        kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+        if runner is not None:
+            kwargs["runner"] = runner
+        try:
+            chat.run_turn(
+                root,
+                agent=agent_key,
+                prompt=prompt,
+                settings=settings,
+                commit_message=(
+                    f'brainstorm: {agent_key} independent research on "{topic}"'
+                ),
+                **kwargs,
+            )
+        except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+            print_fn(f"{label} could not research this pass: {error}")
+
+
+def merge_pass_zero(root: Path, models: list[tuple[str, str]], topic: str) -> None:
+    """Combines every model's non-empty temp file into the one shared file,
+    under a `## <Label>` heading each, in `models`' own order. Deletes the
+    temp files afterward. An empty or missing temp file is skipped, not an
+    error (spec: "an empty/missing pass-0 temp file is skipped")."""
+    sections = []
+    used_paths = []
+    for agent_key, label in models:
+        path = temp_path(root, agent_key)
+        if path.exists() and path.read_text(encoding="utf-8").strip():
+            sections.append(f"## {label}\n\n{path.read_text(encoding='utf-8').strip()}\n")
+            used_paths.append(path)
+    target = shared_path(root, topic)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    body = f"# Brainstorm: {topic}\n\n" + "\n".join(sections)
+    target.write_text(body, encoding="utf-8")
+    for path in used_paths:
+        path.unlink()
+    gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
