@@ -461,6 +461,45 @@ command = [
 
 **Not yet tested: a logged-out or first-run session might hang** rather than failing promptly, since there is no login-status check to catch this ahead of time and the relay's own subprocess call inherits stdin. Left as a known, unverified risk rather than assumed safe.
 
+## Chat: talk to any configured agent from one terminal
+
+`whyline-relay chat` starts an interactive REPL. Plain text goes to a fixed
+default agent; `/claude`, `/codex`, `/agy`, `/grok` sends one message to that
+agent specifically. Every agent shares one conversation history for the
+repo, saved to `.whyline/relay/chat-history.jsonl` and replayed (capped to a
+token budget, oldest turns dropped first) into every new turn's prompt --
+so switching agents mid-conversation doesn't lose context.
+
+First run in a repo asks which of claude/codex/agy/grok are actually
+installed and which one should be the default; `/default <agent>` changes
+it later.
+
+Agentic turns (file edits, commands) run under each agent's *existing*
+permission floor -- claude and codex always work here, even with no
+`config.toml` in the repo, using their own managed defaults. `agy`/`grok`
+only work in chat if they're already configured as a generic agent (see
+"Using Antigravity today" / "Using Grok today" above) -- chat never invents
+a separate, looser permission set. A turn that changes files is committed
+automatically (`chat: <agent> turn`), and the diff-stat is printed right
+after so you always see what changed before typing your next line.
+
+Meta-commands: `/agents` (what's installed vs. configured), `/history`
+(replay the saved transcript), `/clear` (wipe history, asks first), `/exit`.
+
+```
+$ whyline-relay chat
+Detected: claude, codex, agy. Not found: grok.
+Pick your default agent [claude]:
+Saved. Starting chat -- default agent is claude.
+
+> what does the auth middleware do?
+[claude] The middleware in src/auth/...
+
+> /codex refactor validate_token to raise instead of returning None
+[codex] Done -- validate_token now raises AuthError...
+  3 files changed, committed as a1b2c3d
+```
+
 ## Backup agents
 
 Since 0.2.4, a role can name one backup agent, used automatically when the role's active agent hits a detected usage limit or stops being authenticated:
