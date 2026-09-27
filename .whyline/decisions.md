@@ -2586,3 +2586,20 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: 47a37d660c4440e1ad4d0b23d4203498 -->
+
+## 2026-09-27 — Release chat automatic failover as whyline-relay 0.2.17 with the Grok cancellation limitation disclosed
+
+**Actor:** codex
+**Role:** releaser
+**Task:** CF-RELEASE-0.2.17
+
+**Because:** 0.2.16 is already published, CF-1 through CF-5 are complete, 573 tests pass, the 0.2.17 artifacts are clean and installable, and PyPI/GitHub do not contain 0.2.17
+
+**Rejected:**
+
+- Publish without release notes — would hide the known generic-Grok cancellation and false rate-limit classification risk
+- Fold Grok cancellation handling into this release — that is a separate unimplemented behavioral fix and should not delay or silently expand the reviewed chat-failover plan
+
+**Files:** docs/releases/v0.2.17.md
+
+<!-- whyline-event: 6c2ea36b0608413e81ced0d172c60e2f -->
