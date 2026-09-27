@@ -5,18 +5,18 @@ timeout_minutes = 30
 branch_prefix = "relay/"
 
 [roles]
-implementer = "antigravity"
-reviewer = "codex"
-
-[agents.antigravity]
-adapter = "generic"
-command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-project", "--add-dir", ".", "-p"]
+implementer = "grok"
+reviewer = "antigravity"
 
 [agents.codex]
 command = ["codex", "exec", "-s", "workspace-write", "--color", "never"]
 
 [agents.claude]
 command = ["claude", "-p", "--permission-mode", "acceptEdits", "--output-format", "json", "--settings", ".whyline/relay/claude-settings.json"]
+
+[agents.antigravity]
+adapter = "generic"
+command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--add-dir", ".", "--new-project", "-p"]
 
 [agents.grok]
 adapter = "generic"

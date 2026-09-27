@@ -1,314 +1,188 @@
-- [x] RSW-1: `setup.py` — plan source and the role wizard
+- [ ] CB-1: `chat.py` — `run_turn`/`_execute_agent_call` gain `commit_message`
 
   Global constraints:
   - No new runtime dependency.
-  - `doctor`'s own checks (`preflight.run`/`print_checks`/`failures`) are reused completely unchanged — no new validation engine.
-  - The wizard auto-commits its own generated files (`config.toml`, `prompts/test.md`) before ever running `doctor` or asking to start — a plan already mid-flight elsewhere in this session hit exactly the "working tree has uncommitted changes" wall this must never cause.
-  - `which`/`exec_fn`/`runner` must be resolved at call time, not bound as default arguments.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
   - Every existing test must still pass after every task.
 
-
   **Files:**
-  - Create: `src/whyline_relay/setup.py`
-  - Test: `tests/test_setup.py`
+  - Modify: `src/whyline_relay/chat.py`
+  - Test: `tests/test_chat_turn.py`
 
   **Interfaces:**
-  - Produces: `setup.choose_plan_source(root, settings, *, input_fn=None, print_fn=None, planner_start=None) -> bool` (`True` once a usable plan file exists; `False` if drafting was refused or nothing exists to proceed with). `setup.run_role_wizard(root, *, input_fn=None, print_fn=None) -> dict[str, str]` (`{"implementer": ..., "tester": ..., "reviewer": ...}`; also writes `.whyline/relay/config.toml` and `.whyline/relay/prompts/test.md`).
+  - Produces: `_execute_agent_call(..., *, commit_message: str | None = None)` and `run_turn(..., commit_message: str | None = None)`. When omitted, both behave exactly as today (`f"chat: {agent} turn"`). When given, that exact string is used as the commit message for whichever attempt actually gets committed (the primary agent, or its backup if failover switched).
 
   Step 1: Write the failing tests
 
-  Create `tests/test_setup.py`:
+  First, read `tests/test_chat_turn.py`'s existing `_init_repo` helper (it creates a
+  real git repo in `tmp_path` with one committed `README.md`) so the new tests
+  below match it exactly. Add:
 
   ```python
-  from pathlib import Path
-
-  from whyline_relay import config, setup
-
-
-  def test_choose_plan_source_existing_default_when_plan_exists(tmp_path: Path):
-      (tmp_path / "plan.md").write_text("- [ ] TASK-1: x\n")
-      settings = config.load(tmp_path)
-      answers = iter([""])  # accept the bracketed default: existing
-      result = setup.choose_plan_source(
-          tmp_path, settings,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-      )
-      assert result is True
-
-
-  def test_choose_plan_source_refuses_when_no_plan_and_existing_chosen(tmp_path: Path):
-      settings = config.load(tmp_path)
-      answers = iter(["existing"])
-      printed = []
-      result = setup.choose_plan_source(
-          tmp_path, settings,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
-      )
-      assert result is False
-      assert any("does not exist" in line for line in printed)
-
-
-  def test_choose_plan_source_draft_calls_planner_start(tmp_path: Path):
-      settings = config.load(tmp_path)
-      calls = []
-
-      def fake_planner_start(root, settings_arg, description):
-          calls.append((root, description))
-          (root / settings_arg.plan).write_text("- [ ] TASK-1: drafted\n")
-          return "drafted!"
-
-      answers = iter(["draft", "build a widget"])
-      result = setup.choose_plan_source(
-          tmp_path, settings,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          planner_start=fake_planner_start,
-      )
-      assert result is True
-      assert calls == [(tmp_path, "build a widget")]
-
-
-  def test_choose_plan_source_draft_with_no_description_does_nothing(tmp_path: Path):
-      settings = config.load(tmp_path)
-      calls = []
-      answers = iter(["draft", ""])
-      result = setup.choose_plan_source(
-          tmp_path, settings,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          planner_start=lambda root, s, d: calls.append(d),
-      )
-      assert result is False
-      assert calls == []
-
-
-  def test_choose_plan_source_draft_handles_a_plan_already_in_progress(tmp_path: Path):
-      from whyline_relay import planner
-
+  def test_execute_agent_call_uses_a_custom_commit_message(tmp_path: Path):
+      _init_repo(tmp_path)
       settings = config.load(tmp_path)
 
-      def fake_planner_start(root, settings_arg, description):
-          raise planner.PlanAlreadyInProgress("a plan draft is already in progress")
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          (tmp_path / "new.txt").write_text("x\n")
+          return RunResult(0, '{"type":"result","result":"done"}\n')
 
-      answers = iter(["draft", "build a widget"])
-      printed = []
-      result = setup.choose_plan_source(
-          tmp_path, settings,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
-          planner_start=fake_planner_start,
+      chat._execute_agent_call(
+          tmp_path, "claude", "prompt", "full prompt", settings, fake_run_fn,
+          commit_message="custom: message",
       )
-      assert result is False
-      assert any("already in progress" in line for line in printed)
+      log = subprocess.run(
+          ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+          check=True, capture_output=True, text=True,
+      ).stdout
+      assert "custom: message" in log
 
 
-  def test_run_role_wizard_writes_config_and_test_prompt(tmp_path: Path):
-      answers = iter(["grok", "codex", ""])
-      result = setup.run_role_wizard(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
+  def test_execute_agent_call_default_commit_message_is_unchanged(tmp_path: Path):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          (tmp_path / "new.txt").write_text("x\n")
+          return RunResult(0, '{"type":"result","result":"done"}\n')
+
+      chat._execute_agent_call(
+          tmp_path, "claude", "prompt", "full prompt", settings, fake_run_fn
       )
-      assert result == {"implementer": "grok", "tester": "codex", "reviewer": "claude"}
-      config_text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
-      assert 'implementer = "grok"' in config_text
-      assert 'tester      = "codex"' in config_text
-      assert 'reviewer    = "claude"' in config_text
-      assert "[pipeline.stages.test]" in config_text
-      assert 'default_profile = "full"' in config_text
-      test_prompt = (tmp_path / ".whyline" / "relay" / "prompts" / "test.md").read_text()
-      assert "You are the tester for this task" in test_prompt
-      assert "\x7bactor\x7d" in test_prompt
-      assert "{tester}" not in test_prompt  # no such placeholder exists in render()
+      log = subprocess.run(
+          ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+          check=True, capture_output=True, text=True,
+      ).stdout
+      assert "chat: claude turn" in log
 
 
-  def test_run_role_wizard_config_parses_as_a_valid_pipeline(tmp_path: Path):
-      # The wizard's own output must be immediately usable by config.load --
-      # not just plausible-looking TOML. Uses only built-in agents so this
-      # exercises the happy path; an unconfigured name is Task 2's concern
-      # (doctor correctly reports it as a FAIL rather than crashing).
-      answers = iter(["codex", "claude", "claude"])
-      setup.run_role_wizard(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
+  def test_run_turn_threads_a_custom_commit_message(tmp_path: Path):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          (tmp_path / "new.txt").write_text("x\n")
+          return RunResult(0, '{"type":"result","result":"done"}\n')
+
+      chat.run_turn(
+          tmp_path, agent="claude", prompt="p", settings=settings,
+          run_fn=fake_run_fn, commit_message="brainstorm: claude research",
       )
-      loaded = config.load(tmp_path)
-      assert loaded.pipeline is not None
-      assert set(loaded.pipeline.stages) == {"draft", "test", "review"}
+      log = subprocess.run(
+          ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+          check=True, capture_output=True, text=True,
+      ).stdout
+      assert "brainstorm: claude research" in log
   ```
 
   Step 2: Run tests to verify they fail
 
-  Run: `uv run pytest tests/test_setup.py -v`
-  Expected: FAIL — `whyline_relay.setup` does not exist.
+  Run: `uv run pytest tests/test_chat_turn.py -k commit_message -v`
+  Expected: FAIL — `_execute_agent_call`/`run_turn` do not accept `commit_message`.
 
   Step 3: Implement
 
-  Create `src/whyline_relay/setup.py`:
+  In `src/whyline_relay/chat.py`, change `_execute_agent_call`'s signature.
+  Replace:
 
   ```python
-  """The `whyline-relay setup` wizard: plan source, roles, then a doctor gate."""
+  def _execute_agent_call(
+      root: Path, agent: str, prompt: str, full_prompt: str,
+      settings: "config.Config", run_fn,
+  ) -> dict:
+  ```
 
-  from __future__ import annotations
+  with:
 
-  from pathlib import Path
+  ```python
+  def _execute_agent_call(
+      root: Path, agent: str, prompt: str, full_prompt: str,
+      settings: "config.Config", run_fn, *, commit_message: str | None = None,
+  ) -> dict:
+  ```
 
-  from whyline_relay import config, planner
+  Then, inside the same function, replace:
 
-  TEST_PROMPT_TEMPLATE = """\x7bsync_packet\x7d
+  ```python
+      committed = gitcheck.commit_all(root, f"chat: {agent} turn")
+  ```
 
-  You are the tester for this task. Round \x7bround\x7d.
+  with:
 
-  ## Task \x7btask_id\x7d
+  ```python
+      committed = gitcheck.commit_all(root, commit_message or f"chat: {agent} turn")
+  ```
 
-  \x7btask_text\x7d
+  Change `run_turn`'s signature. Replace:
 
-  ## How to test
-
-  Run the project's own test suite in full, plus anything this task's own
-  instructions call for. Judge only whether the implementation behaves
-  correctly -- not whether the diff is well-written; that is the reviewer's
-  job next.
-
-  Record your ruling -- testing is deciding:
-
-      whyline note "<one-line ruling>" --because "<why>" \\
-        --file <path> --actor \x7bactor\x7d --role tester --task \x7btask_id\x7d
-
-  ## How to finish
-
-  Exactly one of these outcomes.
-
-  Passed: hand off to the reviewer.
-
-      whyline handoff \x7btask_id\x7d --from \x7bactor\x7d --to \x7breviewer\x7d --status passed \\
-        --summary "<what you verified>" --test "<command>: <result>"
-
-  Failed: hand back to the implementer with concrete, actionable detail.
-
-      whyline handoff \x7btask_id\x7d --from \x7bactor\x7d --to \x7bimplementer\x7d --status failed \\
-        --summary "<what failed>" --test "<command>: <result>"
-
-  Do not commit either way -- the reviewer commits once this task is fully
-  approved.
-  """
-
-  PIPELINE_CONFIG_TEMPLATE = """[roles]
-  implementer = "\x7bimplementer\x7d"
-  tester      = "{tester}"
-  reviewer    = "\x7breviewer\x7d"
-
-  [pipeline]
-  default_profile = "full"
-
-  [pipeline.profiles]
-  full = ["draft", "test", "review"]
-
-  [pipeline.stages.draft]
-  role   = "implementer"
-  prompt = "implement"
-  [pipeline.stages.draft.on]
-  ready = "@next"
-
-  [pipeline.stages.test]
-  role       = "tester"
-  prompt     = "test"
-  max_visits = 5
-  [pipeline.stages.test.on]
-  passed = "@next"
-  failed = "draft"
-
-  [pipeline.stages.review]
-  role   = "reviewer"
-  prompt = "review"
-  [pipeline.stages.review.on]
-  approved = "@complete"
-  rejected = "draft"
-  """
-
-
-  def choose_plan_source(
+  ```python
+  def run_turn(
       root: Path,
-      settings: "config.Config",
       *,
-      input_fn=None,
-      print_fn=None,
-      planner_start=None,
-  ) -> bool:
-      """Ask "use existing or draft a new plan?" and act on it. Returns True
-      once a plan file exists and setup should continue; False otherwise."""
-      input_fn = input_fn if input_fn is not None else input
-      print_fn = print_fn if print_fn is not None else print
-      planner_start = planner_start if planner_start is not None else planner.start
+      agent: str,
+      prompt: str,
+      settings: "config.Config | None" = None,
+      run_fn=None,
+      runner=subprocess.run,
+  ) -> dict:
+  ```
 
-      plan_path = root / settings.plan
-      default_choice = "existing" if plan_path.exists() else "draft"
-      choice = (
-          input_fn(
-              f"Use the existing {settings.plan}, or draft a new one? "
-              f"[{default_choice}]: "
-          ).strip().lower()
-          or default_choice
+  with:
+
+  ```python
+  def run_turn(
+      root: Path,
+      *,
+      agent: str,
+      prompt: str,
+      settings: "config.Config | None" = None,
+      run_fn=None,
+      runner=subprocess.run,
+      commit_message: str | None = None,
+  ) -> dict:
+  ```
+
+  Inside `run_turn`, there are two calls to `_execute_agent_call`. Replace the
+  first:
+
+  ```python
+      attempt = _execute_agent_call(root, resolved, prompt, full_prompt, settings, run_fn)
+  ```
+
+  with:
+
+  ```python
+      attempt = _execute_agent_call(
+          root, resolved, prompt, full_prompt, settings, run_fn,
+          commit_message=commit_message,
       )
+  ```
 
-      if choice == "draft":
-          description = input_fn("What should this plan build? ").strip()
-          if not description:
-              print_fn("No description given -- nothing drafted.")
-              return plan_path.exists()
-          try:
-              summary = planner_start(root, settings, description)
-          except planner.PlanAlreadyInProgress as error:
-              print_fn(str(error))
-              return plan_path.exists()
-          print_fn(summary)
-          return plan_path.exists()
+  And replace the second (inside the failover-retry branch):
 
-      if not plan_path.exists():
-          print_fn(
-              f"{settings.plan} does not exist -- write one by hand, or run "
-              f"`whyline-relay plan \"...\"` to draft one, then run "
-              f"`whyline-relay setup` again."
-          )
-          return False
-      return True
+  ```python
+                  attempt = _execute_agent_call(
+                      root, backup, prompt, full_prompt, settings, run_fn
+                  )
+  ```
 
+  with:
 
-  def run_role_wizard(root: Path, *, input_fn=None, print_fn=None) -> dict[str, str]:
-      """Asks implementer/tester/reviewer, writes config.toml and
-      prompts/test.md. Returns the three chosen agent names."""
-      input_fn = input_fn if input_fn is not None else input
-      print_fn = print_fn if print_fn is not None else print
-
-      implementer = input_fn("Who implements? [codex]: ").strip() or "codex"
-      tester = input_fn("Who tests?      [claude]: ").strip() or "claude"
-      reviewer = input_fn("Who reviews?    [claude]: ").strip() or "claude"
-
-      relay = config.relay_dir(root)
-      config_path = relay / "config.toml"
-      config_path.parent.mkdir(parents=True, exist_ok=True)
-      config_path.write_text(
-          PIPELINE_CONFIG_TEMPLATE.format(
-              implementer=implementer, tester=tester, reviewer=reviewer
-          ),
-          encoding="utf-8",
-      )
-      print_fn(f"Wrote {config_path.relative_to(root)}.")
-
-      test_prompt_path = relay / "prompts" / "test.md"
-      test_prompt_path.parent.mkdir(parents=True, exist_ok=True)
-      test_prompt_path.write_text(TEST_PROMPT_TEMPLATE, encoding="utf-8")
-      print_fn(f"Wrote {test_prompt_path.relative_to(root)}.")
-
-      return {"implementer": implementer, "tester": tester, "reviewer": reviewer}
+  ```python
+                  attempt = _execute_agent_call(
+                      root, backup, prompt, full_prompt, settings, run_fn,
+                      commit_message=commit_message,
+                  )
   ```
 
   Step 4: Run tests to verify they pass
 
-  Run: `uv run pytest tests/test_setup.py -v`
+  Run: `uv run pytest tests/test_chat_turn.py -v`
   Expected: PASS, all of them.
 
   Step 5: Run the full suite
@@ -319,40 +193,421 @@
   Step 6: Commit
 
   ```bash
-  git add src/whyline_relay/setup.py tests/test_setup.py
-  git commit -m "feat: setup wizard -- plan source and the implementer/tester/reviewer roles"
+  git add src/whyline_relay/chat.py tests/test_chat_turn.py
+  git commit -m "feat: run_turn accepts a custom commit message"
   ```
 
+  ---
 
-
-- [x] RSW-2: `setup.py` — auto-commit, the doctor gate, and the start confirmation
+- [ ] CB-2: `brainstorm.py` — setup questions, model parsing, availability check
 
   Global constraints:
   - No new runtime dependency.
-  - `doctor`'s own checks (`preflight.run`/`print_checks`/`failures`) are reused completely unchanged — no new validation engine.
-  - The wizard auto-commits its own generated files (`config.toml`, `prompts/test.md`) before ever running `doctor` or asking to start — a plan already mid-flight elsewhere in this session hit exactly the "working tree has uncommitted changes" wall this must never cause.
-  - `which`/`exec_fn`/`runner` must be resolved at call time, not bound as default arguments.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
   - Every existing test must still pass after every task.
 
-
   **Files:**
-  - Modify: `src/whyline_relay/setup.py`
-  - Test: `tests/test_setup.py`
+  - Create: `src/whyline_relay/brainstorm.py`
+  - Test: `tests/test_brainstorm_setup.py`
 
   **Interfaces:**
-  - Consumes: `choose_plan_source`, `run_role_wizard` (Task 1); `gitcheck.commit_all`, `preflight.run`/`print_checks`/`failures` (existing, unchanged).
-  - Produces: `setup.run(root, *, input_fn=None, print_fn=None, exec_fn=None, which=None, runner=None) -> int` — the whole `whyline-relay setup` flow, returning a process exit code.
+  - Consumes: `chat.resolve_command`, `chat.AgentUnavailable` (existing).
+  - Produces: `brainstorm.MODEL_OPTIONS` (tuple of `(number, agent_key, label)`). `brainstorm.slugify(topic: str) -> str`. `brainstorm.parse_model_selection(raw: str) -> list[tuple[str, str]] | None` (list of `(agent_key, label)`, `None` if nothing valid was named). `brainstorm.check_availability(settings, models) -> list[tuple[str, str]]` (the unavailable subset). `brainstorm.ask_brainstorm_setup(root, settings, *, input_fn=None, print_fn=None) -> dict | None` (`{"topic": str, "models": list[tuple[str,str]], "passes": int, "final_agent": str}`, or `None` if the user declined after an availability warning).
 
   Step 1: Write the failing tests
 
-  First, read `src/whyline_relay/preflight.py`'s `Check` dataclass (`status: Literal["ok", "warn", "FAIL"]`, `message: str`, `hint: str | None = None`) so the fakes below match its real shape exactly.
+  Create `tests/test_brainstorm_setup.py`:
 
-  Add to `tests/test_setup.py`:
+  ```python
+  from pathlib import Path
+
+  from whyline_relay import brainstorm, config
+
+
+  def test_slugify_lowercases_and_hyphenates():
+      assert brainstorm.slugify("Best Caching Strategy!") == "best-caching-strategy"
+
+
+  def test_slugify_truncates_long_topics():
+      long_topic = "x" * 200
+      assert len(brainstorm.slugify(long_topic)) == 60
+
+
+  def test_slugify_never_returns_empty():
+      assert brainstorm.slugify("!!!") == "topic"
+
+
+  def test_parse_model_selection_comma_separated():
+      assert brainstorm.parse_model_selection("1,3") == [
+          ("claude", "Claude"), ("agy", "Antigravity"),
+      ]
+
+
+  def test_parse_model_selection_five_means_all():
+      assert brainstorm.parse_model_selection("5") == [
+          ("claude", "Claude"), ("codex", "Codex"),
+          ("agy", "Antigravity"), ("grok", "Grok"),
+      ]
+
+
+  def test_parse_model_selection_rejects_garbage():
+      assert brainstorm.parse_model_selection("abc") is None
+      assert brainstorm.parse_model_selection("6") is None
+      assert brainstorm.parse_model_selection("") is None
+
+
+  def test_parse_model_selection_deduplicates():
+      assert brainstorm.parse_model_selection("1,1,2") == [
+          ("claude", "Claude"), ("codex", "Codex"),
+      ]
+
+
+  def test_check_availability_reports_an_unconfigured_agent(tmp_path: Path):
+      settings = config.load(tmp_path)
+      unavailable = brainstorm.check_availability(
+          settings, [("claude", "Claude"), ("grok", "Grok")]
+      )
+      assert unavailable == [("grok", "Grok")]
+
+
+  def test_check_availability_empty_when_all_configured(tmp_path: Path):
+      settings = config.load(tmp_path)
+      unavailable = brainstorm.check_availability(
+          settings, [("claude", "Claude"), ("codex", "Codex")]
+      )
+      assert unavailable == []
+
+
+  def test_ask_brainstorm_setup_happy_path(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["caching strategy", "1,2", "2", "claude"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result == {
+          "topic": "caching strategy",
+          "models": [("claude", "Claude"), ("codex", "Codex")],
+          "passes": 2,
+          "final_agent": "claude",
+      }
+
+
+  def test_ask_brainstorm_setup_rejects_empty_topic_then_accepts(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["", "real topic", "1", "0", "claude"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result["topic"] == "real topic"
+      assert result["passes"] == 0
+
+
+  def test_ask_brainstorm_setup_defaults_passes_to_one(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["topic", "1", "", "claude"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result["passes"] == 1
+
+
+  def test_ask_brainstorm_setup_rejects_a_final_model_not_selected(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["topic", "1", "1", "codex", "claude"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result["final_agent"] == "claude"
+
+
+  def test_ask_brainstorm_setup_declines_and_aborts_on_unavailable_model(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["topic", "1,4", "1", "claude", "n"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result is None
+
+
+  def test_ask_brainstorm_setup_proceeds_without_an_unavailable_model(tmp_path: Path):
+      settings = config.load(tmp_path)
+      answers = iter(["topic", "1,4", "1", "claude", "y"])
+      result = brainstorm.ask_brainstorm_setup(
+          tmp_path, settings,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+      )
+      assert result["models"] == [("claude", "Claude")]
+  ```
+
+  Step 2: Run tests to verify they fail
+
+  Run: `uv run pytest tests/test_brainstorm_setup.py -v`
+  Expected: FAIL — `whyline_relay.brainstorm` does not exist.
+
+  Step 3: Implement
+
+  Create `src/whyline_relay/brainstorm.py`:
+
+  ```python
+  """Multi-model brainstorming: independent research, combined review passes,
+  then one model's final synthesis -- all built on ordinary chat turns."""
+
+  from __future__ import annotations
+
+  import re
+  from pathlib import Path
+
+  from whyline_relay import chat, config
+
+  MODEL_OPTIONS = (
+      ("1", "claude", "Claude"),
+      ("2", "codex", "Codex"),
+      ("3", "agy", "Antigravity"),
+      ("4", "grok", "Grok"),
+  )
+
+
+  def slugify(topic: str) -> str:
+      lowered = topic.strip().lower()
+      slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+      return slug[:60] or "topic"
+
+
+  def parse_model_selection(raw: str) -> list[tuple[str, str]] | None:
+      """Parses "1,2,4" or "5" (all) into [(agent_key, label), ...], in
+      MODEL_OPTIONS' own order. None if the input names nothing valid."""
+      raw = raw.strip()
+      if not raw:
+          return None
+      if raw == "5":
+          return [(key, label) for _, key, label in MODEL_OPTIONS]
+      tokens = [t.strip() for t in raw.split(",") if t.strip()]
+      by_number = {number: (key, label) for number, key, label in MODEL_OPTIONS}
+      chosen: list[tuple[str, str]] = []
+      for token in tokens:
+          if token not in by_number:
+              return None
+          pair = by_number[token]
+          if pair not in chosen:
+              chosen.append(pair)
+      return chosen or None
+
+
+  def check_availability(
+      settings: "config.Config", models: list[tuple[str, str]]
+  ) -> list[tuple[str, str]]:
+      """The subset of `models` chat.resolve_command would refuse right now --
+      checked before any turn runs (spec B6)."""
+      unavailable = []
+      for agent_key, label in models:
+          try:
+              chat.resolve_command(settings, agent_key)
+          except chat.AgentUnavailable:
+              unavailable.append((agent_key, label))
+      return unavailable
+
+
+  def ask_brainstorm_setup(
+      root: Path,
+      settings: "config.Config",
+      *,
+      input_fn=None,
+      print_fn=None,
+  ) -> dict | None:
+      """Asks topic/models/passes/final-model, validating and reprompting.
+
+      Returns {"topic", "models", "passes", "final_agent"}, or None if the
+      user declined to proceed after an availability warning.
+      """
+      input_fn = input_fn if input_fn is not None else input
+      print_fn = print_fn if print_fn is not None else print
+
+      topic = ""
+      while not topic:
+          topic = input_fn("What should we research? ").strip()
+
+      models: list[tuple[str, str]] | None = None
+      while models is None:
+          menu = ", ".join(f"{n} {label}" for n, _, label in MODEL_OPTIONS)
+          raw = input_fn(f"Which models? ({menu}, 5 all): ").strip()
+          models = parse_model_selection(raw)
+          if models is None:
+              print_fn(
+                  "Not understood -- use comma-separated numbers, e.g. 1,2, "
+                  "or 5 for all."
+              )
+
+      passes = None
+      while passes is None:
+          raw_passes = input_fn("How many passes? [1]: ").strip()
+          if not raw_passes:
+              passes = 1
+          elif raw_passes.isdigit():
+              passes = int(raw_passes)
+          else:
+              print_fn("Enter a whole number of passes (0 or more).")
+
+      valid_keys = {key for key, _ in models}
+      default_final = models[0][0]
+      final_agent = None
+      while final_agent is None:
+          raw_final = (
+              input_fn(
+                  f"Which model gives the final synthesis? [{default_final}]: "
+              ).strip()
+              or default_final
+          )
+          if raw_final in valid_keys:
+              final_agent = raw_final
+          else:
+              print_fn(
+                  f"{raw_final} wasn't one of the models you selected -- pick "
+                  f"one of: {', '.join(valid_keys)}"
+              )
+
+      unavailable = check_availability(settings, models)
+      if unavailable:
+          names = ", ".join(label for _, label in unavailable)
+          pronoun = "them" if len(unavailable) > 1 else "it"
+          proceed = (
+              input_fn(
+                  f"{names} not configured for chat in this repo. Proceed "
+                  f"without {pronoun}? [y/N]: "
+              )
+              .strip()
+              .lower()
+          )
+          if proceed != "y":
+              return None
+          unavailable_keys = {key for key, _ in unavailable}
+          models = [(key, label) for key, label in models if key not in unavailable_keys]
+          if not models:
+              print_fn("No models left to brainstorm with.")
+              return None
+          if final_agent in unavailable_keys:
+              final_agent = models[0][0]
+              print_fn(f"Final synthesis will come from {models[0][1]} instead.")
+
+      return {
+          "topic": topic,
+          "models": models,
+          "passes": passes,
+          "final_agent": final_agent,
+      }
+  ```
+
+  Step 4: Run tests to verify they pass
+
+  Run: `uv run pytest tests/test_brainstorm_setup.py -v`
+  Expected: PASS, all of them.
+
+  Step 5: Run the full suite
+
+  Run: `uv run pytest -q`
+  Expected: PASS.
+
+  Step 6: Commit
+
+  ```bash
+  git add src/whyline_relay/brainstorm.py tests/test_brainstorm_setup.py
+  git commit -m "feat: brainstorm setup -- topic, model selection, availability check"
+  ```
+
+  ---
+
+- [ ] CB-3: `brainstorm.py` — pass 0 and the merge
+
+  Global constraints:
+  - No new runtime dependency.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
+  - Every existing test must still pass after every task.
+
+  **Files:**
+  - Modify: `src/whyline_relay/brainstorm.py`
+  - Modify: `src/whyline_relay/init.py`
+  - Test: `tests/test_brainstorm_pass0.py`
+  - Test: `tests/test_init.py`
+
+  **Interfaces:**
+  - Consumes: `chat.run_turn` with its new `commit_message` parameter (Task 1); `ask_brainstorm_setup`'s returned `models`/`topic` shape (Task 2).
+  - Produces: `brainstorm.temp_path(root, agent: str) -> Path` (`.whyline/relay/brainstorm-tmp/<agent>.md`). `brainstorm.shared_path(root, topic: str) -> Path` (`docs/brainstorm/<slug>.md`). `brainstorm.run_pass_zero(root, models, topic, *, settings, run_fn=None, runner=None, print_fn=None) -> None` (runs each model's research turn; degrades gracefully per spec B7 -- an `AgentMissing`/`AgentTimeout` is caught, printed, and that model is simply skipped for pass 0, leaving no temp file for it). `brainstorm.merge_pass_zero(root, models, topic) -> None` (reads each model's temp file if present and non-empty, writes `shared_path`, commits, deletes the temp files).
+
+  Step 1: Add `brainstorm-tmp/` to the relay gitignore list, with a failing test
+
+  In `tests/test_init.py`, find the existing test for `RELAY_GITIGNORE_LINES`'
+  content (search for `"logs/\nstate.json"` or similar) and add:
+
+  ```python
+  def test_relay_gitignore_covers_brainstorm_temp_files(tmp_path: Path):
+      from whyline_relay import init
+
+      init.ensure_relay_gitignore(tmp_path)
+      content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
+      assert "brainstorm-tmp/" in content
+  ```
+
+  Run: `uv run pytest tests/test_init.py -k brainstorm -v`
+  Expected: FAIL — `brainstorm-tmp/` is not yet in `RELAY_GITIGNORE_LINES`.
+
+  In `src/whyline_relay/init.py`, change:
+
+  ```python
+  RELAY_GITIGNORE_LINES = (
+      "logs/",
+      "state.json",
+      "STOP",
+      "running.json",
+      "chat.json",
+      "chat-history.jsonl",
+  )
+  ```
+
+  to:
+
+  ```python
+  RELAY_GITIGNORE_LINES = (
+      "logs/",
+      "state.json",
+      "STOP",
+      "running.json",
+      "chat.json",
+      "chat-history.jsonl",
+      "brainstorm-tmp/",
+  )
+  ```
+
+  Run: `uv run pytest tests/test_init.py -v`
+  Expected: PASS, all of them.
+
+  ```bash
+  git add src/whyline_relay/init.py tests/test_init.py
+  git commit -m "feat: relay gitignore also covers brainstorm's temp files"
+  ```
+
+  Step 2: Write the failing tests for pass 0 and the merge
+
+  Create `tests/test_brainstorm_pass0.py`:
 
   ```python
   import subprocess
+  from pathlib import Path
 
-  from whyline_relay import preflight
+  from whyline_relay import brainstorm, config
 
 
   def _init_repo(root: Path) -> None:
@@ -360,321 +615,426 @@
       subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
       subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
       (root / "README.md").write_text("hi\n")
-      (root / "plan.md").write_text("- [ ] TASK-1: x\n")
       subprocess.run(["git", "add", "-A"], cwd=root, check=True)
       subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
 
 
-  def test_run_commits_setup_before_running_doctor(tmp_path: Path, monkeypatch):
+  def test_temp_path_is_per_agent_under_the_gitignored_directory(tmp_path: Path):
+      path = brainstorm.temp_path(tmp_path, "claude")
+      assert path == tmp_path / ".whyline" / "relay" / "brainstorm-tmp" / "claude.md"
+
+
+  def test_shared_path_uses_the_slugified_topic(tmp_path: Path):
+      path = brainstorm.shared_path(tmp_path, "Best Caching Strategy!")
+      assert path == tmp_path / "docs" / "brainstorm" / "best-caching-strategy.md"
+
+
+  def test_run_pass_zero_writes_a_temp_file_per_model(tmp_path: Path):
       _init_repo(tmp_path)
-      answers = iter(["existing", "codex", "claude", "claude", "n"])
-      seen_dirty_at_doctor_time = []
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude"), ("codex", "Codex")]
 
-      def fake_runner(*a, **k):
-          # doctor's own login-status checks call this; report "logged in"
-          return subprocess.CompletedProcess(a, 0, "", "")
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          # Simulate the agent editing its own temp file, the way a real
+          # agent's own tool use would -- run_fn itself never writes files in
+          # production; this fake stands in for that.
+          for agent in ("claude", "codex"):
+              if agent in command[0]:
+                  brainstorm.temp_path(tmp_path, agent).parent.mkdir(
+                      parents=True, exist_ok=True
+                  )
+                  brainstorm.temp_path(tmp_path, agent).write_text(
+                      f"{agent} findings\n"
+                  )
+          return RunResult(0, '{"type":"result","result":"done"}\n')
 
-      def fake_preflight_run(root, *a, **k):
-          from whyline_relay import gitcheck
-          seen_dirty_at_doctor_time.append(gitcheck.is_dirty(root))
-          return [preflight.Check("ok", "all good")]
-
-      monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
-      code = setup.run(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
+      brainstorm.run_pass_zero(
+          tmp_path, models, "my topic", settings=settings, run_fn=fake_run_fn,
           print_fn=lambda *a, **k: None,
-          exec_fn=lambda binary, argv: (_ for _ in ()).throw(
-              AssertionError("should not start -- test answers 'n'")
-          ),
-          which=lambda name: "/bin/x",
-          runner=fake_runner,
       )
-      assert seen_dirty_at_doctor_time == [False]
-      assert code == 0
+      assert brainstorm.temp_path(tmp_path, "claude").read_text() == "claude findings\n"
+      assert brainstorm.temp_path(tmp_path, "codex").read_text() == "codex findings\n"
 
 
-  def test_run_refuses_to_offer_start_on_a_fail(tmp_path: Path, monkeypatch):
+  def test_run_pass_zero_skips_a_model_that_is_missing(tmp_path: Path):
       _init_repo(tmp_path)
-      answers = iter(["existing", "codex", "claude", "claude"])
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude")]
 
-      def fake_preflight_run(root, *a, **k):
-          return [preflight.Check("FAIL", "grok is not on PATH", "install grok")]
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay import agents
+          raise agents.AgentMissing("claude is not installed")
 
-      monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
-      code = setup.run(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          exec_fn=lambda binary, argv: (_ for _ in ()).throw(
-              AssertionError("should never be offered on a FAIL")
-          ),
-          which=lambda name: "/bin/x",
+      printed = []
+      brainstorm.run_pass_zero(
+          tmp_path, models, "my topic", settings=settings, run_fn=fake_run_fn,
+          print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
       )
-      assert code == 1
+      assert not brainstorm.temp_path(tmp_path, "claude").exists()
+      assert any("claude" in line for line in printed)
 
 
-  def test_run_asks_before_proceeding_on_a_warn_and_honors_no(tmp_path: Path, monkeypatch):
+  def test_merge_pass_zero_combines_temp_files_into_the_shared_file(tmp_path: Path):
       _init_repo(tmp_path)
-      answers = iter(["existing", "codex", "claude", "claude", "n"])
+      models = [("claude", "Claude"), ("codex", "Codex")]
+      brainstorm.temp_path(tmp_path, "claude").parent.mkdir(parents=True, exist_ok=True)
+      brainstorm.temp_path(tmp_path, "claude").write_text("claude findings\n")
+      brainstorm.temp_path(tmp_path, "codex").write_text("codex findings\n")
 
-      def fake_preflight_run(root, *a, **k):
-          return [preflight.Check("warn", "grok has no login check")]
+      brainstorm.merge_pass_zero(tmp_path, models, "my topic")
 
-      monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
-      code = setup.run(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          exec_fn=lambda binary, argv: (_ for _ in ()).throw(
-              AssertionError("declined -- must not exec")
-          ),
-          which=lambda name: "/bin/x",
-      )
-      assert code == 0
+      shared = brainstorm.shared_path(tmp_path, "my topic").read_text()
+      assert "## Claude" in shared
+      assert "claude findings" in shared
+      assert "## Codex" in shared
+      assert "codex findings" in shared
+      assert shared.index("## Claude") < shared.index("## Codex")
+      assert not brainstorm.temp_path(tmp_path, "claude").exists()
+      assert not brainstorm.temp_path(tmp_path, "codex").exists()
+      log = subprocess.run(
+          ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+          check=True, capture_output=True, text=True,
+      ).stdout
+      assert 'brainstorm: merge independent research on "my topic"' in log
 
 
-  def test_run_execs_into_start_when_clean_and_confirmed(tmp_path: Path, monkeypatch):
+  def test_merge_pass_zero_skips_an_empty_or_missing_temp_file(tmp_path: Path):
       _init_repo(tmp_path)
-      answers = iter(["existing", "codex", "claude", "claude", ""])  # "" accepts [Y]
+      models = [("claude", "Claude"), ("codex", "Codex")]
+      brainstorm.temp_path(tmp_path, "claude").parent.mkdir(parents=True, exist_ok=True)
+      brainstorm.temp_path(tmp_path, "claude").write_text("claude findings\n")
+      # codex's temp file was never created (e.g. it was skipped in pass 0)
 
-      def fake_preflight_run(root, *a, **k):
-          return [preflight.Check("ok", "all good")]
+      brainstorm.merge_pass_zero(tmp_path, models, "my topic")
 
-      monkeypatch.setattr(setup.preflight, "run", fake_preflight_run)
-      calls = []
-      code = setup.run(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          exec_fn=lambda binary, argv: calls.append((binary, argv)),
-          which=lambda name: "/bin/x",
-      )
-      assert calls == [("whyline-relay", ["whyline-relay", "start"])]
-      assert code == 0
-
-
-  def test_run_stops_early_when_no_plan_source_resolved(tmp_path: Path):
-      answers = iter(["existing"])  # no plan.md exists, "existing" is refused
-      code = setup.run(
-          tmp_path,
-          input_fn=lambda prompt="": next(answers),
-          print_fn=lambda *a, **k: None,
-          exec_fn=lambda binary, argv: (_ for _ in ()).throw(
-              AssertionError("must not reach the wizard with no plan")
-          ),
-          which=lambda name: "/bin/x",
-      )
-      assert code == 1
+      shared = brainstorm.shared_path(tmp_path, "my topic").read_text()
+      assert "## Claude" in shared
+      assert "## Codex" not in shared
   ```
 
-  Step 2: Run tests to verify they fail
+  Step 3: Run tests to verify they fail
 
-  Run: `uv run pytest tests/test_setup.py -k "test_run_" -v`
-  Expected: FAIL — `setup.run` does not exist.
+  Run: `uv run pytest tests/test_brainstorm_pass0.py -v`
+  Expected: FAIL — `temp_path`/`shared_path`/`run_pass_zero`/`merge_pass_zero`
+  do not exist.
 
-  Step 3: Implement
+  Step 4: Implement
 
-  Add to `src/whyline_relay/setup.py`. First, extend the imports at the top:
+  Add to `src/whyline_relay/brainstorm.py`. Extend the imports:
 
   ```python
-  from __future__ import annotations
-
-  import os
-  import shutil
-  import sys
-  from pathlib import Path
-
-  from whyline_relay import config, gitcheck, planner, preflight
+  from whyline_relay import agents, chat, config, gitcheck
   ```
 
-  Then add, at the end of the file:
+  Then add:
 
   ```python
-  def _which(name: str) -> str | None:
-      return shutil.which(name)
+  def temp_path(root: Path, agent: str) -> Path:
+      return config.relay_dir(root) / "brainstorm-tmp" / f"{agent}.md"
 
 
-  def _exec(binary: str, argv: list[str]) -> None:
-      os.execvp(binary, argv)
+  def shared_path(root: Path, topic: str) -> Path:
+      return root / "docs" / "brainstorm" / f"{slugify(topic)}.md"
 
 
-  def run(
+  def run_pass_zero(
       root: Path,
+      models: list[tuple[str, str]],
+      topic: str,
       *,
-      input_fn=None,
-      print_fn=None,
-      exec_fn=None,
-      which=None,
+      settings: "config.Config",
+      run_fn=None,
       runner=None,
-  ) -> int:
-      """The whole `whyline-relay setup` flow: plan source, roles, an
-      auto-committed setup, doctor's gate, then an offer to start."""
-      input_fn = input_fn if input_fn is not None else input
+      print_fn=None,
+  ) -> None:
+      """Each model researches independently into its own temp file. A model
+      that can't run is skipped (spec B7) -- it simply leaves no temp file,
+      which merge_pass_zero already treats as absent, not an error."""
       print_fn = print_fn if print_fn is not None else print
-      exec_fn = exec_fn if exec_fn is not None else _exec
-      which = which if which is not None else _which
+      for agent_key, label in models:
+          prompt = (
+              f'Research "{topic}" independently. Write your findings to '
+              f"{temp_path(root, agent_key)} as plain markdown. This is your "
+              "own independent pass -- you haven't seen, and shouldn't need, "
+              "any other model's perspective yet."
+          )
+          kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+          if runner is not None:
+              kwargs["runner"] = runner
+          try:
+              chat.run_turn(
+                  root,
+                  agent=agent_key,
+                  prompt=prompt,
+                  settings=settings,
+                  commit_message=(
+                      f'brainstorm: {agent_key} independent research on "{topic}"'
+                  ),
+                  **kwargs,
+              )
+          except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+              print_fn(f"{label} could not research this pass: {error}")
 
-      settings = config.load(root)
-      if not choose_plan_source(root, settings, input_fn=input_fn, print_fn=print_fn):
-          return 1
 
-      run_role_wizard(root, input_fn=input_fn, print_fn=print_fn)
+  def merge_pass_zero(root: Path, models: list[tuple[str, str]], topic: str) -> None:
+      """Combines every model's non-empty temp file into the one shared file,
+      under a `## <Label>` heading each, in `models`' own order. Deletes the
+      temp files afterward. An empty or missing temp file is skipped, not an
+      error (spec: "an empty/missing pass-0 temp file is skipped")."""
+      sections = []
+      used_paths = []
+      for agent_key, label in models:
+          path = temp_path(root, agent_key)
+          if path.exists() and path.read_text(encoding="utf-8").strip():
+              sections.append(f"## {label}\n\n{path.read_text(encoding='utf-8').strip()}\n")
+              used_paths.append(path)
 
-      if gitcheck.commit_all(root, "setup: assign implementer/tester/reviewer roles"):
-          print_fn("Committed setup.")
+      target = shared_path(root, topic)
+      target.parent.mkdir(parents=True, exist_ok=True)
+      body = f"# Brainstorm: {topic}\n\n" + "\n".join(sections)
+      target.write_text(body, encoding="utf-8")
 
-      preflight_kwargs = {} if runner is None else {"runner": runner}
-      checks = preflight.run(root, **preflight_kwargs)
-      preflight.print_checks(checks, stream=sys.stdout, include_ok=True, summary=True)
+      for path in used_paths:
+          path.unlink()
 
-      if preflight.failures(checks):
-          print_fn("Fix the FAILs above before starting.")
-          return 1
-
-      has_warnings = any(check.status == "warn" for check in checks)
-      if has_warnings:
-          proceed = input_fn("Proceed anyway? [y/N]: ").strip().lower()
-          if proceed != "y":
-              return 0
-
-      start_choice = input_fn("Ready to start? [Y/n]: ").strip().lower()
-      if start_choice in ("", "y", "yes"):
-          exec_fn("whyline-relay", ["whyline-relay", "start"])
-      return 0
+      gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
   ```
 
-  Step 4: Run tests to verify they pass
+  Step 5: Run tests to verify they pass
 
-  Run: `uv run pytest tests/test_setup.py -v`
+  Run: `uv run pytest tests/test_brainstorm_pass0.py -v`
   Expected: PASS, all of them.
 
-  Step 5: Run the full suite
+  Step 6: Run the full suite
 
   Run: `uv run pytest -q`
   Expected: PASS.
 
-  Step 6: Commit
+  Step 7: Commit
 
   ```bash
-  git add src/whyline_relay/setup.py tests/test_setup.py
-  git commit -m "feat: setup auto-commits, gates on doctor, then offers to start"
+  git add src/whyline_relay/brainstorm.py tests/test_brainstorm_pass0.py
+  git commit -m "feat: brainstorm pass 0 -- independent research, then the merge"
   ```
 
+  ---
 
-
-- [x] RSW-3: `cli.py` — wire the `setup` subcommand
+- [ ] CB-4: `brainstorm.py` — review passes and the final synthesis
 
   Global constraints:
   - No new runtime dependency.
-  - `doctor`'s own checks (`preflight.run`/`print_checks`/`failures`) are reused completely unchanged — no new validation engine.
-  - The wizard auto-commits its own generated files (`config.toml`, `prompts/test.md`) before ever running `doctor` or asking to start — a plan already mid-flight elsewhere in this session hit exactly the "working tree has uncommitted changes" wall this must never cause.
-  - `which`/`exec_fn`/`runner` must be resolved at call time, not bound as default arguments.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
   - Every existing test must still pass after every task.
 
-
   **Files:**
-  - Modify: `src/whyline_relay/cli.py`
-  - Test: `tests/test_cli_setup.py`
+  - Modify: `src/whyline_relay/brainstorm.py`
+  - Test: `tests/test_brainstorm_passes.py`
 
   **Interfaces:**
-  - Consumes: `setup.run` (Task 2).
-  - Produces: `whyline-relay setup [--repo PATH]` on the command line.
+  - Consumes: `chat.run_turn` with `commit_message` (Task 1); `shared_path` (Task 3).
+  - Produces: `brainstorm.run_review_pass(root, models, topic, pass_number, *, settings, run_fn=None, runner=None, print_fn=None) -> None`. `brainstorm.run_final_synthesis(root, final_agent, models, topic, *, settings, run_fn=None, runner=None) -> dict` (the raw `chat.run_turn` record).
 
   Step 1: Write the failing tests
 
-  Create `tests/test_cli_setup.py`:
+  Create `tests/test_brainstorm_passes.py`:
 
   ```python
-  import os
+  import subprocess
   from pathlib import Path
 
-  from whyline_relay import cli
+  from whyline_relay import brainstorm, config
 
 
-  def test_setup_subcommand_is_registered():
-      parser = cli.build_parser()
-      args = parser.parse_args(["setup"])
-      assert args.command == "setup"
+  def _init_repo(root: Path) -> None:
+      subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+      subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+      subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+      (root / "README.md").write_text("hi\n")
+      subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+      subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
 
 
-  def test_cmd_setup_calls_setup_run(tmp_path: Path, monkeypatch):
-      from whyline_relay import setup
-
+  def test_run_review_pass_invokes_every_model_once(tmp_path: Path):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude"), ("codex", "Codex")]
       calls = []
-      monkeypatch.setattr(setup, "run", lambda root, **kwargs: calls.append(root) or 0)
-      previous = os.getcwd()
-      os.chdir(tmp_path)
-      try:
-          args = cli.build_parser().parse_args(["setup"])
-          code = cli.cmd_setup(args)
-      finally:
-          os.chdir(previous)
-      assert code == cli.EXIT_OK
-      assert calls == [tmp_path.resolve()]
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          calls.append(command[0])
+          return RunResult(0, '{"type":"result","result":"revised"}\n')
+
+      brainstorm.run_review_pass(
+          tmp_path, models, "my topic", 1, settings=settings, run_fn=fake_run_fn,
+          print_fn=lambda *a, **k: None,
+      )
+      assert calls == ["claude", "codex"]
+
+
+  def test_run_review_pass_skips_a_model_that_times_out(tmp_path: Path):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude"), ("codex", "Codex")]
+      calls = []
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay import agents
+          from whyline_relay.agents import RunResult
+          calls.append(command[0])
+          if command[0] == "claude":
+              raise agents.AgentTimeout("claude exceeded 300s")
+          return RunResult(0, '{"type":"result","result":"revised"}\n')
+
+      printed = []
+      brainstorm.run_review_pass(
+          tmp_path, models, "my topic", 1, settings=settings, run_fn=fake_run_fn,
+          print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+      )
+      assert calls == ["claude", "codex"]  # codex still ran despite claude's timeout
+      assert any("claude" in line for line in printed)
+
+
+  def test_run_review_pass_commit_message_names_the_pass_and_topic(
+      tmp_path: Path, monkeypatch
+  ):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude")]
+      seen = {}
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          return RunResult(0, '{"type":"result","result":"revised"}\n')
+
+      real_run_turn = brainstorm.chat.run_turn
+
+      def spying_run_turn(*args, **kwargs):
+          seen["commit_message"] = kwargs.get("commit_message")
+          return real_run_turn(*args, **kwargs)
+
+      monkeypatch.setattr(brainstorm.chat, "run_turn", spying_run_turn)
+      brainstorm.run_review_pass(
+          tmp_path, models, "my topic", 2, settings=settings,
+          run_fn=fake_run_fn, print_fn=lambda *a, **k: None,
+      )
+      assert seen["commit_message"] == 'brainstorm: claude review pass 2 on "my topic"'
+
+
+  def test_run_final_synthesis_only_invokes_the_designated_model(tmp_path: Path):
+      _init_repo(tmp_path)
+      settings = config.load(tmp_path)
+      models = [("claude", "Claude"), ("codex", "Codex")]
+      calls = []
+
+      def fake_run_fn(command, prompt, **kwargs):
+          from whyline_relay.agents import RunResult
+          calls.append(command[0])
+          return RunResult(0, '{"type":"result","result":"final answer"}\n')
+
+      record = brainstorm.run_final_synthesis(
+          tmp_path, "codex", models, "my topic", settings=settings, run_fn=fake_run_fn
+      )
+      assert calls == ["codex"]
+      assert record["response"] == "final answer"
+      assert record["agent"] == "codex"
   ```
 
   Step 2: Run tests to verify they fail
 
-  Run: `uv run pytest tests/test_cli_setup.py -v`
-  Expected: FAIL — no `setup` subcommand, no `cmd_setup`.
+  Run: `uv run pytest tests/test_brainstorm_passes.py -v`
+  Expected: FAIL — `run_review_pass`/`run_final_synthesis` do not exist.
 
   Step 3: Implement
 
-  In `src/whyline_relay/cli.py`, add `setup` to the module-level import from
-  `whyline_relay` (alongside `adapters, agents, chat, config, ...`):
+  Add to `src/whyline_relay/brainstorm.py`:
 
   ```python
-  from whyline_relay import (
-      adapters,
-      agents,
-      chat,
-      config,
-      failover,
-      gitcheck,
-      init,
-      invocation,
-      loop,
-      notify,
-      plan,
-      planhelp,
-      planner,
-      preflight,
-      prompts,
-      remove,
-      roles,
-      running,
-      setup,
-      state,
-      whylinecmd,
-  )
-  ```
+  def run_review_pass(
+      root: Path,
+      models: list[tuple[str, str]],
+      topic: str,
+      pass_number: int,
+      *,
+      settings: "config.Config",
+      run_fn=None,
+      runner=None,
+      print_fn=None,
+  ) -> None:
+      """Every selected model, once, revises only its own section. A model
+      that can't run this pass is skipped (spec B7) -- its section simply
+      keeps whatever it held from the last successful pass."""
+      print_fn = print_fn if print_fn is not None else print
+      shared = shared_path(root, topic)
+      for agent_key, label in models:
+          prompt = (
+              f'Combined review pass {pass_number} of a brainstorm on '
+              f'"{topic}". Read {shared} in full. Update your own section '
+              f'("## {label}") in place based on what you now see from the '
+              "others -- replace it with your revised thinking, rather than "
+              "appending a new dated block; the file should only ever show "
+              "your current view, not a history of past passes. Do not touch "
+              "any other model's section."
+          )
+          kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+          if runner is not None:
+              kwargs["runner"] = runner
+          try:
+              record = chat.run_turn(
+                  root,
+                  agent=agent_key,
+                  prompt=prompt,
+                  settings=settings,
+                  commit_message=(
+                      f'brainstorm: {agent_key} review pass {pass_number} '
+                      f'on "{topic}"'
+                  ),
+                  **kwargs,
+              )
+          except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+              print_fn(f"{label} could not review this pass: {error}")
+              continue
+          if not record["ok"]:
+              print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
 
-  In `build_parser()`, right after the `chat_parser` block, add:
 
-  ```python
-      setup_parser = subparsers.add_parser(
-          "setup", help="Assign roles to a plan and gate on doctor before starting"
+  def run_final_synthesis(
+      root: Path,
+      final_agent: str,
+      models: list[tuple[str, str]],
+      topic: str,
+      *,
+      settings: "config.Config",
+      run_fn=None,
+      runner=None,
+  ) -> dict:
+      shared = shared_path(root, topic)
+      prompt = (
+          f'All review passes are complete for this brainstorm on "{topic}". '
+          f"Read {shared} in full and write a new \"## Final Synthesis\" "
+          "section (at the top, right after the title) combining the "
+          "strongest ideas from every model's section into one clear, "
+          "actionable recommendation."
       )
-      setup_parser.add_argument(
-          "--repo", default=".", help="Use this repository root (default: current directory)."
+      kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+      if runner is not None:
+          kwargs["runner"] = runner
+      return chat.run_turn(
+          root,
+          agent=final_agent,
+          prompt=prompt,
+          settings=settings,
+          commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
+          **kwargs,
       )
   ```
-
-  Add a new command function, near `cmd_chat`:
-
-  ```python
-  def cmd_setup(args: argparse.Namespace) -> int:
-      root = Path(args.repo).resolve()
-      return setup.run(root)
-  ```
-
-  Find `main()`'s dispatch dict (the one containing `"chat": cmd_chat`) and
-  add `"setup": cmd_setup` to it.
 
   Step 4: Run tests to verify they pass
 
-  Run: `uv run pytest tests/test_cli_setup.py -v`
+  Run: `uv run pytest tests/test_brainstorm_passes.py -v`
   Expected: PASS, all of them.
 
   Step 5: Run the full suite
@@ -685,21 +1045,171 @@
   Step 6: Commit
 
   ```bash
-  git add src/whyline_relay/cli.py tests/test_cli_setup.py
-  git commit -m "feat: whyline-relay setup -- the CLI entry point"
+  git add src/whyline_relay/brainstorm.py tests/test_brainstorm_passes.py
+  git commit -m "feat: brainstorm review passes and the final synthesis"
   ```
 
+  ---
 
-
-- [x] RSW-4: README — document the setup wizard
+- [ ] CB-5: `chat.py` — wire `/brainstorm` into the REPL
 
   Global constraints:
   - No new runtime dependency.
-  - `doctor`'s own checks (`preflight.run`/`print_checks`/`failures`) are reused completely unchanged — no new validation engine.
-  - The wizard auto-commits its own generated files (`config.toml`, `prompts/test.md`) before ever running `doctor` or asking to start — a plan already mid-flight elsewhere in this session hit exactly the "working tree has uncommitted changes" wall this must never cause.
-  - `which`/`exec_fn`/`runner` must be resolved at call time, not bound as default arguments.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
   - Every existing test must still pass after every task.
 
+  **Files:**
+  - Modify: `src/whyline_relay/chat.py`
+  - Test: `tests/test_chat_repl.py`
+
+  **Interfaces:**
+  - Consumes: `brainstorm.ask_brainstorm_setup`, `brainstorm.run_pass_zero`, `brainstorm.merge_pass_zero`, `brainstorm.run_review_pass`, `brainstorm.run_final_synthesis` (Tasks 2-4).
+  - Produces: `/brainstorm` recognized by `repl()`.
+
+  Step 1: Write the failing tests
+
+  Read `tests/test_chat_repl.py`'s existing `_repo`/`_fake_run_fn` fixtures
+  (already used throughout that file) before writing these, so the new tests
+  match them exactly. Add:
+
+  ```python
+  def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
+      root = _repo(tmp_path)
+      chat.save_default_agent(root, "claude")
+      answers = iter([
+          "/brainstorm",
+          "caching strategy",  # topic
+          "1,2",  # models: claude, codex
+          "0",  # passes
+          "claude",  # final synthesis model
+          "/exit",
+      ])
+      printed = []
+      chat.repl(
+          root,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+          run_fn=_fake_run_fn,
+          which=lambda name: "/bin/x",
+      )
+      assert any("an answer" in line for line in printed)
+      from whyline_relay import brainstorm
+      shared = brainstorm.shared_path(root, "caching strategy")
+      assert shared.exists()
+
+
+  def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path: Path):
+      root = _repo(tmp_path)
+      chat.save_default_agent(root, "claude")
+      answers = iter([
+          "/brainstorm",
+          "some topic",
+          "4",  # grok -- not configured for chat in this repo
+          "0",
+          "grok",
+          "n",  # decline to proceed without it
+          "/exit",
+      ])
+      chat.repl(
+          root,
+          input_fn=lambda prompt="": next(answers),
+          print_fn=lambda *a, **k: None,
+          run_fn=_fake_run_fn,
+          which=lambda name: "/bin/x",
+      )
+      from whyline_relay import brainstorm
+      assert not brainstorm.shared_path(root, "some topic").exists()
+  ```
+
+  Step 2: Run tests to verify they fail
+
+  Run: `uv run pytest tests/test_chat_repl.py -k brainstorm -v`
+  Expected: FAIL — `/brainstorm` is rejected as an unknown command.
+
+  Step 3: Implement
+
+  In `src/whyline_relay/chat.py`, add `brainstorm` to the `whyline_relay`
+  import line:
+
+  ```python
+  from whyline_relay import adapters, agents, brainstorm, chatlog, config, failover, gitcheck, init, invocation
+  ```
+
+  Update `SLASH_COMMANDS`. Change:
+
+  ```python
+  SLASH_COMMANDS = (
+      "/default", "/agents", "/history", "/clear", "/exit",
+      "/backups", "/reset-backup",
+  )
+  ```
+
+  to:
+
+  ```python
+  SLASH_COMMANDS = (
+      "/default", "/agents", "/history", "/clear", "/exit",
+      "/backups", "/reset-backup", "/brainstorm",
+  )
+  ```
+
+  Add a new branch in `repl()`'s main loop, right after the existing
+  `/reset-backup` branch and before the `/default` branch:
+
+  ```python
+          if line == "/brainstorm":
+              setup = brainstorm.ask_brainstorm_setup(
+                  root, settings, input_fn=input_fn, print_fn=print_fn
+              )
+              if setup is None:
+                  continue
+              brainstorm.run_pass_zero(
+                  root, setup["models"], setup["topic"], settings=settings,
+                  run_fn=run_fn, print_fn=print_fn,
+              )
+              brainstorm.merge_pass_zero(root, setup["models"], setup["topic"])
+              for pass_number in range(1, setup["passes"] + 1):
+                  brainstorm.run_review_pass(
+                      root, setup["models"], setup["topic"], pass_number,
+                      settings=settings, run_fn=run_fn, print_fn=print_fn,
+                  )
+              record = brainstorm.run_final_synthesis(
+                  root, setup["final_agent"], setup["models"], setup["topic"],
+                  settings=settings, run_fn=run_fn,
+              )
+              print_fn(f"[{record['agent']}] {record['response']}")
+              continue
+  ```
+
+  Step 4: Run tests to verify they pass
+
+  Run: `uv run pytest tests/test_chat_repl.py -v`
+  Expected: PASS, all of them.
+
+  Step 5: Run the full suite
+
+  Run: `uv run pytest -q`
+  Expected: PASS.
+
+  Step 6: Commit
+
+  ```bash
+  git add src/whyline_relay/chat.py tests/test_chat_repl.py
+  git commit -m "feat: wire /brainstorm into the chat REPL"
+  ```
+
+  ---
+
+- [ ] CB-6: README — document `/brainstorm`
+
+  Global constraints:
+  - No new runtime dependency.
+  - run_turn is reused completely unchanged in every phase except for the one new, optional commit_message parameter.
+  - Pass 0 is structurally blind: a model's independent research goes to its own private temp file, never the shared file, until every selected model has finished and the files are merged by plain code.
+  - A mid-brainstorm crash on one model never aborts the whole session -- the rest of the phase, and later phases, continue.
+  - Every existing test must still pass after every task.
 
   **Files:**
   - Modify: `README.md`
@@ -709,65 +1219,39 @@
 
   Step 1: Update the README
 
-  Add a new section, immediately after "## Configuring a custom pipeline":
+  Find the "## Chat: talk to any configured agent from one terminal" section
+  and add a new paragraph, immediately after its existing "Automatic backup"
+  paragraph (added for 0.2.17):
 
   ````markdown
-  ## `whyline-relay setup`: a guided path from plan to running
-
-  Hand-writing `[roles]`/`[pipeline]`/a stage's prompt file works, but
-  `whyline-relay setup` does the common case (implementer -> tester ->
-  reviewer) for you, and refuses to let you start until `doctor`'s own checks
-  pass:
+  **`/brainstorm` runs a topic through several models at once:**
 
   ```
-  $ whyline-relay setup
-  Use the existing plan.md, or draft a new one? [existing]:
-  Who implements? [codex]: grok
-  Who tests?      [claude]: codex
-  Who reviews?    [claude]:
-  Wrote .whyline/relay/config.toml.
-  Wrote .whyline/relay/prompts/test.md.
-  Committed setup.
-
-    ok    directory is inside a git repository
-    ok    whyline is installed and initialised
-    ok    relay setup is complete
-    ok    grok is on PATH
-    ok    codex is on PATH
-    ok    codex is logged in
-    ok    plan parses and has unchecked tasks: plan.md
-    ok    working tree is clean
-  All checks passed.
-
-  Ready to start? [Y/n]:
+  > /brainstorm
+  What should we research? caching strategy for the API
+  Which models? (1 Claude, 2 Codex, 3 Antigravity, 4 Grok, 5 all): 1,2
+  How many passes? [1]: 1
+  Which model gives the final synthesis? [claude]: 
   ```
 
-  If no plan file exists yet (or you choose "draft"), it calls the existing
-  `whyline-relay plan "..."` planner workflow first, then continues into the
-  role wizard once a plan exists. The wizard's own generated files are
-  committed automatically, before `doctor` ever runs -- so you never hit
-  "working tree has uncommitted changes" right after finishing it. A `FAIL`
-  from `doctor` refuses to offer `start` at all; a `warn`-only result asks
-  whether to proceed anyway. This is exactly `whyline-relay doctor`'s own
-  existing check list, run for you as part of the flow -- not a new or
-  different validation.
+  Each selected model independently researches the topic into its own
+  private file first (true independence -- no model can see another's until
+  every one has finished); those get merged into one real file,
+  `docs/brainstorm/<topic>.md`, under a heading per model. Each configured
+  review pass has every model re-read the whole file and revise only its own
+  section based on what it now sees from the others. Finally, the model you
+  named writes a "Final Synthesis" section and its answer is shown like any
+  normal chat response. Every step is an ordinary, auto-committed chat turn
+  under the hood -- brainstorming inherits the same permission floor and
+  automatic backup/failover chat already has for everything else. A model
+  that can't run a given pass (missing, timed out, or not configured) is
+  skipped for that pass rather than stopping the whole session; you're told
+  which one and why.
   ````
 
   Step 2: Commit
 
   ```bash
   git add README.md
-  git commit -m "docs: document whyline-relay setup"
+  git commit -m "docs: document /brainstorm"
   ```
-
-  ## Not in this plan
-
-  - **Automatic pipeline failover** — a separate plan, deferred (per the
-    original sequencing: chat-failover, then pipeline-failover, then this
-    wizard). The wizard's generated `config.toml` has no `[roles.backup]`
-    (forbidden together with `[pipeline]` regardless).
-  - **A fully custom stage/transition builder** — explicit non-goal; the
-    wizard offers exactly the fixed implementer/tester/reviewer template.
-  - **Whyline's own entry menu** — a separate, sibling plan,
-    `2026-09-27-whyline-entry-menu.md`. That plan's "relay" choice execs into
-    the `setup` command this plan builds; either can ship first.
