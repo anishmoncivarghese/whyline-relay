@@ -1612,7 +1612,7 @@
   ---
 
 
-- [ ] BC-7: `doctor` checks the chain; `roles status` shows `tried`
+- [x] BC-7: `doctor` checks the chain; `roles status` shows `tried`
 
 
   **Files:**
