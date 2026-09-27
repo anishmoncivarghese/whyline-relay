@@ -2788,3 +2788,17 @@ Append-only. Written by whyline; readable without it.
 **Files:** pyproject.toml
 
 <!-- whyline-event: 2bbdb355b524409faa3a37e31feb06a8 -->
+
+## 2026-09-27 — Auto-resume script recovered CB-1: grok exited without handing off but its work passed the full suite
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** CB-1
+
+**Because:** the same handoff-stall pattern seen throughout this project's use of grok -- its code is reliably correct, it just doesn't always call whyline handoff itself
+
+**Rejected:**
+
+- reset and redo — wastes correct, test-verified work
+
+<!-- whyline-event: 07e971530dbb486c82ee1656476a2f77 -->
