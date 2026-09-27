@@ -2434,3 +2434,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, src/whyline_relay/chatlog.py, src/whyline_relay/agents.py, src/whyline_relay/init.py, src/whyline_relay/gitcheck.py, src/whyline_relay/cli.py
 
 <!-- whyline-event: cb1b9ea0740149958dd5fb751b368b48 -->
+
+## 2026-09-27 — Found and fixed a real bug via empirical end-to-end smoke testing (not just mocked tests): chat's zero-config claude support was actually broken
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** RCR-followup
+
+**Because:** D5 claimed claude/codex always work in chat with zero relay config present, but claude's managed default_command references .whyline/relay/claude-settings.json, which only whyline-relay's init flow ever created -- a repo that only ever ran chat made the real claude CLI fail with 'Settings file not found.' Confirmed by running a real chat session against the real claude binary, not just the mocked test suite, which never exercises the real CLI's settings-file requirement. Fixed by generating the file on first use (same content init.run would write), committed separately from the turn itself so the turn's own diff-stat isn't polluted by one-time setup
+
+**Rejected:**
+
+- leave it as a known limitation and require init first — contradicts D5's explicit intent and the README's own claim
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: 657229f629114c7c88c0e286341b4087 -->
