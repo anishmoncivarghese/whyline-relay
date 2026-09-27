@@ -815,7 +815,7 @@
 
   ---
 
-- [ ] CF-4: `chat.py` — `/backups` and `/reset-backup`
+- [x] CF-4: `chat.py` — `/backups` and `/reset-backup`
 
   Global constraints:
   - No new runtime dependency.
