@@ -598,6 +598,44 @@ A stage's `on` table maps the outcome your prompt tells the agent to hand off wi
 
 **Not supported together with `[pipeline]`:** `[roles.backup]` (a configured pipeline has no failover — a stage with no working agent pauses) and a hand-written `[status_map]` (a pipeline's stages define their own outcome labels instead). Both are refused at config-load time with an explanation. There is no `init`/`roles set` wizard for authoring a `[pipeline]` table yet — write it by hand, matching the shape above.
 
+## `whyline-relay setup`: a guided path from plan to running
+
+Hand-writing `[roles]`/`[pipeline]`/a stage's prompt file works, but
+`whyline-relay setup` does the common case (implementer -> tester ->
+reviewer) for you, and refuses to let you start until `doctor`'s own checks
+pass:
+
+```
+$ whyline-relay setup
+Use the existing plan.md, or draft a new one? [existing]:
+Who implements? [codex]: grok
+Who tests?      [claude]: codex
+Who reviews?    [claude]:
+Wrote .whyline/relay/config.toml.
+Wrote .whyline/relay/prompts/test.md.
+Committed setup.
+  ok    directory is inside a git repository
+  ok    whyline is installed and initialised
+  ok    relay setup is complete
+  ok    grok is on PATH
+  ok    codex is on PATH
+  ok    codex is logged in
+  ok    plan parses and has unchecked tasks: plan.md
+  ok    working tree is clean
+All checks passed.
+Ready to start? [Y/n]:
+```
+
+If no plan file exists yet (or you choose "draft"), it calls the existing
+`whyline-relay plan "..."` planner workflow first, then continues into the
+role wizard once a plan exists. The wizard's own generated files are
+committed automatically, before `doctor` ever runs -- so you never hit
+"working tree has uncommitted changes" right after finishing it. A `FAIL`
+from `doctor` refuses to offer `start` at all; a `warn`-only result asks
+whether to proceed anyway. This is exactly `whyline-relay doctor`'s own
+existing check list, run for you as part of the flow -- not a new or
+different validation.
+
 ## Permissions and safety
 
 **Read this before using it on anything valuable.**

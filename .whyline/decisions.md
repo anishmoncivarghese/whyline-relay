@@ -2744,3 +2744,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/cli.py
 
 <!-- whyline-event: 83e00a2b60cf486088fe0591c5d7f9bf -->
+
+## 2026-09-27 — Document whyline-relay setup after custom pipeline section in README
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RSW-4
+
+**Because:** It builds directly on the three-stage pipeline and prompts created in earlier tasks
+
+**Rejected:**
+
+- Place in Quick start — setup is for configuring multi-stage pipeline workflows beyond minimal default
+
+**Files:** README.md
+
+<!-- whyline-event: 97a463ff21f74d77a5b2466607f2bdd6 -->
+
+## 2026-09-27 — Approve setup wizard README documentation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RSW-4
+
+**Because:** The new section is immediately after Configuring a custom pipeline, matches the requested command transcript and behavior, adds no runtime code, and the full plain test suite passes
+
+**Files:** README.md
+
+<!-- whyline-event: 7f10b8e98e7140238cf59e917e9339a9 -->
