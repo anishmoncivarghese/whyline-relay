@@ -691,7 +691,7 @@
 
 
 
-- [ ] RSW-4: README — document the setup wizard
+- [x] RSW-4: README — document the setup wizard
 
   Global constraints:
   - No new runtime dependency.
