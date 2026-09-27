@@ -2802,3 +2802,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 07e971530dbb486c82ee1656476a2f77 -->
+
+## 2026-09-27 — CB-1 review: approve custom commit_message for run_turn and _execute_agent_call
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-1
+
+**Because:** Implementation satisfies all CB-1 requirements with clean backward compatibility: commit_message defaults to None and preserves the existing message if omitted, threads through both primary and failover attempts in run_turn, new unit tests cover default and custom commit messages, and the full test suite passed cleanly.
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: 206e5bd6a8084509ab18934e9f40e470 -->
