@@ -218,6 +218,7 @@ class Config:
     pipeline: "pipeline_module.Pipeline | None" = None
     pipeline_fingerprint: str = ""
     planner: PlannerConfig = field(default_factory=PlannerConfig)
+    chat_backup: dict[str, str] = field(default_factory=dict)
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -364,6 +365,24 @@ def load(root: Path) -> Config:
         status_map = {**DEFAULTS["status_map"], **(raw.get("status_map") or {})}
         roles_obj = Roles(**role_names)
 
+    raw_chat = raw.get("chat") or {}
+    chat_backup_raw = raw_chat.get("backup") or {}
+    chat_backup: dict[str, str] = {}
+    for key, value in chat_backup_raw.items():
+        if not isinstance(value, str):
+            raise ConfigError(f"[chat.backup] {key} must be a string")
+        if value == key:
+            raise ConfigError(
+                f"[chat.backup] {key} cannot be the same as its own agent"
+            )
+        if value not in adapters.BUILTIN and value not in configured_adapters:
+            builtins = ", ".join(sorted(adapters.BUILTIN))
+            raise ConfigError(
+                f"[chat.backup] {key} names '{value}', which is not a built-in "
+                f"agent ({builtins}) or a configured generic agent"
+            )
+        chat_backup[key] = value
+
     raw_planner = raw.get("planner") or {}
     role_agents = list(role_names.values())
     default_draft, default_review = role_agents[0], role_agents[-1]
@@ -406,4 +425,5 @@ def load(root: Path) -> Config:
         pipeline=compiled_pipeline,
         pipeline_fingerprint=pipeline_fp,
         planner=planner_cfg,
+        chat_backup=chat_backup,
     )

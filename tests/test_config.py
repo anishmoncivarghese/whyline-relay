@@ -248,6 +248,55 @@ def test_config_built_by_hand_still_works_without_backups():
     assert cfg.backups == {}
 
 
+def test_no_chat_backup_table_means_no_chat_backups(tmp_path):
+    write(tmp_path, "")
+    assert config.load(tmp_path).chat_backup == {}
+
+
+def test_a_chat_backup_is_parsed(tmp_path):
+    write(tmp_path, '[chat.backup]\nclaude = "codex"\n')
+    assert config.load(tmp_path).chat_backup == {"claude": "codex"}
+
+
+def test_a_chat_backup_may_be_a_configured_generic_agent(tmp_path):
+    write(
+        tmp_path,
+        '[chat.backup]\nclaude = "aider"\n[agents.aider]\n'
+        'adapter = "generic"\ncommand = ["aider"]\n',
+    )
+    assert config.load(tmp_path).chat_backup == {"claude": "aider"}
+
+
+def test_a_chat_backup_naming_itself_is_refused(tmp_path):
+    write(tmp_path, '[chat.backup]\nclaude = "claude"\n')
+    with pytest.raises(config.ConfigError, match="cannot be the same as its own agent"):
+        config.load(tmp_path)
+
+
+def test_a_chat_backup_naming_an_unknown_agent_is_refused(tmp_path):
+    write(tmp_path, '[chat.backup]\nclaude = "gemini"\n')
+    with pytest.raises(
+        config.ConfigError,
+        match="not a built-in agent .* or a configured generic agent",
+    ):
+        config.load(tmp_path)
+
+
+def test_a_non_string_chat_backup_is_refused(tmp_path):
+    write(tmp_path, "[chat.backup]\nclaude = 3\n")
+    with pytest.raises(
+        config.ConfigError, match="\\[chat.backup\\] claude must be a string"
+    ):
+        config.load(tmp_path)
+
+
+def test_chat_backup_works_alongside_a_configured_pipeline(tmp_path):
+    write(tmp_path, PIPELINE_TOML + '\n[chat.backup]\nclaude = "codex"\n')
+    loaded = config.load(tmp_path)
+    assert loaded.chat_backup == {"claude": "codex"}
+    assert loaded.pipeline is not None
+
+
 def test_defaults_when_no_file(tmp_path: Path):
     loaded = config.load(tmp_path)
     assert loaded.plan == "plan.md"
