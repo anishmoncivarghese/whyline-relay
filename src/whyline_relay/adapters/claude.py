@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from whyline_relay.adapters.base import Adapter, Manages, last_line_detail
+from whyline_relay.adapters.base import (
+    Adapter,
+    Manages,
+    extract_or_fallback,
+    last_line_detail,
+)
 
 BASE_ALLOW = [
     "Edit",
@@ -70,6 +75,10 @@ def diagnose(text: str) -> str:
     return last_line_detail(text)
 
 
+def extract_response(text: str) -> str:
+    return extract_or_fallback(text, ("result",))
+
+
 ADAPTER = Adapter(
     name="claude",
     default_command=(
@@ -89,4 +98,6 @@ ADAPTER = Adapter(
     diagnose=diagnose,
     manages=Manages(True, True, True),
     model_flag=("--model",),
+    extract_response=extract_response,
+    uses_output_file=False,
 )
