@@ -703,7 +703,7 @@
   ---
 
 
-- [ ] BC-4: Pipeline runner gets real failover
+- [x] BC-4: Pipeline runner gets real failover
 
 
   **Files:**
