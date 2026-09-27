@@ -210,3 +210,82 @@ def merge_pass_zero(root: Path, models: list[tuple[str, str]], topic: str) -> No
     for path in used_paths:
         path.unlink()
     gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
+
+
+def run_review_pass(
+    root: Path,
+    models: list[tuple[str, str]],
+    topic: str,
+    pass_number: int,
+    *,
+    settings: "config.Config",
+    run_fn=None,
+    runner=None,
+    print_fn=None,
+) -> None:
+    """Every selected model, once, revises only its own section. A model
+    that can't run this pass is skipped (spec B7) -- its section simply
+    keeps whatever it held from the last successful pass."""
+    print_fn = print_fn if print_fn is not None else print
+    shared = shared_path(root, topic)
+    for agent_key, label in models:
+        prompt = (
+            f'Combined review pass {pass_number} of a brainstorm on '
+            f'"{topic}". Read {shared} in full. Update your own section '
+            f'("## {label}") in place based on what you now see from the '
+            "others -- replace it with your revised thinking, rather than "
+            "appending a new dated block; the file should only ever show "
+            "your current view, not a history of past passes. Do not touch "
+            "any other model's section."
+        )
+        kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+        if runner is not None:
+            kwargs["runner"] = runner
+        try:
+            record = chat.run_turn(
+                root,
+                agent=agent_key,
+                prompt=prompt,
+                settings=settings,
+                commit_message=(
+                    f'brainstorm: {agent_key} review pass {pass_number} '
+                    f'on "{topic}"'
+                ),
+                **kwargs,
+            )
+        except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+            print_fn(f"{label} could not review this pass: {error}")
+            continue
+        if not record["ok"]:
+            print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
+
+
+def run_final_synthesis(
+    root: Path,
+    final_agent: str,
+    models: list[tuple[str, str]],
+    topic: str,
+    *,
+    settings: "config.Config",
+    run_fn=None,
+    runner=None,
+) -> dict:
+    shared = shared_path(root, topic)
+    prompt = (
+        f'All review passes are complete for this brainstorm on "{topic}". '
+        f"Read {shared} in full and write a new \"## Final Synthesis\" "
+        "section (at the top, right after the title) combining the "
+        "strongest ideas from every model's section into one clear, "
+        "actionable recommendation."
+    )
+    kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+    if runner is not None:
+        kwargs["runner"] = runner
+    return chat.run_turn(
+        root,
+        agent=final_agent,
+        prompt=prompt,
+        settings=settings,
+        commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
+        **kwargs,
+    )
