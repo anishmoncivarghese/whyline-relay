@@ -528,7 +528,7 @@
 
   ---
 
-- [ ] CB-3: `brainstorm.py` — pass 0 and the merge
+- [x] CB-3: `brainstorm.py` — pass 0 and the merge
 
   Global constraints:
   - No new runtime dependency.
