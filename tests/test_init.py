@@ -5,12 +5,13 @@ from pathlib import Path
 from whyline_relay import cli, init
 
 
+# .gitignore is created once by ensure_relay_gitignore. It is not reported
+# or replaced by the generated-file loop, including under --overwrite.
 GENERATED = (
     ".whyline/relay/claude-settings.json",
     ".whyline/relay/prompts/implement.md",
     ".whyline/relay/prompts/review.md",
     ".whyline/relay/config.toml",
-    ".whyline/relay/.gitignore",
 )
 
 
@@ -75,9 +76,9 @@ def test_run_writes_settings_templates_and_config(tmp_path: Path, capsys):
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "implement.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "review.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "config.toml").exists()
-    assert "running.json" in (
-        tmp_path / ".whyline" / "relay" / ".gitignore"
-    ).read_text().splitlines()
+    assert (tmp_path / ".whyline" / "relay" / ".gitignore").read_text() == (
+        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\n"
+    )
     for relative in GENERATED:
         assert f"Wrote {relative}." in out
 
@@ -88,7 +89,8 @@ def test_second_run_with_no_edits_does_not_touch_or_report_files(
     init.run(tmp_path, assume_yes=True)
     capsys.readouterr()
     old_timestamp = 1_000_000_000
-    for path in generated_paths(tmp_path):
+    gitignore = tmp_path / ".whyline" / "relay" / ".gitignore"
+    for path in (*generated_paths(tmp_path), gitignore):
         os.utime(path, ns=(old_timestamp, old_timestamp))
 
     assert init.run(tmp_path, assume_yes=True) == 0
@@ -98,7 +100,7 @@ def test_second_run_with_no_edits_does_not_touch_or_report_files(
     assert "Wrote " not in out
     assert all(
         path.stat().st_mtime_ns == old_timestamp
-        for path in generated_paths(tmp_path)
+        for path in (*generated_paths(tmp_path), gitignore)
     )
 
 
@@ -146,7 +148,9 @@ def test_overwrite_restores_edits_and_rewrites_every_file(tmp_path: Path, capsys
     for path in generated_paths(tmp_path)[:3]:
         path.write_text("edited\n")
     old_timestamp = 1_000_000_000
-    for path in generated_paths(tmp_path):
+    gitignore = tmp_path / ".whyline" / "relay" / ".gitignore"
+    gitignore_bytes = gitignore.read_bytes()
+    for path in (*generated_paths(tmp_path), gitignore):
         os.utime(path, ns=(old_timestamp, old_timestamp))
 
     assert (
@@ -160,6 +164,9 @@ def test_overwrite_restores_edits_and_rewrites_every_file(tmp_path: Path, capsys
         assert path.stat().st_mtime_ns != old_timestamp
         assert f"Wrote {path.relative_to(tmp_path)}." in out
     assert "Kept " not in out
+    assert gitignore.read_bytes() == gitignore_bytes
+    assert gitignore.stat().st_mtime_ns == old_timestamp
+    assert "Wrote .whyline/relay/.gitignore." not in out
 
 
 def test_a_missing_file_is_created_among_existing_files(tmp_path: Path, capsys):
@@ -347,3 +354,23 @@ def test_ask_model_eof_with_a_preset_falls_back_to_it(tmp_path):
         raise EOFError
     result = init._ask_model(raise_eof, tmp_path, "codex")
     assert result == "gpt-5-codex"
+
+
+def test_ensure_relay_gitignore_creates_it_when_absent(tmp_path: Path):
+    from whyline_relay import init
+
+    init.ensure_relay_gitignore(tmp_path)
+    content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
+    assert content == (
+        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\n"
+    )
+
+
+def test_ensure_relay_gitignore_leaves_an_existing_one_alone(tmp_path: Path):
+    from whyline_relay import init
+
+    target = tmp_path / ".whyline" / "relay"
+    target.mkdir(parents=True)
+    (target / ".gitignore").write_text("custom\n")
+    init.ensure_relay_gitignore(tmp_path)
+    assert (target / ".gitignore").read_text() == "custom\n"

@@ -10,6 +10,30 @@ from whyline_relay import adapters, config, invocation, prompts, whyline_model
 from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
 
 
+RELAY_GITIGNORE_LINES = (
+    "logs/",
+    "state.json",
+    "STOP",
+    "running.json",
+    "chat.json",
+    "chat-history.jsonl",
+)
+
+
+def ensure_relay_gitignore(root: Path) -> None:
+    """Write .whyline/relay/.gitignore with the canonical content, once.
+
+    Both init and chat's own first-launch setup call this, since chat can
+    run in a repo that never ran init at all -- whichever runs first creates
+    a correct file; the other is then a no-op.
+    """
+    path = root / ".whyline" / "relay" / ".gitignore"
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(RELAY_GITIGNORE_LINES) + "\n", encoding="utf-8")
+
+
 def _ask_agent(confirm, role: str, default: str) -> str | None:
     """Returns None for an answer that isn't a built-in agent name."""
     try:
@@ -140,7 +164,6 @@ def run(
         (relay / "prompts" / "implement.md", prompts.IMPLEMENT),
         (relay / "prompts" / "review.md", prompts.REVIEW),
         (relay / "config.toml", config_text),
-        (relay / ".gitignore", "logs/\nstate.json\nSTOP\nrunning.json\n"),
     ]
     written: list[Path] = []
     kept: list[Path] = []
@@ -150,6 +173,15 @@ def run(
             written.append(path)
         elif path.read_bytes() != content.encode("utf-8"):
             kept.append(path)
+
+    # Same "Wrote" report as the other generated files, but only when this
+    # call created the file. An existing one is left alone, even with
+    # --overwrite, so a later chat setup cannot clobber it.
+    gitignore = relay / ".gitignore"
+    created_gitignore = not gitignore.exists()
+    ensure_relay_gitignore(root)
+    if created_gitignore:
+        written.append(gitignore)
 
     for path in written:
         print(f"Wrote {path.relative_to(root)}.")
