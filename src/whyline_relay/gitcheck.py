@@ -181,3 +181,12 @@ def commit_all(root: Path, message: str) -> bool:
         return False
     _git(root, "commit", "-m", message)
     return True
+
+
+def commit_stat(root: Path) -> str:
+    """The diffstat of HEAD against its parent (or, for a root commit,
+    against nothing). Deliberately reads the *commit*, not the working tree:
+    `git diff --stat` never shows a brand-new untracked file, only changes to
+    already-tracked ones -- but a committed new file shows correctly here,
+    since by then it's part of the commit being described."""
+    return _git(root, "show", "--stat", "--format=", "HEAD")

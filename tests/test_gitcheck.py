@@ -185,3 +185,15 @@ def test_commit_all_does_nothing_and_returns_false_when_the_tree_is_clean(
     committed = gitcheck.commit_all(repo, "chore: nothing")
     assert committed is False
     assert gitcheck.head_commit(repo) == before
+
+
+def test_commit_stat_reports_a_new_file_in_the_latest_commit(repo: Path):
+    (repo / "new.txt").write_text("made by an agent\n")
+    gitcheck.commit_all(repo, "add new.txt")
+    assert "new.txt" in gitcheck.commit_stat(repo)
+
+
+def test_commit_stat_reports_a_change_to_a_tracked_file(repo: Path):
+    (repo / "README.md").write_text("changed\n")
+    gitcheck.commit_all(repo, "change readme")
+    assert "README.md" in gitcheck.commit_stat(repo)
