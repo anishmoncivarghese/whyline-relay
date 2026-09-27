@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from whyline_relay import adapters, agents, chatlog, config, failover, gitcheck, init, invocation
+from whyline_relay import adapters, agents, brainstorm, chatlog, config, failover, gitcheck, init, invocation
 from whyline_relay.adapters import grok
 
 CHAT_AGENTS = ("claude", "codex", "agy", "grok")
@@ -284,7 +284,7 @@ def run_turn(
 
 SLASH_COMMANDS = (
     "/default", "/agents", "/history", "/clear", "/exit",
-    "/backups", "/reset-backup",
+    "/backups", "/reset-backup", "/brainstorm",
 )
 
 
@@ -381,6 +381,28 @@ def repl(
                 root, role=target, storage_path=failover.chat_path(root)
             )
             print_fn(f"Cleared {removed} backup override(s).")
+            continue
+        if line == "/brainstorm":
+            setup = brainstorm.ask_brainstorm_setup(
+                root, settings, input_fn=input_fn, print_fn=print_fn
+            )
+            if setup is None:
+                continue
+            brainstorm.run_pass_zero(
+                root, setup["models"], setup["topic"], settings=settings,
+                run_fn=run_fn, print_fn=print_fn,
+            )
+            brainstorm.merge_pass_zero(root, setup["models"], setup["topic"])
+            for pass_number in range(1, setup["passes"] + 1):
+                brainstorm.run_review_pass(
+                    root, setup["models"], setup["topic"], pass_number,
+                    settings=settings, run_fn=run_fn, print_fn=print_fn,
+                )
+            record = brainstorm.run_final_synthesis(
+                root, setup["final_agent"], setup["models"], setup["topic"],
+                settings=settings, run_fn=run_fn,
+            )
+            print_fn(f"[{record['agent']}] {record['response']}")
             continue
         if line.startswith("/default"):
             parts = line.split(maxsplit=1)

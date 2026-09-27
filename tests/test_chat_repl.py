@@ -295,3 +295,51 @@ def test_repl_prints_the_failover_notice_when_present(tmp_path: Path):
         runner=fake_login_ok,
     )
     assert any("trying its backup" in line for line in printed)
+
+
+def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    answers = iter([
+        "/brainstorm",
+        "caching strategy",  # topic
+        "1,2",  # models: claude, codex
+        "0",  # passes
+        "claude",  # final synthesis model
+        "/exit",
+    ])
+    printed = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    assert any("an answer" in line for line in printed)
+    from whyline_relay import brainstorm
+    shared = brainstorm.shared_path(root, "caching strategy")
+    assert shared.exists()
+
+
+def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    answers = iter([
+        "/brainstorm",
+        "some topic",
+        "4",  # grok -- not configured for chat in this repo
+        "0",
+        "grok",
+        "n",  # decline to proceed without it
+        "/exit",
+    ])
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    from whyline_relay import brainstorm
+    assert not brainstorm.shared_path(root, "some topic").exists()
