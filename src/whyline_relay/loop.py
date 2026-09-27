@@ -328,7 +328,10 @@ def _run_task(
                 adapter, text, settings.agents[agent], runner=runner
             )
             if reason is not None:
-                backup = settings.backups.get(role)
+                # One hop to the first chain entry. Walking the rest of the
+                # chain is a later change; a single entry matches the old
+                # one-backup switch these callers already rely on.
+                backup = settings.backup_chain[0] if settings.backup_chain else None
                 if backup is not None and backup != agent:
                     verb, _ = failover.REASON_TEXT[reason]
                     failover.write_override(
@@ -408,9 +411,8 @@ def _run_configured_task(
     Mirrors _run_task's contract and most of its per-turn checks (task
     mismatch, from_actor, blocked, unknown, no-handoff/timeout) but routes on
     pipeline.decide() against the stage that just ran, not a fixed pair of
-    roles. [roles.backup] is refused together with [pipeline] at config load
-    (see config.py), so there is no failover branch here: a no-handoff always
-    pauses -- there is never a backup to switch to.
+    roles. This runner does not walk [backup].chain yet, so there is no
+    failover branch here: a no-handoff always pauses.
 
     With `resume`, state.json's saved stage/profile/stage_visits pick the task
     back up where it paused. State is checkpointed (via `on_turn`) before every

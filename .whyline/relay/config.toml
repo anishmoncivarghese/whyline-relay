@@ -5,8 +5,8 @@ timeout_minutes = 30
 branch_prefix = "relay/"
 
 [roles]
-implementer = "grok"
-reviewer = "antigravity"
+implementer = "antigravity"
+reviewer = "codex"
 
 [agents.codex]
 command = ["codex", "exec", "-s", "workspace-write", "--color", "never"]

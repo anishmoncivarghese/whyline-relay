@@ -2994,3 +2994,99 @@ Append-only. Written by whyline; readable without it.
 **Files:** pyproject.toml
 
 <!-- whyline-event: f20699a4e1934861a0e6b5c911aa6165 -->
+
+## 2026-09-27 — Preserve BC-1 partial work and resume only after Grok rate-limit recovery
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-1
+
+**Because:** The relay checkpoint records a genuine Grok usage limit, no handoff or approval was recorded, and the working tree contains partial BC-1 edits that must be reviewed by the configured reviewer
+
+**Rejected:**
+
+- commit the partial edits now — would bypass the required handoff and reviewer gate
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 839ce9a787f94c61b1e8c87d0ac1036a -->
+
+## 2026-09-27 — Replace [roles.backup] and [chat.backup] with unified [backup].chain in config.py
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-1
+
+**Because:** Consolidates role and chat failover into a single shared ordered fallback chain and rejects legacy backup keys
+
+**Rejected:**
+
+- keep deprecated backup keys alongside new chain — would create ambiguous precedence and dual configuration surfaces
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 72b3438472b44c9280e1935e99bde0e7 -->
+
+## 2026-09-27 — Remove test_the_backup_also_failing_pauses_and_names_both
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-1
+
+**Because:** Single-backup failure wording is superseded by chain exhaustion messaging which Task 3 will test under the new wording
+
+**Rejected:**
+
+- keep old test — asserts obsolete single-backup pause wording that chain failover replaces
+
+**Files:** tests/test_loop_failover.py
+
+<!-- whyline-event: 0eeaa27d3d8b446dadb6631b9dd72d1b -->
+
+## 2026-09-27 — Remove legacy chat turn failover tests pending Task 5
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-1
+
+**Because:** Old tests assert deprecated [chat.backup] behavior; Task 5 re-adds equivalent tests against [backup].chain
+
+**Rejected:**
+
+- rewrite them in BC-1 — chat.run_turn chain-walking logic is scheduled and implemented in BC-5
+
+**Files:** tests/test_chat_turn.py
+
+<!-- whyline-event: e9452c4ced4342fc8a901ebed250455f -->
+
+## 2026-09-27 — Remove legacy preflight backup tests pending Task 7
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-1
+
+**Because:** Old preflight tests rely on [roles.backup]; Task 7 restores equivalent checks against [backup].chain
+
+**Rejected:**
+
+- update preflight checks in BC-1 — doctor checks for chain agents are scheduled and specified in BC-7
+
+**Files:** tests/test_preflight.py
+
+<!-- whyline-event: f55a8fa74f984973922a0448850894a2 -->
+
+## 2026-09-27 — Approve unified backup-chain configuration migration
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-1
+
+**Because:** Config now exposes only ordered backup_chain, rejects both legacy backup tables with migration guidance, validates built-in and configured agents, and all 611 tests pass
+
+**Rejected:**
+
+- request changes — implementation matches BC-1 and leaves no stale runtime references
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 258206a3d2e641a98d15c2d9c11deb60 -->

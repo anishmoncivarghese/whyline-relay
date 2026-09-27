@@ -88,9 +88,6 @@ def _agents_in_use(
         name = getattr(settings.roles, role)
         if name not in agents:
             agents[name] = (settings.agents[name], None)
-    for role, name in settings.backups.items():
-        if name not in agents:
-            agents[name] = (settings.agents[name], role)
     return agents
 
 

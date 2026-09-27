@@ -207,53 +207,11 @@ def run_turn(
     )
     final_agent = resolved
     failover_notice: str | None = None
-    if resolved == requested:
-        # Check `chat_backup` *before* calling failover_reason: that call can
-        # run a real login-status subprocess (via runner), and there is no
-        # point spending it -- or risking a real, unmocked subprocess call in
-        # a test that never configured [chat.backup] -- when there is no
-        # backup to switch to anyway. This also means every pre-existing
-        # chat test, none of which configure [chat.backup], never reaches
-        # failover_reason at all: zero behavior change for them.
-        backup = settings.chat_backup.get(requested)
-        if backup:
-            reason = failover.failover_reason(
-                attempt["adapter"], attempt["raw"], attempt["command"], runner=runner
-            )
-            if reason:
-                verb, _ = failover.REASON_TEXT[reason]
-                failover_notice = f"{requested} {verb}; trying its backup, {backup}..."
-                failover.write_override(
-                    root,
-                    requested,
-                    failover.ActiveOverride(
-                        agent=backup,
-                        backup_for=requested,
-                        reason=reason,
-                        since=datetime.now(timezone.utc).isoformat(),
-                    ),
-                    storage_path=failover.chat_path(root),
-                )
-                attempt = _execute_agent_call(
-                    root, backup, prompt, full_prompt, settings, run_fn,
-                    commit_message=commit_message,
-                )
-                final_agent = backup
-                reason2 = failover.failover_reason(
-                    attempt["adapter"], attempt["raw"], attempt["command"],
-                    runner=runner,
-                )
-                if reason2:
-                    override = failover.read_overrides(
-                        root, failover.chat_path(root)
-                    ).get(requested)
-                    failover_notice = failover.pause_message(
-                        backup, requested, reason2, override
-                    )
-    else:
-        # Already on an active backup (someone configured [chat.backup] for
-        # `requested` at some point, and it already switched) -- detect a
-        # further failure but never chase a third agent (one hop only).
+    if resolved != requested:
+        # Already on an active override. Detect a further failure but do not
+        # chase another agent; chain walking lands later. A turn that is still
+        # on its requested agent skips failover_reason entirely, so it never
+        # shells out for a login check when there is nothing to switch to.
         reason = failover.failover_reason(
             attempt["adapter"], attempt["raw"], attempt["command"], runner=runner
         )

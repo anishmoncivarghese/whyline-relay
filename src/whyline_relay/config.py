@@ -214,11 +214,10 @@ class Config:
     status_map: dict[str, str]
     roles: Roles = field(default_factory=Roles)
     adapters: dict[str, str] = field(default_factory=dict)
-    backups: dict[str, str] = field(default_factory=dict)
+    backup_chain: list[str] = field(default_factory=list)
     pipeline: "pipeline_module.Pipeline | None" = None
     pipeline_fingerprint: str = ""
     planner: PlannerConfig = field(default_factory=PlannerConfig)
-    chat_backup: dict[str, str] = field(default_factory=dict)
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -291,12 +290,13 @@ def load(root: Path) -> Config:
             agents[name] = [*agents[name], *resolved_adapter.model_flag, model]
 
     role_values = raw.get("roles") or {}
+    if "backup" in role_values:
+        raise ConfigError(
+            "[roles.backup] is no longer supported; configure a shared "
+            "fallback chain under [backup].chain instead"
+        )
     raw_pipeline = raw.get("pipeline")
     if raw_pipeline is not None:
-        if "backup" in role_values:
-            raise ConfigError(
-                "[roles.backup] is not supported together with [pipeline]"
-            )
         if "status_map" in raw:
             raise ConfigError(
                 "[status_map] is not supported together with [pipeline]; a "
@@ -316,12 +316,11 @@ def load(root: Path) -> Config:
                 )
         compiled_pipeline = _load_pipeline(raw_pipeline, role_names)
         pipeline_fp = _pipeline_fingerprint(raw_pipeline)
-        backup_values: dict[str, str] = {}
         status_map = dict(DEFAULTS["status_map"])
         roles_obj = Roles()
     else:
         for key in role_values:
-            if key not in ("implementer", "reviewer", "backup"):
+            if key not in ("implementer", "reviewer"):
                 raise ConfigError(
                     f"[roles] has an unknown key '{key}' (use implementer or reviewer)"
                 )
@@ -339,49 +338,33 @@ def load(root: Path) -> Config:
                     f"({builtins}) or a configured generic agent"
                 )
 
-        backup_values = role_values.get("backup") or {}
-        for key in backup_values:
-            if key not in ("implementer", "reviewer"):
-                raise ConfigError(
-                    f"[roles.backup] has an unknown key '{key}' "
-                    f"(use implementer or reviewer)"
-                )
-            value = backup_values[key]
-            if not isinstance(value, str):
-                raise ConfigError(f"[roles.backup] {key} must be a string")
-            if value == role_names[key]:
-                raise ConfigError(
-                    f"[roles.backup] {key} cannot be the same as its own agent"
-                )
-            if value not in adapters.BUILTIN and value not in configured_adapters:
-                builtins = ", ".join(sorted(adapters.BUILTIN))
-                raise ConfigError(
-                    f"[roles.backup] {key} names '{value}', which is not a built-in "
-                    f"agent ({builtins}) or a configured generic agent"
-                )
-
         compiled_pipeline = None
         pipeline_fp = ""
         status_map = {**DEFAULTS["status_map"], **(raw.get("status_map") or {})}
         roles_obj = Roles(**role_names)
 
     raw_chat = raw.get("chat") or {}
-    chat_backup_raw = raw_chat.get("backup") or {}
-    chat_backup: dict[str, str] = {}
-    for key, value in chat_backup_raw.items():
-        if not isinstance(value, str):
-            raise ConfigError(f"[chat.backup] {key} must be a string")
-        if value == key:
-            raise ConfigError(
-                f"[chat.backup] {key} cannot be the same as its own agent"
-            )
+    if "backup" in raw_chat:
+        raise ConfigError(
+            "[chat.backup] is no longer supported; configure a shared "
+            "fallback chain under [backup].chain instead"
+        )
+
+    raw_backup = raw.get("backup") or {}
+    chain_raw = raw_backup.get("chain", [])
+    if not isinstance(chain_raw, list):
+        raise ConfigError("[backup] chain must be a list of agent names")
+    backup_chain: list[str] = []
+    for value in chain_raw:
+        if not isinstance(value, str) or not value:
+            raise ConfigError("[backup] chain entries must be non-empty strings")
         if value not in adapters.BUILTIN and value not in configured_adapters:
             builtins = ", ".join(sorted(adapters.BUILTIN))
             raise ConfigError(
-                f"[chat.backup] {key} names '{value}', which is not a built-in "
+                f"[backup] chain names {value!r}, which is not a built-in "
                 f"agent ({builtins}) or a configured generic agent"
             )
-        chat_backup[key] = value
+        backup_chain.append(value)
 
     raw_planner = raw.get("planner") or {}
     role_agents = list(role_names.values())
@@ -421,9 +404,8 @@ def load(root: Path) -> Config:
         status_map=status_map,
         roles=roles_obj,
         adapters=configured_adapters,
-        backups=dict(backup_values),
+        backup_chain=backup_chain,
         pipeline=compiled_pipeline,
         pipeline_fingerprint=pipeline_fp,
         planner=planner_cfg,
-        chat_backup=chat_backup,
     )

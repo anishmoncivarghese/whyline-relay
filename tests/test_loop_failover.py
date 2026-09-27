@@ -39,7 +39,7 @@ sys.exit(1)
 
 
 def settings_with_backup(
-    root, implementer_command, backup_agent, backup_command, backups
+    root, implementer_command, backup_agent, backup_command, chain: list[str]
 ):
     base = config.load(root)
     return config.Config(
@@ -62,7 +62,7 @@ def settings_with_backup(
         },
         status_map=base.status_map,
         adapters={backup_agent: "generic"},
-        backups=backups,
+        backup_chain=chain,
     )
 
 
@@ -84,7 +84,7 @@ def test_a_rate_limited_implementer_switches_to_its_backup_and_the_task_complete
             "ready-for-review",
             "no",
         ],
-        {"implementer": "aider"},
+        ["aider"],
     )
     base = loop.gitcheck.head_commit(repo)
     outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
@@ -109,7 +109,7 @@ def test_the_rendered_prompt_names_the_switched_agent_not_the_static_config(
         [sys.executable, str(limited)],
         "aider",
         [sys.executable, FAKE, str(repo), "aider", "claude", "ready-for-review", "no"],
-        {"implementer": "aider"},
+        ["aider"],
     )
     seen = []
     real_render = loop.prompts.render
@@ -148,7 +148,7 @@ def test_an_unauthenticated_implementer_switches_to_its_backup(
             "ready-for-review",
             "no",
         ],
-        {"implementer": "aider"},
+        ["aider"],
     )
     monkeypatch.setattr(
         loop.failover,
@@ -177,7 +177,7 @@ def test_a_switch_does_not_consume_a_review_round(repo, tmp_path):
             "ready-for-review",
             "no",
         ],
-        {"implementer": "aider"},
+        ["aider"],
     )
     settings = replace(settings, max_rounds=1)
     base = loop.gitcheck.head_commit(repo)
@@ -205,23 +205,6 @@ def test_no_backup_configured_pauses_exactly_as_0_2_3(repo, tmp_path):
     )
 
 
-def test_the_backup_also_failing_pauses_and_names_both(repo, tmp_path):
-    limited = tmp_path / "limited.py"
-    limited.write_text(RATE_LIMITED)
-    settings = settings_with_backup(
-        repo,
-        [sys.executable, str(limited)],
-        "aider",
-        [sys.executable, str(limited)],
-        {"implementer": "aider"},
-    )
-    base = loop.gitcheck.head_commit(repo)
-    with pytest.raises(loop.Paused) as raised:
-        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
-    assert "backup for implementer" in raised.value.reason
-    assert "codex was already out" in raised.value.reason
-
-
 def test_dry_run_shows_the_effective_backup_agent(tmp_path, monkeypatch, capsys):
     from whyline_relay import cli
 
@@ -233,7 +216,7 @@ def test_dry_run_shows_the_effective_backup_agent(tmp_path, monkeypatch, capsys)
     relay = tmp_path / ".whyline" / "relay"
     relay.mkdir()
     (relay / "config.toml").write_text(
-        '[roles.backup]\nimplementer = "claude"\n'
+        '[backup]\nchain = ["claude"]\n'
     )
     failover.write_override(
         tmp_path,

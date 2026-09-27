@@ -182,61 +182,7 @@ def test_config_can_still_be_built_without_roles_or_adapters():
     assert built.adapters == {}
 
 
-def test_no_backup_table_means_no_backups(tmp_path):
-    write(tmp_path, "")
-    assert config.load(tmp_path).backups == {}
-
-
-def test_a_role_backup_is_parsed(tmp_path):
-    write(tmp_path, '[roles.backup]\nimplementer = "claude"\n')
-    loaded = config.load(tmp_path)
-    assert loaded.backups == {"implementer": "claude"}
-    assert loaded.roles.implementer == "codex"  # the primary is untouched
-
-
-def test_a_backup_may_be_a_configured_generic_agent(tmp_path):
-    write(
-        tmp_path,
-        '[roles.backup]\nreviewer = "aider"\n[agents.aider]\n'
-        'adapter = "generic"\ncommand = ["aider"]\n',
-    )
-    assert config.load(tmp_path).backups == {"reviewer": "aider"}
-
-
-def test_a_backup_naming_the_same_agent_as_its_role_is_refused(tmp_path):
-    write(tmp_path, '[roles.backup]\nimplementer = "codex"\n')
-    with pytest.raises(config.ConfigError, match="cannot be the same as its own agent"):
-        config.load(tmp_path)
-
-
-def test_a_backup_naming_an_unknown_agent_is_refused(tmp_path):
-    write(tmp_path, '[roles.backup]\nimplementer = "gemini"\n')
-    with pytest.raises(
-        config.ConfigError,
-        match="not a built-in agent .* or a configured generic agent",
-    ):
-        config.load(tmp_path)
-
-
-def test_an_unknown_key_under_roles_backup_is_refused(tmp_path):
-    write(tmp_path, '[roles.backup]\nplanner = "claude"\n')
-    with pytest.raises(
-        config.ConfigError,
-        match="\\[roles.backup\\] has an unknown key 'planner'",
-    ):
-        config.load(tmp_path)
-
-
-def test_a_non_string_backup_is_refused(tmp_path):
-    write(tmp_path, "[roles.backup]\nimplementer = 3\n")
-    with pytest.raises(
-        config.ConfigError,
-        match="\\[roles.backup\\] implementer must be a string",
-    ):
-        config.load(tmp_path)
-
-
-def test_config_built_by_hand_still_works_without_backups():
+def test_config_built_by_hand_has_an_empty_backup_chain():
     cfg = config.Config(
         plan="plan.md",
         max_rounds=3,
@@ -245,56 +191,70 @@ def test_config_built_by_hand_still_works_without_backups():
         agents={},
         status_map={},
     )
-    assert cfg.backups == {}
+    assert cfg.backup_chain == []
 
 
-def test_no_chat_backup_table_means_no_chat_backups(tmp_path):
-    write(tmp_path, "")
-    assert config.load(tmp_path).chat_backup == {}
+def test_backup_chain_defaults_to_empty(tmp_path):
+    settings = config.load(tmp_path)
+    assert settings.backup_chain == []
 
 
-def test_a_chat_backup_is_parsed(tmp_path):
-    write(tmp_path, '[chat.backup]\nclaude = "codex"\n')
-    assert config.load(tmp_path).chat_backup == {"claude": "codex"}
-
-
-def test_a_chat_backup_may_be_a_configured_generic_agent(tmp_path):
+def test_backup_chain_parses_in_order(tmp_path):
     write(
         tmp_path,
-        '[chat.backup]\nclaude = "aider"\n[agents.aider]\n'
-        'adapter = "generic"\ncommand = ["aider"]\n',
+        '[backup]\nchain = ["claude", "codex"]\n',
     )
-    assert config.load(tmp_path).chat_backup == {"claude": "aider"}
+    settings = config.load(tmp_path)
+    assert settings.backup_chain == ["claude", "codex"]
 
 
-def test_a_chat_backup_naming_itself_is_refused(tmp_path):
-    write(tmp_path, '[chat.backup]\nclaude = "claude"\n')
-    with pytest.raises(config.ConfigError, match="cannot be the same as its own agent"):
+def test_backup_chain_rejects_an_unknown_agent(tmp_path):
+    write(tmp_path, '[backup]\nchain = ["not-a-real-agent"]\n')
+    with pytest.raises(config.ConfigError, match="not-a-real-agent"):
         config.load(tmp_path)
 
 
-def test_a_chat_backup_naming_an_unknown_agent_is_refused(tmp_path):
-    write(tmp_path, '[chat.backup]\nclaude = "gemini"\n')
-    with pytest.raises(
-        config.ConfigError,
-        match="not a built-in agent .* or a configured generic agent",
-    ):
+def test_backup_chain_accepts_a_configured_generic_agent(tmp_path):
+    write(
+        tmp_path,
+        '[backup]\nchain = ["grok"]\n'
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n',
+    )
+    settings = config.load(tmp_path)
+    assert settings.backup_chain == ["grok"]
+
+
+def test_backup_chain_works_alongside_a_configured_pipeline(tmp_path):
+    write(tmp_path, PIPELINE_TOML + '\n[backup]\nchain = ["grok"]\n'
+          '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n')
+    settings = config.load(tmp_path)
+    assert settings.backup_chain == ["grok"]
+    assert settings.pipeline is not None
+
+
+def test_roles_backup_is_rejected_with_a_pointer_to_the_new_key(tmp_path):
+    write(tmp_path, '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+          '[roles.backup]\nimplementer = "claude"\n')
+    with pytest.raises(config.ConfigError, match=r"\[backup\]\.chain"):
         config.load(tmp_path)
 
 
-def test_a_non_string_chat_backup_is_refused(tmp_path):
-    write(tmp_path, "[chat.backup]\nclaude = 3\n")
-    with pytest.raises(
-        config.ConfigError, match="\\[chat.backup\\] claude must be a string"
-    ):
+def test_roles_backup_is_rejected_together_with_a_pipeline_too(tmp_path):
+    write(tmp_path, PIPELINE_TOML + '\n[roles.backup]\nimplementer = "claude"\n')
+    with pytest.raises(config.ConfigError, match=r"\[backup\]\.chain"):
         config.load(tmp_path)
 
 
-def test_chat_backup_works_alongside_a_configured_pipeline(tmp_path):
-    write(tmp_path, PIPELINE_TOML + '\n[chat.backup]\nclaude = "codex"\n')
-    loaded = config.load(tmp_path)
-    assert loaded.chat_backup == {"claude": "codex"}
-    assert loaded.pipeline is not None
+def test_chat_backup_is_rejected_with_a_pointer_to_the_new_key(tmp_path):
+    write(tmp_path, '[chat.backup]\nclaude = "codex"\n')
+    with pytest.raises(config.ConfigError, match=r"\[backup\]\.chain"):
+        config.load(tmp_path)
+
+
+def test_backup_chain_rejects_a_non_list(tmp_path):
+    write(tmp_path, '[backup]\nchain = "claude"\n')
+    with pytest.raises(config.ConfigError, match="chain"):
+        config.load(tmp_path)
 
 
 def test_defaults_when_no_file(tmp_path: Path):
@@ -458,7 +418,7 @@ def test_a_real_pipeline_parses_correctly(tmp_path):
     assert pipe.roles["tester"].agent == "claude"
     assert pipe.legacy is False
     assert settings.pipeline_fingerprint  # non-empty
-    assert settings.backups == {}
+    assert settings.backup_chain == []
     assert settings.status_map == config.DEFAULTS["status_map"]
 
 
@@ -485,7 +445,7 @@ def test_a_legacy_config_has_no_pipeline_and_an_empty_fingerprint(tmp_path):
         (
             PIPELINE_TOML
             + '\n[roles.backup]\nimplementer = "claude"\n',
-            "[roles.backup] is not supported together with [pipeline]",
+            "[backup].chain",
         ),
         (
             PIPELINE_TOML + '\n[status_map]\nreview = "needs-review"\n',

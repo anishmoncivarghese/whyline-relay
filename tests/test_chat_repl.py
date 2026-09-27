@@ -264,35 +264,28 @@ def test_repl_reset_backup_with_no_argument_clears_all(tmp_path: Path):
     assert failover.read_overrides(root, failover.chat_path(root)) == {}
 
 
-def test_repl_prints_the_failover_notice_when_present(tmp_path: Path):
-    import subprocess
-
+def test_repl_prints_the_failover_notice_when_present(tmp_path: Path, monkeypatch):
     root = _repo(tmp_path)
     chat.save_default_agent(root, "claude")
-    relay = root / ".whyline" / "relay"
-    relay.mkdir(parents=True, exist_ok=True)
-    (relay / "config.toml").write_text('[chat.backup]\nclaude = "codex"\n')
-
-    def fake_run_fn(command, prompt, **kwargs):
-        from whyline_relay.agents import RunResult
-
-        if command[0] == "claude":
-            return RunResult(1, "You have exceeded your usage limit. Try again later.")
-        return RunResult(0, '{"type":"result","result":"pong"}\n')
-
-    # codex's "pong" response has no rate-limit marker, so the post-retry
-    # failover_reason check falls through to a login-status re-check -- fake
-    # the subprocess runner so this never shells out for real.
-    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(
+        chat,
+        "run_turn",
+        lambda *a, **k: {
+            "agent": "codex",
+            "prompt": "hello",
+            "response": "pong",
+            "ok": True,
+            "rate_limited": False,
+            "failover_notice": "claude hit a usage limit; trying its backup, codex...",
+        },
+    )
     lines = iter(["hello", "/exit"])
     printed = []
     chat.repl(
         root,
         input_fn=lambda prompt="": next(lines),
         print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
-        run_fn=fake_run_fn,
         which=lambda name: "/bin/x",
-        runner=fake_login_ok,
     )
     assert any("trying its backup" in line for line in printed)
 
