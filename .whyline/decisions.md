@@ -2906,3 +2906,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: efbeff66a161430d8d55686d139f6329 -->
+
+## 2026-09-27 — CB-5 review: approve wire /brainstorm into the chat REPL
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-5
+
+**Because:** Implementation wires /brainstorm command into chat REPL with setup, pass zero, review passes, and final synthesis flow; tests verify full flow and declined flow; all 624 tests pass.
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_repl.py
+
+<!-- whyline-event: f56919fcbbf94ec6973a655228b83ec1 -->
