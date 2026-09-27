@@ -199,7 +199,7 @@
 
   ---
 
-- [ ] CB-2: `brainstorm.py` — setup questions, model parsing, availability check
+- [x] CB-2: `brainstorm.py` — setup questions, model parsing, availability check
 
   Global constraints:
   - No new runtime dependency.
