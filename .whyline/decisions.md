@@ -2620,3 +2620,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/adapters/grok.py, src/whyline_relay/failover.py, src/whyline_relay/loop.py, src/whyline_relay/chat.py
 
 <!-- whyline-event: fe566c17c9484266bdf75da5203eeb35 -->
+
+## 2026-09-27 — Release structured Grok cancellation handling as whyline-relay 0.2.18
+
+**Actor:** codex
+**Role:** releaser
+**Task:** GROK-CANCEL-RELEASE-0.2.18
+
+**Because:** The historical false-pause log is classified correctly, 579 tests pass, the 0.2.18 artifacts are clean and installable, and the version is unused on GitHub and PyPI
+
+**Rejected:**
+
+- Wait for Grok to expose denied-command metadata — the current fix safely prevents false routing and gives actionable guidance without pretending it knows the omitted command
+
+**Files:** docs/releases/v0.2.18.md
+
+<!-- whyline-event: 9d8cfeddf0664c04849cbb78ea3f0045 -->
