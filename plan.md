@@ -1,6 +1,6 @@
 # Unified Backup Chain — active relay plan
 
-- [ ] BC-1: `config.py` -- one `[backup] chain`, old keys removed
+- [x] BC-1: `config.py` -- one `[backup] chain`, old keys removed
 
 
   **Files:**
