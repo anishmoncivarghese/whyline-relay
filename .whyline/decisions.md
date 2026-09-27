@@ -2510,3 +2510,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py
 
 <!-- whyline-event: 5fb9860f2f0342ee898a3db7438ab47e -->
+
+## 2026-09-27 — Orchestrator handed off CF-3 on grok's behalf; the relay's own pause reason ('rate limit') was a false positive, not a real block
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** CF-3
+
+**Because:** grok's actual code is correct and fully verified (17/17 CF-3 tests pass, full suite 556 passed); the reported pause reason came from agents.rate_limited() matching grok's own reasoning trace, which quoted CF-3's own test fixture string 'You have exceeded your usage limit' while implementing and verifying rate-limit detection -- a self-referential false positive, not a real xAI quota block (confirmed separately: the account's own usage dashboard showed 11% used, no weekly limit)
+
+**Rejected:**
+
+- wait for a quota reset that was never actually needed
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: 596a1fbde9a74e09a8afa1c75979c530 -->
