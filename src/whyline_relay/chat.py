@@ -128,7 +128,7 @@ def _ensure_permission_files(root: Path, agent: str) -> bool:
 
 def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
-    settings: "config.Config", run_fn,
+    settings: "config.Config", run_fn, *, commit_message: str | None = None,
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
@@ -171,7 +171,7 @@ def _execute_agent_call(
     # is_dirty first, and it's the only reliable way to see a brand-new
     # untracked file in the resulting stat (git diff on the working tree
     # never shows untracked files; the committed diff always does).
-    committed = gitcheck.commit_all(root, f"chat: {agent} turn")
+    committed = gitcheck.commit_all(root, commit_message or f"chat: {agent} turn")
     diff_stat = gitcheck.commit_stat(root) if committed else ""
     files_changed = max(len(diff_stat.splitlines()) - 1, 0) if diff_stat else 0
     return {
@@ -194,13 +194,17 @@ def run_turn(
     settings: "config.Config | None" = None,
     run_fn=None,
     runner=subprocess.run,
+    commit_message: str | None = None,
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
     requested = agent
     resolved = failover.resolve_chat_agent(root, requested)
     full_prompt = _build_prompt(root, prompt)
-    attempt = _execute_agent_call(root, resolved, prompt, full_prompt, settings, run_fn)
+    attempt = _execute_agent_call(
+        root, resolved, prompt, full_prompt, settings, run_fn,
+        commit_message=commit_message,
+    )
     final_agent = resolved
     failover_notice: str | None = None
     if resolved == requested:
@@ -231,7 +235,8 @@ def run_turn(
                     storage_path=failover.chat_path(root),
                 )
                 attempt = _execute_agent_call(
-                    root, backup, prompt, full_prompt, settings, run_fn
+                    root, backup, prompt, full_prompt, settings, run_fn,
+                    commit_message=commit_message,
                 )
                 final_agent = backup
                 reason2 = failover.failover_reason(

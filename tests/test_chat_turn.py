@@ -378,3 +378,56 @@ def test_run_turn_with_no_backup_configured_behaves_exactly_as_before(tmp_path: 
     assert record["agent"] == "claude"
     assert record["rate_limited"] is True
     assert "failover_notice" not in record
+
+
+def test_execute_agent_call_uses_a_custom_commit_message(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        (tmp_path / "new.txt").write_text("x\n")
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+    chat._execute_agent_call(
+        tmp_path, "claude", "prompt", "full prompt", settings, fake_run_fn,
+        commit_message="custom: message",
+    )
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "custom: message" in log
+
+
+def test_execute_agent_call_default_commit_message_is_unchanged(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        (tmp_path / "new.txt").write_text("x\n")
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+    chat._execute_agent_call(
+        tmp_path, "claude", "prompt", "full prompt", settings, fake_run_fn
+    )
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "chat: claude turn" in log
+
+
+def test_run_turn_threads_a_custom_commit_message(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        (tmp_path / "new.txt").write_text("x\n")
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+    chat.run_turn(
+        tmp_path, agent="claude", prompt="p", settings=settings,
+        run_fn=fake_run_fn, commit_message="brainstorm: claude research",
+    )
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "brainstorm: claude research" in log
