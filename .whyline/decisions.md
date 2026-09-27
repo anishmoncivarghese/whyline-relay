@@ -2880,3 +2880,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 592dd350c8ca4106b53fea8f26eebc37 -->
+
+## 2026-09-27 — CB-4 review: approve brainstorm review passes and final synthesis
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-4
+
+**Because:** Implementation correctly delivers run_review_pass and run_final_synthesis with per-model error handling, designated synthesis agent delegation, and descriptive commit messages; all tests pass.
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: ee5ed65cae5d463691003e7e0e0081da -->
