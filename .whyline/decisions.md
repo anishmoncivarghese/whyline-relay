@@ -2494,3 +2494,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 70094dc90e2245b4bfc68903f17ce16c -->
+
+## 2026-09-27 — CF-2 review: approve the [chat.backup] configuration table
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CF-2
+
+**Because:** The implementation matches the requested Config interface and validation rules, the seven focused tests cover defaults, valid built-in and generic backups, invalid values, self-reference, unknown agents, and pipeline coexistence, and the full suite passes
+
+**Rejected:**
+
+- request changes — no functional, safety, or coverage defect was found
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: 5fb9860f2f0342ee898a3db7438ab47e -->
