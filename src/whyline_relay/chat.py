@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from whyline_relay import agents, chatlog, config, gitcheck, init, invocation
+from whyline_relay import adapters, agents, chatlog, config, gitcheck, init, invocation
 
 CHAT_AGENTS = ("claude", "codex", "agy", "grok")
 
@@ -96,6 +96,33 @@ def _build_prompt(root: Path, new_input: str) -> str:
     return f"{history}\n\n{new_input}" if history else new_input
 
 
+def _ensure_permission_files(root: Path, agent: str) -> bool:
+    """Generate a managed agent's permission file(s) (e.g. claude's
+    claude-settings.json) if this repo's own `init` command was never run.
+    Returns True if anything was newly created.
+
+    claude's own managed default_command references that file directly --
+    without it, the real claude CLI fails outright with "Settings file not
+    found," which the init flow normally prevents by writing it up front.
+    chat must not assume init ever ran (spec D5: claude/codex work in chat
+    with zero relay config present), so it generates the same file here,
+    once, the same way init.run does -- and never overwrites an existing
+    one, so a user's own customized settings are left alone.
+    """
+    if agent not in adapters.BUILTIN:
+        return False
+    stack = init.detect_stack(root)
+    relay = config.relay_dir(root)
+    created = False
+    for key, text in adapters.BUILTIN[agent].permission_files(stack).items():
+        path = relay / key
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            created = True
+    return created
+
+
 def run_turn(
     root: Path,
     *,
@@ -108,6 +135,11 @@ def run_turn(
     run_fn = run_fn if run_fn is not None else agents.run
     command = resolve_command(settings, agent)
     adapter = config.adapter_for(settings, agent)
+    if _ensure_permission_files(root, agent):
+        # Committed on its own, before the turn -- so the turn's own
+        # diff-stat/files_changed reflects only what the agent did, not
+        # one-time setup init would normally have already done.
+        gitcheck.commit_all(root, f"chat: generate {agent}'s permission settings")
     full_prompt = _build_prompt(root, prompt)
     turn_command = list(command)
     output_file: Path | None = None

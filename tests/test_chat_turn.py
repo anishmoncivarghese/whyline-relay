@@ -163,3 +163,60 @@ def test_run_turn_returns_the_persisted_chat_record(tmp_path: Path):
     assert {key: record[key] for key in persisted} == persisted
     assert record["rate_limited"] is False
     assert "diff_stat" not in record
+
+
+def test_run_turn_generates_claude_settings_when_init_never_ran(tmp_path: Path):
+    # Regression proof: claude's own managed default_command references
+    # .whyline/relay/claude-settings.json, which only `whyline-relay init`
+    # used to create -- so a repo that only ever ran `chat` (no init) would
+    # make the real claude CLI fail with "Settings file not found." Verified
+    # empirically against the real claude binary before this test was added.
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    settings_path = tmp_path / ".whyline" / "relay" / "claude-settings.json"
+    assert settings_path.exists()
+    assert "Bash(git commit:*)" in settings_path.read_text()
+
+
+def test_run_turn_never_overwrites_a_customized_claude_settings_file(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    settings_path = tmp_path / ".whyline" / "relay" / "claude-settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text('{"custom": true}')
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert settings_path.read_text() == '{"custom": true}'
+
+
+def test_run_turn_does_not_generate_permission_files_for_generic_agents(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n'
+    )
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(0, '{"text":"pong"}\n')
+
+    chat.run_turn(
+        tmp_path, agent="grok", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert not (relay / "claude-settings.json").exists()
