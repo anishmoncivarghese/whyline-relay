@@ -2854,3 +2854,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 7cc9043e6e3c498caa118d62422bb38b -->
+
+## 2026-09-27 — CB-3 review: approve brainstorm pass 0 independent research and merge
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-3
+
+**Because:** Implementation fulfills CB-3 requirements: temp_path, shared_path, run_pass_zero with graceful error handling, merge_pass_zero combining sections and cleaning up, plus relay gitignore coverage; test suite passes completely.
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/init.py, tests/test_brainstorm_pass0.py, tests/test_init.py
+
+<!-- whyline-event: c5b534a56ea04283aa0248759b9c9e2f -->
