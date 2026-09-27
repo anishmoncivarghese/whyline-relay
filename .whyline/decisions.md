@@ -3396,3 +3396,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, src/whyline_relay/roles.py, tests/test_preflight.py, tests/test_roles.py
 
 <!-- whyline-event: 69daa5cade854b7f8894acedcd57111a -->
+
+## 2026-09-27 — Mark the completed backup-chain branch ready for merge and release review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-RELEASE-REVIEW
+
+**Because:** BC-1 through BC-7 are checked, BC-7 is approved, the branch is clean, and the reviewer recorded 649 passing tests
+
+**Rejected:**
+
+- release the unified console now — it is only a committed design and plan, with no implementation tasks executed
+
+**Files:** plan.md
+
+<!-- whyline-event: 5a1d6902e8b442bea731c3b73347f599 -->
