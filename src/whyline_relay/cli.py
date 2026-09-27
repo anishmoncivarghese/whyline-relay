@@ -14,6 +14,7 @@ from pathlib import Path
 from whyline_relay import (
     adapters,
     agents,
+    chat,
     config,
     failover,
     gitcheck,
@@ -243,6 +244,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Clear an in-flight plan session without resuming it.",
     )
+
+    chat_parser = subparsers.add_parser("chat", help="Start the interactive chat REPL")
+    chat_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
     return parser
 
 
@@ -369,6 +375,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     if saved.log_path:
         print(f"Log       {saved.log_path}")
     print(f"Resume with: {invocation.command('resume')}")
+    return EXIT_OK
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    chat.repl(root)
     return EXIT_OK
 
 
@@ -629,6 +641,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "doctor": cmd_doctor,
             "plan-format": cmd_plan_format,
             "plan": cmd_plan,
+            "chat": cmd_chat,
         }
         try:
             return commands[args.command](args)

@@ -155,3 +155,124 @@ def run_turn(
     if committed:
         record["diff_stat"] = diff_stat
     return record
+
+
+SLASH_COMMANDS = ("/default", "/agents", "/history", "/clear", "/exit")
+
+
+def _agent_status_lines(settings: "config.Config", which) -> list[str]:
+    lines = []
+    for name in CHAT_AGENTS:
+        configured = name in settings.agents
+        found = which(name) is not None
+        if configured and found:
+            state = "installed, configured"
+        elif found:
+            state = "installed, not configured for chat"
+        elif configured:
+            state = "configured, but not installed"
+        else:
+            state = "not available"
+        lines.append(f"{name}: {state}")
+    return lines
+
+
+def repl(
+    root: Path,
+    *,
+    input_fn=None,
+    print_fn=None,
+    run_fn=None,
+    which=None,
+    setup_answers=None,
+) -> None:
+    input_fn = input_fn if input_fn is not None else input
+    print_fn = print_fn if print_fn is not None else print
+    which = which if which is not None else shutil.which
+
+    default_agent = load_default_agent(root)
+    if default_agent is None:
+        wizard_input = input_fn
+        if setup_answers is not None:
+            def wizard_input(_prompt=""):
+                return next(setup_answers)
+
+        default_agent = run_setup_wizard(
+            root, which=which, input_fn=wizard_input, print_fn=print_fn
+        )
+
+    settings = config.load(root)
+    while True:
+        line = input_fn("> ").strip()
+        if not line:
+            continue
+        if line == "/exit":
+            return
+        if line.startswith("/") and line.split()[0] not in (
+            *(f"/{a}" for a in CHAT_AGENTS),
+            *SLASH_COMMANDS,
+        ):
+            print_fn(
+                f"Unknown command: {line.split()[0]}. Try "
+                + ", ".join(f"/{a}" for a in CHAT_AGENTS)
+                + ", " + ", ".join(SLASH_COMMANDS) + "."
+            )
+            continue
+        if line == "/agents":
+            for status_line in _agent_status_lines(settings, which):
+                print_fn(status_line)
+            continue
+        if line == "/history":
+            for turn in chatlog.load(root):
+                print_fn(f"[{turn['agent']}] {turn['prompt']}")
+                print_fn(turn["response"])
+            continue
+        if line == "/clear":
+            confirm = input_fn(
+                "Clear all chat history for this repo? [y/N] "
+            ).strip().lower()
+            if confirm == "y":
+                chatlog.clear(root)
+                print_fn("History cleared.")
+            continue
+        if line.startswith("/default"):
+            parts = line.split(maxsplit=1)
+            if len(parts) == 2 and parts[1].strip() in CHAT_AGENTS:
+                save_default_agent(root, parts[1].strip())
+                default_agent = parts[1].strip()
+                print_fn(f"Default agent is now {default_agent}.")
+            else:
+                print_fn(f"Usage: /default <{'|'.join(CHAT_AGENTS)}>")
+            continue
+
+        agent = default_agent
+        prompt = line
+        first_word = line.split(maxsplit=1)[0]
+        if first_word in (f"/{a}" for a in CHAT_AGENTS):
+            agent = first_word[1:]
+            rest = line.split(maxsplit=1)
+            prompt = rest[1] if len(rest) == 2 else ""
+
+        try:
+            record = run_turn(
+                root, agent=agent, prompt=prompt, settings=settings, run_fn=run_fn
+            )
+        except AgentUnavailable as error:
+            print_fn(str(error))
+            continue
+        except agents.AgentMissing as error:
+            print_fn(str(error))
+            continue
+        except agents.AgentTimeout as error:
+            print_fn(f"{error} -- try again, or /default another agent.")
+            continue
+
+        print_fn(f"[{record['agent']}] {record['response']}")
+        if record["rate_limited"]:
+            print_fn(
+                f"{record['agent']} looks rate-limited -- "
+                "/default another agent, or wait."
+            )
+        if record.get("diff_stat"):
+            prefix = "" if record["ok"] else "⚠ "
+            print_fn(f"{prefix}{record['diff_stat'].strip()}")
