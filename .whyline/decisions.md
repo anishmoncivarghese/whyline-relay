@@ -2962,3 +2962,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: b74d36c4b29f446a9dcc596a5c0e361c -->
+
+## 2026-09-27 — CB-6 review: approve /brainstorm documentation in README.md
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-6
+
+**Because:** README.md accurately documents the /brainstorm workflow and user interaction exactly as specified, and all tests pass
+
+**Rejected:**
+
+- request changes — the required documentation is present and accurate
+
+**Files:** README.md
+
+<!-- whyline-event: 1a2f1dac06344a3bb89a2c40bc8f1a5a -->
