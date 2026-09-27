@@ -161,7 +161,7 @@ def _execute_agent_call(
         agent_name=agent,
     )
     if adapter.uses_output_file:
-        raw = output_file.read_text(encoding="utf-8") if output_file.exists() else ""
+        raw = (output_file.read_text(encoding="utf-8") if output_file.exists() else "") or (result.output or "")
     else:
         raw = result.output or ""
     response = adapter.extract_response(raw)
@@ -195,6 +195,7 @@ def run_turn(
     run_fn=None,
     runner=subprocess.run,
     commit_message: str | None = None,
+    exclude: frozenset[str] = frozenset(),
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
@@ -207,27 +208,47 @@ def run_turn(
     )
     final_agent = resolved
     failover_notice: str | None = None
-    if resolved != requested:
-        # Already on an active override. Detect a further failure but do not
-        # chase another agent; chain walking lands later. A turn that is still
-        # on its requested agent skips failover_reason entirely, so it never
-        # shells out for a login check when there is nothing to switch to.
+    current = resolved
+    existing = failover.read_overrides(root, failover.chat_path(root)).get(requested)
+    tried = set(existing.tried) if existing is not None else set()
+    tried.add(resolved)
+    while settings.backup_chain:
         reason = failover.failover_reason(
             attempt["adapter"], attempt["raw"], attempt["command"], runner=runner
         )
-        if reason:
+        if reason is None:
+            break
+        backup = failover.next_backup(settings.backup_chain, tried, exclude)
+        if backup is None:
             override = failover.read_overrides(root, failover.chat_path(root)).get(
                 requested
             )
-            failover_notice = failover.pause_message(
-                resolved, requested, reason, override
-            )
+            failover_notice = failover.pause_message(current, requested, reason, override)
+            break
+        verb, _ = failover.REASON_TEXT[reason]
+        failover_notice = f"{current} {verb}; trying its backup, {backup}..."
+        failover.write_override(
+            root,
+            requested,
+            failover.ActiveOverride(
+                agent=backup,
+                backup_for=requested,
+                reason=reason,
+                since=datetime.now(timezone.utc).isoformat(),
+                tried=sorted(tried),
+            ),
+            storage_path=failover.chat_path(root),
+        )
+        attempt = _execute_agent_call(
+            root, backup, prompt, full_prompt, settings, run_fn,
+            commit_message=commit_message,
+        )
+        final_agent = backup
+        current = backup
+        tried.add(backup)
     rate_limited = failover.rate_limited(
         attempt["adapter"], attempt["raw"], attempt["command"]
     )
-    # append generates the timestamp and returns the record it persisted.
-    # rate_limited, diff_stat, and failover_notice are return-only, so they
-    # are added after the write and never become part of the chatlog line.
     record = chatlog.append(
         root, agent=final_agent, prompt=prompt, response=attempt["response"],
         files_changed=attempt["files_changed"], ok=attempt["ok"],

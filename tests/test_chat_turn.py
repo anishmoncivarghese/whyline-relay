@@ -7,6 +7,12 @@ import pytest
 from whyline_relay import chat, chatlog, config
 
 
+def _deliver(command: list[str], text: str) -> None:
+    """Write `text` to a chat `-o` path when the command has one."""
+    if "-o" in command:
+        Path(command[command.index("-o") + 1]).write_text(text, encoding="utf-8")
+
+
 def _init_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
@@ -311,3 +317,164 @@ def test_run_turn_threads_a_custom_commit_message(tmp_path: Path):
         check=True, capture_output=True, text=True,
     ).stdout
     assert "brainstorm: claude research" in log
+
+
+def test_run_turn_switches_to_the_backup_and_retries_automatically(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[backup]\nchain = ["codex"]\n')
+    settings = config.load(tmp_path)
+    calls = []
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        text = "pong from backup\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok,
+    )
+    assert calls == ["claude", "codex"]
+    assert record["agent"] == "codex"
+    assert record["response"] == "pong from backup"
+    assert "claude hit a usage or rate limit" in record["failover_notice"]
+    from whyline_relay import failover
+    override = failover.read_overrides(tmp_path, failover.chat_path(tmp_path))
+    assert override["claude"].agent == "codex"
+    assert override["claude"].reason == "rate-limit"
+    assert override["claude"].tried == ["claude"]
+
+
+def test_run_turn_walks_past_a_backup_that_also_fails(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text(
+        '[backup]\nchain = ["codex", "aider"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\n'
+    )
+    settings = config.load(tmp_path)
+    calls = []
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        if command[0] in ("claude", "codex"):
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        text = "pong from aider\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok,
+    )
+    assert calls == ["claude", "codex", "aider"]
+    assert record["agent"] == "aider"
+    from whyline_relay import failover
+    override = failover.read_overrides(tmp_path, failover.chat_path(tmp_path))
+    assert override["claude"].agent == "aider"
+    assert override["claude"].tried == ["claude", "codex"]
+
+
+def test_run_turn_reports_and_stops_when_the_chain_is_exhausted(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[backup]\nchain = ["codex"]\n')
+    settings = config.load(tmp_path)
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        text = "You have exceeded your usage limit. Try again later."
+        _deliver(command, text)
+        return RunResult(1, text)
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert record["agent"] == "codex"
+    assert "also" in record["failover_notice"]
+    assert "hit a usage or rate limit" in record["failover_notice"]
+
+
+def test_run_turn_uses_an_already_active_backup_and_keeps_walking_if_it_fails(
+    tmp_path: Path
+):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text(
+        '[backup]\nchain = ["codex", "aider"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\n'
+    )
+    settings = config.load(tmp_path)
+    from whyline_relay import failover
+    failover.write_override(
+        tmp_path, "claude",
+        failover.ActiveOverride(
+            "codex", "claude", "rate-limit", "2026-01-01T00:00:00", tried=["claude"]
+        ),
+        storage_path=failover.chat_path(tmp_path),
+    )
+    calls = []
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        if command[0] == "codex":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        text = "pong from aider\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok,
+    )
+    assert calls == ["codex", "aider"]
+    assert record["agent"] == "aider"
+    override = failover.read_overrides(tmp_path, failover.chat_path(tmp_path))
+    assert override["claude"].tried == ["claude", "codex"]
+
+
+def test_run_turn_with_no_chain_configured_behaves_exactly_as_before(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(1, "You have exceeded your usage limit. Try again later.")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert record["agent"] == "claude"
+    assert record["rate_limited"] is True
+    assert "failover_notice" not in record
+
+
+def test_run_turn_exclude_skips_a_chain_candidate(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text(
+        '[backup]\nchain = ["codex", "aider"]\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\n'
+    )
+    settings = config.load(tmp_path)
+    calls = []
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        text = "pong from aider\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok, exclude=frozenset({"codex"}),
+    )
+    assert calls == ["claude", "aider"]
+    assert record["agent"] == "aider"

@@ -3182,3 +3182,36 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/failover.py, src/whyline_relay/loop.py, tests/test_failover.py, tests/test_loop_pipeline.py
 
 <!-- whyline-event: 1bf2518d1da447feb240e6b62f4c248d -->
+
+## 2026-09-27 — Walk backup chain in chat run_turn and fall back to captured output on empty output file
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-5
+
+**Because:** Chat turns need multi-hop failover with tried-tracking and exclude support, and output-file adapters leave the file empty when rate-limited
+
+**Rejected:**
+
+- Single-hop chat backup — does not walk the configured backup chain
+- Require output file on failure — causes rate-limit failures for output-file adapters like codex to be invisible
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: 331cb4195afb41a7978dcb8ac3f56af4 -->
+
+## 2026-09-27 — Approve chat backup-chain walking with empty output-file fallback
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-5
+
+**Because:** The implementation matches BC-5, preserves no-chain behavior, keeps the executing agent in the returned record, and passes focused and full test suites; captured output is used only when an output-file adapter leaves its file empty
+
+**Rejected:**
+
+- Request changes — no functional, coverage, or safety defect found
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: ae90dde2fc5145f6b414c345a2911763 -->
