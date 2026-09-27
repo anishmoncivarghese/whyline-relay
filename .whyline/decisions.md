@@ -2772,3 +2772,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: 7f10b8e98e7140238cf59e917e9339a9 -->
+
+## 2026-09-27 — Release the completed setup wizard as whyline-relay 0.2.19
+
+**Actor:** codex
+**Role:** releaser
+**Task:** RSW-RELEASE
+
+**Because:** The four-task setup wizard is merged, independently reviewed, and the full 593-test suite passed; this is a backward-compatible feature release after 0.2.18
+
+**Rejected:**
+
+- 0.3.0 — the CLI and configuration remain backward compatible, with no breaking contract change
+
+**Files:** pyproject.toml
+
+<!-- whyline-event: 2bbdb355b524409faa3a37e31feb06a8 -->
