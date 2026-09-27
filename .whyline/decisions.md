@@ -2814,3 +2814,17 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
 
 <!-- whyline-event: 206e5bd6a8084509ab18934e9f40e470 -->
+
+## 2026-09-27 — Auto-resume script recovered CB-2: grok exited without handing off but its work passed the full suite
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** CB-2
+
+**Because:** the same handoff-stall pattern seen throughout this project's use of grok -- its code is reliably correct, it just doesn't always call whyline handoff itself
+
+**Rejected:**
+
+- reset and redo — wastes correct, test-verified work
+
+<!-- whyline-event: f3a66b4abb05478c9f4abeb7ba508fa0 -->
