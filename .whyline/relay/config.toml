@@ -5,8 +5,12 @@ timeout_minutes = 30
 branch_prefix = "relay/"
 
 [roles]
-implementer = "grok"
+implementer = "antigravity"
 reviewer = "codex"
+
+[agents.antigravity]
+adapter = "generic"
+command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-project", "--add-dir", ".", "-p"]
 
 [agents.codex]
 command = ["codex", "exec", "-s", "workspace-write", "--color", "never"]

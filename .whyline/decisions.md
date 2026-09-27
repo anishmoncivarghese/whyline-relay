@@ -2636,3 +2636,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** docs/releases/v0.2.18.md
 
 <!-- whyline-event: 9d8cfeddf0664c04849cbb78ea3f0045 -->
+
+## 2026-09-27 — Encode relay template placeholders in the executable setup-wizard plan
+
+**Actor:** codex
+**Role:** orchestrator
+**Task:** RSW-SETUP
+
+**Because:** whyline-relay substitutes recognized placeholders after injecting task text, so raw markers in the plan's Python template sample were expanded during dry-run and corrupted the implementation instructions
+
+**Rejected:**
+
+- Keep the source text byte-for-byte — the dry run proved that would inject the live sync packet and erase actor placeholders before Antigravity saw the task
+
+**Files:** plan.md
+
+<!-- whyline-event: 70df90a3bc55453da0a667d8e085fdc9 -->
