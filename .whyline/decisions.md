@@ -2652,3 +2652,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** plan.md
 
 <!-- whyline-event: 70df90a3bc55453da0a667d8e085fdc9 -->
+
+## 2026-09-27 — Generate full three-stage pipeline and preserve relay placeholders in test prompt
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RSW-1
+
+**Because:** the setup wizard produces a fully operational implementer-tester-reviewer pipeline and test prompt template that relay runtime can substitute per task
+
+**Rejected:**
+
+- Generate minimal role-only config — a role-only config does not configure pipeline test stages or max_visits
+
+**Files:** src/whyline_relay/setup.py
+
+<!-- whyline-event: c06dcf988c014191a5bb5e01d6bec4f2 -->
+
+## 2026-09-27 — RSW-1 review: approve the plan-source and role-wizard implementation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RSW-1
+
+**Because:** the implementation matches the requested interfaces, preserves runtime prompt placeholders, generates a config accepted by the real pipeline loader, and all 586 tests pass
+
+**Rejected:**
+
+- Request changes — no functional, coverage, or safety defect was found
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup.py
+
+<!-- whyline-event: ea3fb67bf2a44f669c9ab9a37ae6a0ec -->
