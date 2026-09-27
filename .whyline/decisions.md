@@ -2418,3 +2418,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/preflight.py, docs/releases/v0.2.15.md
 
 <!-- whyline-event: 3f8cb06229d34e3fa5aadb6b113259ff -->
+
+## 2026-09-27 — Merge whyline-relay's chat REPL (RCR-1 through RCR-8) into main, verified byte-for-byte against the relay-driven sandbox
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** RCR
+
+**Because:** Built with grok as implementer and codex as reviewer via whyline-relay itself. Grok got cancelled before calling whyline handoff on 11 of 11 turns (confused re-checking a pytest summary line this project's config never prints), but every turn's actual code was correct and independently verified (full suite run by orchestrator each time) except RCR-6's first round, where codex's own review correctly caught a real interface-contract bug (run_turn silently dropped the persisted record's timestamp field), fixed in a follow-up round. Grok also independently found and correctly fixed two other real gaps neither the spec nor plan anticipated: a golden-output/docstring conflict in RCR-2, and a hardcoded-relay-command lint conflict in RCR-6 (fixed via invocation.command('doctor') instead of a literal string)
+
+**Rejected:**
+
+- release without the matching whyline-side delegation (WCD-1/WCD-2, already merged into agentdock main) — holding both together since bare whyline delegates to this exact command
+
+**Files:** src/whyline_relay/chat.py, src/whyline_relay/chatlog.py, src/whyline_relay/agents.py, src/whyline_relay/init.py, src/whyline_relay/gitcheck.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: cb1b9ea0740149958dd5fb751b368b48 -->
