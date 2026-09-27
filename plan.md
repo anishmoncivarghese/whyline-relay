@@ -277,7 +277,7 @@
   ---
 
 
-- [ ] BC-2: `failover.py` -- `ActiveOverride.tried` and `next_backup()`
+- [x] BC-2: `failover.py` -- `ActiveOverride.tried` and `next_backup()`
 
 
   **Files:**
