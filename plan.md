@@ -1,4 +1,4 @@
-- [ ] CF-1: `failover.py` — a generalized, explicit storage path
+- [x] CF-1: `failover.py` — a generalized, explicit storage path
 
   Global constraints:
   - No new runtime dependency.
