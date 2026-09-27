@@ -1414,7 +1414,7 @@
   ---
 
 
-- [ ] BC-6: Brainstorm relabels a chain substitution and excludes its own models
+- [x] BC-6: Brainstorm relabels a chain substitution and excludes its own models
 
 
   **Files:**
