@@ -2716,3 +2716,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/setup.py, tests/test_setup.py
 
 <!-- whyline-event: bcb2a4482af2449e82504b1ec39b754a -->
+
+## 2026-09-27 — Route whyline-relay setup subcommand directly to setup.run
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RSW-3
+
+**Because:** setup.run encapsulates the wizard flow, preflight gating, and execution transition
+
+**Rejected:**
+
+- Inline wizard flow in cli.py — keeps CLI entry point minimal and setup testable in isolation
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: ebcc6b16a7854201a497d4de58082d65 -->
+
+## 2026-09-27 — Approve setup CLI wiring for RSW-3
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RSW-3
+
+**Because:** The subcommand, repository-path resolution, setup.run dispatch, and regression tests match the specified interface; targeted and full suites pass independently
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 83e00a2b60cf486088fe0591c5d7f9bf -->

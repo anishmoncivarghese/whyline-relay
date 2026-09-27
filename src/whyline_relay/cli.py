@@ -30,6 +30,7 @@ from whyline_relay import (
     remove,
     roles,
     running,
+    setup,
     state,
     whylinecmd,
 )
@@ -249,6 +250,13 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument(
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
+
+    setup_parser = subparsers.add_parser(
+        "setup", help="Assign roles to a plan and gate on doctor before starting"
+    )
+    setup_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
     return parser
 
 
@@ -382,6 +390,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
     chat.repl(root)
     return EXIT_OK
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    return setup.run(root)
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -642,6 +655,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "plan-format": cmd_plan_format,
             "plan": cmd_plan,
             "chat": cmd_chat,
+            "setup": cmd_setup,
         }
         try:
             return commands[args.command](args)
