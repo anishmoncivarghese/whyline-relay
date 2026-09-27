@@ -1202,7 +1202,7 @@
 
   ---
 
-- [ ] CB-6: README — document `/brainstorm`
+- [x] CB-6: README — document `/brainstorm`
 
   Global constraints:
   - No new runtime dependency.
