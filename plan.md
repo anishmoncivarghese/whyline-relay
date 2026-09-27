@@ -459,7 +459,7 @@
   ---
 
 
-- [ ] BC-3: Legacy 2-role runner walks the chain
+- [x] BC-3: Legacy 2-role runner walks the chain
 
 
   **Files:**
