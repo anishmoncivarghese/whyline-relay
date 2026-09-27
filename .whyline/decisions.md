@@ -3215,3 +3215,102 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
 
 <!-- whyline-event: ae90dde2fc5145f6b414c345a2911763 -->
+
+## 2026-09-27 — Pass exclude set of peer models and attribute brainstorm sections to actually-executed agents
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-6
+
+**Because:** Multi-model brainstorm turns must prevent failover from choosing other already-selected peer models, and sections must be labeled with the agent that actually served the turn
+
+**Rejected:**
+
+- Static requested-model section headings — misattributes output when a backup chain substitution occurs
+- Require callers to pass actual_agents mapping — breaks existing callers and tests unless actual_agents is both returned and cached in temporary relay state
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: 016cde755d7b4ef299794aedeec2d233 -->
+
+## 2026-09-27 — Request changes because brainstorm drops actual-agent attribution before review passes
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-6
+
+**Because:** The production /brainstorm orchestration discards run_pass_zero and run_review_pass mappings, and merge_pass_zero deletes the only cached mapping, so review prompts target stale requested-agent headings after substitution despite the unit suites passing
+
+**Rejected:**
+
+- Approve based on passing tests — the tests call helpers in isolation and do not cover the broken sequential flow
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: 0445be723aaf4b52ba570985ac6d57f6 -->
+
+## 2026-09-27 — Preserve and propagate actual-agent mappings across brainstorm phases via chat wiring and persistent cache
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-6
+
+**Because:** Ensures review prompts and markdown section headings target the actually serving models throughout sequential review passes without dropping attribution
+
+**Rejected:**
+
+- Only pass actual_agents in memory — standalone callers and unit tests calling review passes in isolation would lose substitution context
+- Unlink cache in merge_pass_zero — deletes the mapping before review passes 1..N can read it
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: 012a36ce0afa47298a4e685995334b35 -->
+
+## 2026-09-27 — Request changes because brainstorm attribution cache leaks across topics
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-6
+
+**Because:** The topic-scoped cache is also copied to a global fallback, so an unrelated topic without its own cache loads stale actual-agent mappings and can target or relabel the wrong section; the full suite does not cover this isolation case
+
+**Rejected:**
+
+- Approve because production currently threads the mapping explicitly — helper APIs still load the fallback and the handoff explicitly calls out cross-topic isolation as the open risk
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: 348c4079058c45a7a849d247270c4cb0 -->
+
+## 2026-09-27 — Strictly scope brainstorm attribution cache to topic and eliminate global fallback
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-6
+
+**Because:** Prevents cross-topic leakage of actual-agent substitution mappings between unrelated brainstorm runs or isolated helper calls
+
+**Rejected:**
+
+- Keep unscoped fallback — Stale mappings from prior topics leak into new topics and misattribute sections
+- Thread mapping only in memory — Fails when callers or unit tests run merge or review steps in isolation without threading
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: ab7f20aa7b264ca99e868ec19a0c6f3e -->
+
+## 2026-09-27 — Approve BC-6 after round-three review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-6
+
+**Because:** All brainstorm turn sites exclude peer selections; pass-zero and review attribution follows the actually executed agent across sequential phases; topic-scoped state prevents cross-topic leakage; 13 focused tests and the 651-test full suite pass
+
+**Rejected:**
+
+- Request further changes — no remaining correctness defect found in the specified flow or regression coverage
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, tests/test_brainstorm_passes.py
+
+<!-- whyline-event: feaba7a31ef94cb197db700ac631073d -->

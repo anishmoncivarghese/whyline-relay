@@ -367,15 +367,18 @@ def repl(
             )
             if setup is None:
                 continue
-            brainstorm.run_pass_zero(
+            actual_agents = brainstorm.run_pass_zero(
                 root, setup["models"], setup["topic"], settings=settings,
                 run_fn=run_fn, print_fn=print_fn,
             )
-            brainstorm.merge_pass_zero(root, setup["models"], setup["topic"])
+            brainstorm.merge_pass_zero(
+                root, setup["models"], setup["topic"], actual_agents=actual_agents
+            )
             for pass_number in range(1, setup["passes"] + 1):
-                brainstorm.run_review_pass(
+                actual_agents = brainstorm.run_review_pass(
                     root, setup["models"], setup["topic"], pass_number,
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
+                    actual_agents=actual_agents,
                 )
             record = brainstorm.run_final_synthesis(
                 root, setup["final_agent"], setup["models"], setup["topic"],

@@ -3,6 +3,7 @@ then one model's final synthesis -- all built on ordinary chat turns."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -14,6 +15,8 @@ MODEL_OPTIONS = (
     ("3", "agy", "Antigravity"),
     ("4", "grok", "Grok"),
 )
+MODEL_OPTIONS_BY_KEY = {key: label for _, key, label in MODEL_OPTIONS}
+
 
 
 def slugify(topic: str) -> str:
@@ -152,6 +155,26 @@ def shared_path(root: Path, topic: str) -> Path:
     return root / "docs" / "brainstorm" / f"{slugify(topic)}.md"
 
 
+def _actual_agents_path(root: Path, topic: str) -> Path:
+    return config.relay_dir(root) / "brainstorm-tmp" / f".actual-agents-{slugify(topic)}.json"
+
+
+def _load_actual_agents(root: Path, topic: str) -> dict[str, str]:
+    path = _actual_agents_path(root, topic)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_actual_agents(root: Path, mapping: dict[str, str], topic: str) -> None:
+    path = _actual_agents_path(root, topic)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(mapping), encoding="utf-8")
+
+
 def run_pass_zero(
     root: Path,
     models: list[tuple[str, str]],
@@ -161,12 +184,14 @@ def run_pass_zero(
     run_fn=None,
     runner=None,
     print_fn=None,
-) -> None:
+) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run is skipped (spec B7) -- it simply leaves no temp file,
     which merge_pass_zero already treats as absent, not an error."""
     print_fn = print_fn if print_fn is not None else print
+    actual_agents: dict[str, str] = {}
     for agent_key, label in models:
+        exclude = frozenset(key for key, _ in models if key != agent_key)
         prompt = (
             f'Research "{topic}" independently. Write your findings to '
             f"{temp_path(root, agent_key)} as plain markdown. This is your "
@@ -177,7 +202,7 @@ def run_pass_zero(
         if runner is not None:
             kwargs["runner"] = runner
         try:
-            chat.run_turn(
+            record = chat.run_turn(
                 root,
                 agent=agent_key,
                 prompt=prompt,
@@ -185,23 +210,42 @@ def run_pass_zero(
                 commit_message=(
                     f'brainstorm: {agent_key} independent research on "{topic}"'
                 ),
+                exclude=exclude,
                 **kwargs,
             )
+            actual_agents[agent_key] = record["agent"]
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
             print_fn(f"{label} could not research this pass: {error}")
+            actual_agents[agent_key] = agent_key
+
+    _save_actual_agents(root, actual_agents, topic)
+    return actual_agents
 
 
-def merge_pass_zero(root: Path, models: list[tuple[str, str]], topic: str) -> None:
+def merge_pass_zero(
+    root: Path,
+    models: list[tuple[str, str]],
+    topic: str,
+    actual_agents: dict[str, str] | None = None,
+) -> None:
     """Combines every model's non-empty temp file into the one shared file,
     under a `## <Label>` heading each, in `models`' own order. Deletes the
     temp files afterward. An empty or missing temp file is skipped, not an
     error (spec: "an empty/missing pass-0 temp file is skipped")."""
+    model_labels = dict(MODEL_OPTIONS_BY_KEY)
+    if actual_agents is None:
+        actual_agents = _load_actual_agents(root, topic)
+    else:
+        _save_actual_agents(root, actual_agents, topic)
+
     sections = []
     used_paths = []
     for agent_key, label in models:
         path = temp_path(root, agent_key)
         if path.exists() and path.read_text(encoding="utf-8").strip():
-            sections.append(f"## {label}\n\n{path.read_text(encoding='utf-8').strip()}\n")
+            actual = actual_agents.get(agent_key, agent_key)
+            actual_label = model_labels.get(actual, label)
+            sections.append(f"## {actual_label}\n\n{path.read_text(encoding='utf-8').strip()}\n")
             used_paths.append(path)
     target = shared_path(root, topic)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -222,17 +266,27 @@ def run_review_pass(
     run_fn=None,
     runner=None,
     print_fn=None,
-) -> None:
+    actual_agents: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
     keeps whatever it held from the last successful pass."""
     print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
+    model_labels = dict(MODEL_OPTIONS_BY_KEY)
+    if actual_agents is None:
+        actual_map = _load_actual_agents(root, topic)
+    else:
+        actual_map = dict(actual_agents)
+    results: dict[str, str] = dict(actual_map)
     for agent_key, label in models:
+        exclude = frozenset(key for key, _ in models if key != agent_key)
+        current_actual = actual_map.get(agent_key, agent_key)
+        current_label = model_labels.get(current_actual, label)
         prompt = (
             f'Combined review pass {pass_number} of a brainstorm on '
             f'"{topic}". Read {shared} in full. Update your own section '
-            f'("## {label}") in place based on what you now see from the '
+            f'("## {current_label}") in place based on what you now see from the '
             "others -- replace it with your revised thinking, rather than "
             "appending a new dated block; the file should only ever show "
             "your current view, not a history of past passes. Do not touch "
@@ -251,13 +305,38 @@ def run_review_pass(
                     f'brainstorm: {agent_key} review pass {pass_number} '
                     f'on "{topic}"'
                 ),
+                exclude=exclude,
                 **kwargs,
             )
+            actual_key = record["agent"]
+            results[agent_key] = actual_key
+            new_label = model_labels.get(actual_key, label)
+            if new_label != current_label and shared.exists():
+                content = shared.read_text(encoding="utf-8")
+                new_content, count = re.subn(
+                    rf"^##\s+{re.escape(current_label)}\s*$",
+                    f"## {new_label}",
+                    content,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                if count == 0 and f"## {current_label}" in content:
+                    new_content = content.replace(f"## {current_label}", f"## {new_label}", 1)
+                    count = 1
+                if count > 0:
+                    shared.write_text(new_content, encoding="utf-8")
+                    gitcheck.commit_all(
+                        root, f'brainstorm: relabel section to {new_label} on "{topic}"'
+                    )
+            actual_map[agent_key] = actual_key
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
             print_fn(f"{label} could not review this pass: {error}")
+            results[agent_key] = current_actual
             continue
         if not record["ok"]:
             print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
+    _save_actual_agents(root, results, topic)
+    return results
 
 
 def run_final_synthesis(
@@ -281,11 +360,13 @@ def run_final_synthesis(
     kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     if runner is not None:
         kwargs["runner"] = runner
+    exclude = frozenset(key for key, _ in models if key != final_agent)
     return chat.run_turn(
         root,
         agent=final_agent,
         prompt=prompt,
         settings=settings,
         commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
+        exclude=exclude,
         **kwargs,
     )
