@@ -2828,3 +2828,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: f3a66b4abb05478c9f4abeb7ba508fa0 -->
+
+## 2026-09-27 — CB-2 review: approve brainstorm setup -- topic slugification, model selection, and availability check
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-2
+
+**Because:** Implementation fulfills all CB-2 requirements: slugify, parse_model_selection, check_availability, and ask_brainstorm_setup handle edge cases and interactive prompting cleanly; all 14 unit tests and the entire project test suite pass without issues.
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_setup.py
+
+<!-- whyline-event: e50caba5f4c24f1fa4e4d158cafeb7b4 -->
