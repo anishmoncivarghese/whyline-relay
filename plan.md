@@ -1051,7 +1051,7 @@
 
   ---
 
-- [ ] CB-5: `chat.py` — wire `/brainstorm` into the REPL
+- [x] CB-5: `chat.py` — wire `/brainstorm` into the REPL
 
   Global constraints:
   - No new runtime dependency.
