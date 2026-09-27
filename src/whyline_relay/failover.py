@@ -29,13 +29,24 @@ class ActiveOverride:
     since: str  # ISO timestamp
 
 
-def path(root: Path) -> Path:
-    return config.relay_dir(root) / "active-roles.json"
+def path(root: Path, filename: str = "active-roles.json") -> Path:
+    return config.relay_dir(root) / filename
 
 
-def read_overrides(root: Path) -> dict[str, ActiveOverride]:
+def chat_path(root: Path) -> Path:
+    """Chat's own override file -- separate from the pipeline's, since a
+    custom pipeline can name a role after an agent (role = "claude"), which
+    would collide with chat's key (the agent literally called claude) if
+    they shared one file."""
+    return path(root, "chat-active-agents.json")
+
+
+def read_overrides(
+    root: Path, storage_path: Path | None = None
+) -> dict[str, ActiveOverride]:
+    target = storage_path if storage_path is not None else path(root)
     try:
-        raw = json.loads(path(root).read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     if not isinstance(raw, dict):
@@ -50,8 +61,12 @@ def read_overrides(root: Path) -> dict[str, ActiveOverride]:
     return result
 
 
-def _write_all(root: Path, overrides: dict[str, ActiveOverride]) -> None:
-    target = path(root)
+def _write_all(
+    root: Path,
+    overrides: dict[str, ActiveOverride],
+    storage_path: Path | None = None,
+) -> None:
+    target = storage_path if storage_path is not None else path(root)
     if not overrides:
         target.unlink(missing_ok=True)
         return
@@ -62,15 +77,22 @@ def _write_all(root: Path, overrides: dict[str, ActiveOverride]) -> None:
     )
 
 
-def write_override(root: Path, role: str, override: ActiveOverride) -> None:
-    overrides = read_overrides(root)
+def write_override(
+    root: Path,
+    role: str,
+    override: ActiveOverride,
+    storage_path: Path | None = None,
+) -> None:
+    overrides = read_overrides(root, storage_path)
     overrides[role] = override
-    _write_all(root, overrides)
+    _write_all(root, overrides, storage_path)
 
 
-def clear_overrides(root: Path, role: str | None = None) -> int:
+def clear_overrides(
+    root: Path, role: str | None = None, storage_path: Path | None = None
+) -> int:
     """Remove the override for `role`, or every override if `role` is None. Returns the count removed."""
-    overrides = read_overrides(root)
+    overrides = read_overrides(root, storage_path)
     if role is None:
         removed = len(overrides)
         overrides = {}
@@ -79,8 +101,17 @@ def clear_overrides(root: Path, role: str | None = None) -> int:
         removed = 1
     else:
         removed = 0
-    _write_all(root, overrides)
+    _write_all(root, overrides, storage_path)
     return removed
+
+
+def resolve_chat_agent(root: Path, requested: str) -> str:
+    """The agent actually addressed right now for `requested`: its backup if
+    switched, else `requested` unchanged. Chat's own counterpart to
+    effective_agent() -- there is no settings.roles to fall back to here,
+    since chat addresses agents by name directly, not by role."""
+    override = read_overrides(root, chat_path(root)).get(requested)
+    return override.agent if override is not None else requested
 
 
 def effective_agent(root: Path, settings: config.Config, role: str) -> str:

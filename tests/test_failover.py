@@ -167,3 +167,50 @@ def test_active_roles_json_is_locally_excluded(tmp_path):
     from whyline_relay import gitcheck
 
     assert ".whyline/relay/active-roles.json" in gitcheck.RELAY_IGNORE
+
+
+def test_chat_path_is_separate_from_the_pipeline_path(tmp_path):
+    assert failover.chat_path(tmp_path) != failover.path(tmp_path)
+    assert failover.chat_path(tmp_path).name == "chat-active-agents.json"
+
+
+def test_writing_to_the_chat_path_does_not_touch_the_pipeline_file(tmp_path):
+    failover.write_override(
+        tmp_path, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "t"),
+        storage_path=failover.chat_path(tmp_path),
+    )
+    assert failover.read_overrides(tmp_path) == {}
+    assert failover.read_overrides(tmp_path, failover.chat_path(tmp_path)) == {
+        "claude": failover.ActiveOverride("codex", "claude", "rate-limit", "t")
+    }
+
+
+def test_clear_overrides_respects_an_explicit_storage_path(tmp_path):
+    chat_file = failover.chat_path(tmp_path)
+    failover.write_override(
+        tmp_path, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "t"),
+        storage_path=chat_file,
+    )
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride("claude", "codex", "auth", "t"),
+    )
+    removed = failover.clear_overrides(tmp_path, storage_path=chat_file)
+    assert removed == 1
+    assert failover.read_overrides(tmp_path, chat_file) == {}
+    assert "implementer" in failover.read_overrides(tmp_path)
+
+
+def test_resolve_chat_agent_returns_the_requested_name_with_no_override(tmp_path):
+    assert failover.resolve_chat_agent(tmp_path, "claude") == "claude"
+
+
+def test_resolve_chat_agent_returns_the_backup_when_overridden(tmp_path):
+    failover.write_override(
+        tmp_path, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "t"),
+        storage_path=failover.chat_path(tmp_path),
+    )
+    assert failover.resolve_chat_agent(tmp_path, "claude") == "codex"
