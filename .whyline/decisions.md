@@ -2464,3 +2464,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 3726de81700748e3819ab73b2eec92ff -->
+
+## 2026-09-27 — CF-1 review: approve generalized failover storage and chat resolver
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CF-1
+
+**Because:** The implementation preserves every existing default call, keeps chat overrides separate from pipeline overrides, implements the requested resolver without settings-role fallback, and the full test suite passes
+
+**Rejected:**
+
+- request changes — no correctness, compatibility, safety, or coverage defect was found in the requested scope
+
+**Files:** src/whyline_relay/failover.py, tests/test_failover.py
+
+<!-- whyline-event: 8e79cbac813d4586beba04b2cbf64d1c -->
