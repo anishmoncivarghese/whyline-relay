@@ -1,4 +1,4 @@
-- [ ] RSW-1: `setup.py` — plan source and the role wizard
+- [x] RSW-1: `setup.py` — plan source and the role wizard
 
   Global constraints:
   - No new runtime dependency.
