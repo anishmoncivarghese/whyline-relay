@@ -2526,3 +2526,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
 
 <!-- whyline-event: 596a1fbde9a74e09a8afa1c75979c530 -->
+
+## 2026-09-27 — Approved CF-3 failover-aware chat turn pipeline
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CF-3
+
+**Because:** The implementation resolves sticky chat overrides, retries exactly once on configured rate-limit or auth failure, reports backup failure without further routing, preserves legacy no-backup behavior, and the full test suite passed
+
+**Rejected:**
+
+- Request changes — no correctness, safety, or coverage defect was found
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
+
+<!-- whyline-event: e62c4197c7d44fa784e05f70a86d2526 -->
