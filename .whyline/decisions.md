@@ -3090,3 +3090,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/config.py
 
 <!-- whyline-event: 258206a3d2e641a98d15c2d9c11deb60 -->
+
+## 2026-09-27 — Preserve ActiveOverride positional args and default tried on disk deserialization
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-2
+
+**Because:** Existing call sites construct ActiveOverride positionally with 4 arguments, and existing on-disk active-roles.json files lack a tried field
+
+**Rejected:**
+
+- Require explicit tried parameter — breaks existing call sites and existing stored override files
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: dd1dee0c498b4ac586ac51d7800c8032 -->
+
+## 2026-09-27 — Approve ActiveOverride tried persistence and ordered backup selection
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-2
+
+**Because:** The implementation preserves four-argument positional construction, safely reads legacy or malformed tried data, round-trips valid tried lists, and next_backup follows the specified first-eligible contract; the full test suite passes
+
+**Files:** src/whyline_relay/failover.py, tests/test_failover.py
+
+<!-- whyline-event: 8130b1de16ce48e29eea92593dd1b046 -->

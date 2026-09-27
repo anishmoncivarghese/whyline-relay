@@ -258,3 +258,72 @@ def test_resolve_chat_agent_returns_the_backup_when_overridden(tmp_path):
         storage_path=failover.chat_path(tmp_path),
     )
     assert failover.resolve_chat_agent(tmp_path, "claude") == "codex"
+
+
+def test_active_override_tried_defaults_to_empty_list():
+    override = failover.ActiveOverride("antigravity", "codex", "rate-limit", "t")
+    assert override.tried == []
+
+
+def test_active_override_tried_can_be_set():
+    override = failover.ActiveOverride(
+        "grok", "codex", "rate-limit", "t", tried=["codex", "claude"]
+    )
+    assert override.tried == ["codex", "claude"]
+
+
+def test_read_overrides_defaults_tried_when_absent_from_disk(tmp_path):
+    target = failover.path(tmp_path)
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        '{"implementer": {"agent": "claude", "backup_for": "codex", '
+        '"reason": "rate-limit", "since": "t"}}'
+    )
+    overrides = failover.read_overrides(tmp_path)
+    assert overrides["implementer"].tried == []
+
+
+def test_read_overrides_round_trips_tried(tmp_path):
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride("grok", "codex", "rate-limit", "t", tried=["codex"]),
+    )
+    overrides = failover.read_overrides(tmp_path)
+    assert overrides["implementer"].tried == ["codex"]
+
+
+def test_next_backup_returns_the_first_untried_entry():
+    assert failover.next_backup(["claude", "codex", "grok"], tried=set()) == "claude"
+
+
+def test_next_backup_skips_already_tried_entries():
+    result = failover.next_backup(
+        ["claude", "codex", "grok"], tried={"claude", "codex"}
+    )
+    assert result == "grok"
+
+
+def test_next_backup_returns_none_when_the_chain_is_exhausted():
+    result = failover.next_backup(
+        ["claude", "codex"], tried={"claude", "codex"}
+    )
+    assert result is None
+
+
+def test_next_backup_returns_none_for_an_empty_chain():
+    assert failover.next_backup([], tried=set()) is None
+
+
+def test_next_backup_skips_excluded_entries_too():
+    result = failover.next_backup(
+        ["claude", "codex", "grok"], tried=set(), exclude={"claude"}
+    )
+    assert result == "codex"
+
+
+def test_next_backup_never_returns_the_agent_that_just_failed():
+    # The caller is required to have added the failed agent to `tried`
+    # before calling; this test documents that contract holds even when
+    # the failed agent is the chain's only entry.
+    result = failover.next_backup(["claude"], tried={"claude"})
+    assert result is None

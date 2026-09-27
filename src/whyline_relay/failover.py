@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -28,6 +28,7 @@ class ActiveOverride:
     backup_for: str
     reason: str  # "rate-limit" | "auth"
     since: str  # ISO timestamp
+    tried: list[str] = field(default_factory=list)
 
 
 def path(root: Path, filename: str = "active-roles.json") -> Path:
@@ -52,13 +53,19 @@ def read_overrides(
         return {}
     if not isinstance(raw, dict):
         return {}
-    fields = ("agent", "backup_for", "reason", "since")
+    required = ("agent", "backup_for", "reason", "since")
     result: dict[str, ActiveOverride] = {}
     for role, record in raw.items():
-        if isinstance(record, dict) and all(
-            isinstance(record.get(f), str) for f in fields
+        if not isinstance(record, dict) or not all(
+            isinstance(record.get(f), str) for f in required
         ):
-            result[role] = ActiveOverride(**{f: record[f] for f in fields})
+            continue
+        tried = record.get("tried")
+        if not isinstance(tried, list) or not all(isinstance(t, str) for t in tried):
+            tried = []
+        result[role] = ActiveOverride(
+            **{f: record[f] for f in required}, tried=list(tried)
+        )
     return result
 
 
@@ -164,6 +171,18 @@ def failover_reason(
 def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:
     """Detect quota output without treating Grok's private reasoning as fact."""
     return agents.rate_limited(grok.rate_limit_text(adapter, text, command))
+
+
+def next_backup(
+    chain: list[str], tried: set[str], exclude: frozenset[str] = frozenset()
+) -> str | None:
+    """The first chain entry not already tried or excluded, or None if the
+    chain is exhausted. Callers add the just-failed agent to `tried` before
+    calling, so this never returns the agent that just failed."""
+    for candidate in chain:
+        if candidate not in tried and candidate not in exclude:
+            return candidate
+    return None
 
 
 def pause_message(
