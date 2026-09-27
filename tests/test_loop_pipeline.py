@@ -388,3 +388,65 @@ def test_resume_with_a_drifted_fingerprint_pauses_before_running_anything(
             repo, settings, TASK, base_commit=head(repo), echo=False, resume=True
         )
     assert called == []
+
+
+FAKE_ROLE = str(Path(__file__).parent / "fake_role_agent.py")
+RATE_LIMITED = """#!/usr/bin/env python3
+import sys
+print("You have exceeded your usage limit.")
+sys.exit(1)
+"""
+
+
+def test_a_pipeline_stage_switches_to_the_chain_backup_on_no_handoff(
+    repo, tmp_path
+):
+    from whyline_relay import failover, pipeline as pipeline_module
+
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    pipe = pipeline_module.Pipeline(
+        roles={"solo": pipeline_module.Role(name="solo", agent="codex")},
+        stages={
+            "work": pipeline_module.Stage(
+                id="work",
+                role="solo",
+                prompt="implement",
+                transitions={"done": "@complete"},
+            )
+        },
+        profiles={
+            "default": pipeline_module.Profile(name="default", stages=("work",))
+        },
+        default_profile="default",
+    )
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, str(limited)],
+            "aider": [
+                sys.executable,
+                FAKE_ROLE,
+                str(repo),
+                "aider",
+                "aider",
+                "done",
+                "no",
+            ],
+        },
+        status_map=base.status_map,
+        adapters={"aider": "generic"},
+        backup_chain=["aider"],
+        pipeline=pipe,
+        pipeline_fingerprint="test",
+    )
+    base_commit = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
+    assert outcome.committed
+    overrides = failover.read_overrides(repo)
+    assert overrides["solo"].agent == "aider"
+    assert overrides["solo"].tried == ["codex"]

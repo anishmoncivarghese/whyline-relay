@@ -418,8 +418,8 @@ def _run_configured_task(
     Mirrors _run_task's contract and most of its per-turn checks (task
     mismatch, from_actor, blocked, unknown, no-handoff/timeout) but routes on
     pipeline.decide() against the stage that just ran, not a fixed pair of
-    roles. This runner does not walk [backup].chain yet, so there is no
-    failover branch here: a no-handoff always pauses.
+    roles. On a no-handoff, walks settings.backup_chain for stage.role exactly like
+    _run_task's own legacy failover branch, via failover.next_backup.
 
     With `resume`, state.json's saved stage/profile/stage_visits pick the task
     back up where it paused. State is checkpointed (via `on_turn`) before every
@@ -431,7 +431,10 @@ def _run_configured_task(
     main loop restarts, so it is never re-run and never silently dropped.
     """
     pipe = settings.pipeline
-    effective_agents = {name: role.agent for name, role in pipe.roles.items()}
+    effective_agents = {
+        name: failover.pipeline_effective_agent(root, settings, name)
+        for name in pipe.roles
+    }
     round_ = start_round
     feedback = ""
     gitcheck.ensure_relay_ignored(root)
@@ -503,12 +506,22 @@ def _run_configured_task(
         stage_visits = {current_stage_id: 1}
 
     implementer_agent = (
-        pipe.roles["implementer"].agent if "implementer" in pipe.roles else ""
+        failover.pipeline_effective_agent(root, settings, "implementer")
+        if "implementer" in pipe.roles
+        else ""
     )
-    reviewer_agent = pipe.roles["reviewer"].agent if "reviewer" in pipe.roles else ""
+    reviewer_agent = (
+        failover.pipeline_effective_agent(root, settings, "reviewer")
+        if "reviewer" in pipe.roles
+        else ""
+    )
     while True:
+        effective_agents = {
+            name: failover.pipeline_effective_agent(root, settings, name)
+            for name in pipe.roles
+        }
         stage = pipe.stages[current_stage_id]
-        agent = pipe.roles[stage.role].agent
+        agent = effective_agents[stage.role]
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
         head_before = gitcheck.head_commit(root)
@@ -570,8 +583,38 @@ def _run_configured_task(
             )
             if reason is not None:
                 existing = failover.read_overrides(root).get(stage.role)
+                tried = list(existing.tried) if existing is not None else []
+                if agent not in tried:
+                    tried.append(agent)
+                backup = failover.next_backup(settings.backup_chain, set(tried))
+                if backup is not None:
+                    verb, _ = failover.REASON_TEXT[reason]
+                    failover.write_override(
+                        root,
+                        stage.role,
+                        failover.ActiveOverride(
+                            agent=backup,
+                            backup_for=agent,
+                            reason=reason,
+                            since=datetime.now().astimezone().isoformat(),
+                            tried=tried,
+                        ),
+                    )
+                    if echo:
+                        agents.print_status(
+                            f"==> relay: {stage.role} switched from {agent} to "
+                            f"{backup} ({agent} {verb})"
+                        )
+                    continue
+                if not settings.backup_chain:
+                    raise Paused(
+                        failover.pause_message(agent, stage.role, reason, existing),
+                        target,
+                    )
                 raise Paused(
-                    failover.pause_message(agent, stage.role, reason, existing), target
+                    f"every backup in the chain is unavailable for {stage.role} "
+                    f"({', '.join(sorted(tried))} all failed)",
+                    target,
                 )
             raise Paused(
                 f"{agent} exited without handing off"

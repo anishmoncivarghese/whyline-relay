@@ -327,3 +327,93 @@ def test_next_backup_never_returns_the_agent_that_just_failed():
     # the failed agent is the chain's only entry.
     result = failover.next_backup(["claude"], tried={"claude"})
     assert result is None
+
+
+def test_pipeline_effective_agent_with_no_override(tmp_path):
+    from whyline_relay import pipeline as pipeline_module
+    from whyline_relay.config import Config
+
+    pipe = pipeline_module.Pipeline(
+        roles={"tester": pipeline_module.Role(name="tester", agent="claude")},
+        stages={},
+        profiles={},
+        default_profile="default",
+    )
+    settings = Config(
+        plan="p",
+        max_rounds=3,
+        timeout_minutes=30,
+        branch_prefix="r/",
+        agents={},
+        status_map={},
+        pipeline=pipe,
+    )
+    assert failover.pipeline_effective_agent(tmp_path, settings, "tester") == "claude"
+
+
+def test_pipeline_effective_agent_with_an_override(tmp_path):
+    from whyline_relay import pipeline as pipeline_module
+    from whyline_relay.config import Config
+
+    pipe = pipeline_module.Pipeline(
+        roles={"tester": pipeline_module.Role(name="tester", agent="claude")},
+        stages={},
+        profiles={},
+        default_profile="default",
+    )
+    settings = Config(
+        plan="p",
+        max_rounds=3,
+        timeout_minutes=30,
+        branch_prefix="r/",
+        agents={},
+        status_map={},
+        pipeline=pipe,
+    )
+    failover.write_override(
+        tmp_path,
+        "tester",
+        failover.ActiveOverride("grok", "claude", "rate-limit", "t"),
+    )
+    assert failover.pipeline_effective_agent(tmp_path, settings, "tester") == "grok"
+
+
+def test_two_pipeline_roles_have_independent_overrides_even_on_the_same_backup(
+    tmp_path,
+):
+    from whyline_relay import pipeline as pipeline_module
+    from whyline_relay.config import Config
+
+    pipe = pipeline_module.Pipeline(
+        roles={
+            "drafter": pipeline_module.Role(name="drafter", agent="codex"),
+            "checker": pipeline_module.Role(name="checker", agent="claude"),
+        },
+        stages={},
+        profiles={},
+        default_profile="default",
+    )
+    settings = Config(
+        plan="p",
+        max_rounds=3,
+        timeout_minutes=30,
+        branch_prefix="r/",
+        agents={},
+        status_map={},
+        pipeline=pipe,
+    )
+    failover.write_override(
+        tmp_path,
+        "drafter",
+        failover.ActiveOverride("aider", "codex", "rate-limit", "t", tried=["codex"]),
+    )
+    failover.write_override(
+        tmp_path,
+        "checker",
+        failover.ActiveOverride("aider", "claude", "rate-limit", "t", tried=["claude"]),
+    )
+    assert failover.pipeline_effective_agent(tmp_path, settings, "drafter") == "aider"
+    assert failover.pipeline_effective_agent(tmp_path, settings, "checker") == "aider"
+    overrides = failover.read_overrides(tmp_path)
+    assert overrides["drafter"].tried == ["codex"]
+    assert overrides["checker"].tried == ["claude"]

@@ -128,6 +128,17 @@ def effective_agent(root: Path, settings: config.Config, role: str) -> str:
     return override.agent if override is not None else getattr(settings.roles, role)
 
 
+def pipeline_effective_agent(root: Path, settings: config.Config, role: str) -> str:
+    """The agent actually filling a configured pipeline's `role` right now:
+    its backup if switched, else the pipeline's own configured agent for it.
+    A pipeline role name (e.g. "tester") is not a field on Roles, so this
+    cannot reuse effective_agent()'s getattr(settings.roles, role) fallback."""
+    override = read_overrides(root).get(role)
+    if override is not None:
+        return override.agent
+    return settings.pipeline.roles[role].agent
+
+
 def still_logged_in(adapter: Adapter, runner: Runner = subprocess.run) -> bool:
     """True when the adapter has no login check, or the check says it's fine.
 

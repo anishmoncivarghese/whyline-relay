@@ -3150,3 +3150,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/loop.py, tests/test_loop_failover.py
 
 <!-- whyline-event: 9a473acbef634667b6d7be376e38e738 -->
+
+## 2026-09-27 — Walk backup chain in pipeline runner and resolve effective agent dynamically per turn
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** BC-4
+
+**Because:** Configured pipelines need sticky failover switching per stage role while preserving chronological tried state and resume compatibility
+
+**Rejected:**
+
+- Static effective_agents lookup — misses runtime failover switches between stages
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/failover.py
+
+<!-- whyline-event: 12b2f0d58aec42439596974a2b79b28a -->
+
+## 2026-09-27 — Approve pipeline backup-chain failover and role-aware effective-agent routing
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BC-4
+
+**Because:** The runner recomputes role overrides on every retry, advances through configured backups with preserved tried state, retains legacy no-chain behavior, and focused plus full suites pass
+
+**Rejected:**
+
+- Request changes — implementation and coverage satisfy BC-4 with no functional defect found
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/loop.py, tests/test_failover.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 1bf2518d1da447feb240e6b62f4c248d -->
