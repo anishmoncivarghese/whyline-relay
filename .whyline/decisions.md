@@ -2840,3 +2840,17 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_setup.py
 
 <!-- whyline-event: e50caba5f4c24f1fa4e4d158cafeb7b4 -->
+
+## 2026-09-27 — Auto-resume script recovered CB-3: grok exited without handing off but its work passed the full suite
+
+**Actor:** claude
+**Role:** orchestrator
+**Task:** CB-3
+
+**Because:** the same handoff-stall pattern seen throughout this project's use of grok -- its code is reliably correct, it just doesn't always call whyline handoff itself
+
+**Rejected:**
+
+- reset and redo — wastes correct, test-verified work
+
+<!-- whyline-event: 7cc9043e6e3c498caa118d62422bb38b -->
