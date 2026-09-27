@@ -2932,3 +2932,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: c2abf9981f804b0fa4e19d0064cf507c -->
+
+## 2026-09-27 — CB-6 review: request changes -- README.md was not updated with /brainstorm documentation
+
+**Actor:** antigravity
+**Role:** reviewer
+**Task:** CB-6
+
+**Because:** Grok exited without modifying README.md; auto-resume recovered the task because existing tests passed, but the required documentation in README.md was not written
+
+**Rejected:**
+
+- approve — task CB-6 requires documenting /brainstorm in README.md which has not been done
+
+**Files:** README.md
+
+<!-- whyline-event: cc0bd027818d43c4bfbef9ad6ed1b096 -->

@@ -507,6 +507,30 @@ what's currently active. One hop only -- if the backup also fails, chat
 reports it and stops, the same "no further fallback" rule the pipeline's own
 backup already follows.
 
+**`/brainstorm` runs a topic through several models at once:**
+
+```
+> /brainstorm
+What should we research? caching strategy for the API
+Which models? (1 Claude, 2 Codex, 3 Antigravity, 4 Grok, 5 all): 1,2
+How many passes? [1]: 1
+Which model gives the final synthesis? [claude]:
+```
+
+Each selected model independently researches the topic into its own
+private file first (true independence -- no model can see another's until
+every one has finished); those get merged into one real file,
+`docs/brainstorm/<topic>.md`, under a heading per model. Each configured
+review pass has every model re-read the whole file and revise only its own
+section based on what it now sees from the others. Finally, the model you
+named writes a "Final Synthesis" section and its answer is shown like any
+normal chat response. Every step is an ordinary, auto-committed chat turn
+under the hood -- brainstorming inherits the same permission floor and
+automatic backup/failover chat already has for everything else. A model
+that can't run a given pass (missing, timed out, or not configured) is
+skipped for that pass rather than stopping the whole session; you're told
+which one and why.
+
 ```
 $ whyline-relay chat
 Detected: claude, codex, agy. Not found: grok.
