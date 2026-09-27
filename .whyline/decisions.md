@@ -2978,3 +2978,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** README.md
 
 <!-- whyline-event: 1a2f1dac06344a3bb89a2c40bc8f1a5a -->
+
+## 2026-09-27 — Release the completed brainstorm workflow as whyline-relay 0.2.20
+
+**Actor:** codex
+**Role:** releaser
+**Task:** CB-RELEASE
+
+**Because:** All six CB tasks are approved and checked, the full 624-test suite passes, and the new /brainstorm workflow is backward-compatible
+
+**Rejected:**
+
+- 0.3.0 — the chat additions preserve existing commands and configuration contracts
+
+**Files:** pyproject.toml
+
+<!-- whyline-event: f20699a4e1934861a0e6b5c911aa6165 -->
