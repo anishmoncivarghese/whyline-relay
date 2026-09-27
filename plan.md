@@ -1086,7 +1086,7 @@
   ---
 
 
-- [ ] BC-5: Chat's `run_turn` walks the chain
+- [x] BC-5: Chat's `run_turn` walks the chain
 
 
   **Files:**
