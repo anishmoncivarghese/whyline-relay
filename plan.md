@@ -1,4 +1,4 @@
-- [ ] CB-1: `chat.py` — `run_turn`/`_execute_agent_call` gain `commit_message`
+- [x] CB-1: `chat.py` — `run_turn`/`_execute_agent_call` gain `commit_message`
 
   Global constraints:
   - No new runtime dependency.
