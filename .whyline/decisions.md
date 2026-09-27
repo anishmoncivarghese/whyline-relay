@@ -2542,3 +2542,35 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py, tests/test_chat_turn.py
 
 <!-- whyline-event: e62c4197c7d44fa784e05f70a86d2526 -->
+
+## 2026-09-27 — repl forwards runner to run_turn only when the caller passed one
+
+**Actor:** grok
+**Role:** implementer
+**Task:** CF-4
+
+**Because:** run_turn defaults to subprocess.run; repl's own default stays None so an omitted runner keeps that real default
+
+**Rejected:**
+
+- always pass runner=runner — None would replace subprocess.run and break unmocked login checks
+
+**Files:** src/whyline_relay/chat.py
+
+<!-- whyline-event: 71ef6b25892b47708a629b9b6d069102 -->
+
+## 2026-09-27 — Approved CF-4 chat backup management commands and failover notices
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CF-4
+
+**Because:** The REPL lists and clears chat-scoped overrides, forwards an explicitly supplied runner without replacing run_turn's default, prints failover notices before responses, and both focused and full test suites passed
+
+**Rejected:**
+
+- Request changes — no correctness, safety, or meaningful coverage defect was found
+
+**Files:** src/whyline_relay/chat.py, tests/test_chat_repl.py
+
+<!-- whyline-event: b81349ef298e4f8cb5eaaee89b6f28b5 -->

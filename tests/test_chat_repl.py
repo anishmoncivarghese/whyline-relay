@@ -176,3 +176,122 @@ def test_repl_clear_wipes_history_after_confirmation(tmp_path: Path):
         which=lambda name: "/bin/x",
     )
     assert chatlog.load(root) == []
+
+
+def test_repl_backups_command_reports_none_active(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    lines = iter(["/backups", "/exit"])
+    printed = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(lines),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    assert any("no active" in line.lower() for line in printed)
+
+
+def test_repl_backups_command_lists_an_active_override(tmp_path: Path):
+    from whyline_relay import failover
+
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    failover.write_override(
+        root, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "2026-01-01T00:00:00"),
+        storage_path=failover.chat_path(root),
+    )
+    lines = iter(["/backups", "/exit"])
+    printed = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(lines),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    assert any("claude" in line and "codex" in line for line in printed)
+
+
+def test_repl_reset_backup_clears_one_agent(tmp_path: Path):
+    from whyline_relay import failover
+
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    failover.write_override(
+        root, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "t"),
+        storage_path=failover.chat_path(root),
+    )
+    lines = iter(["/reset-backup claude", "/backups", "/exit"])
+    printed = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(lines),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    assert failover.read_overrides(root, failover.chat_path(root)) == {}
+    assert any("no active" in line.lower() for line in printed)
+
+
+def test_repl_reset_backup_with_no_argument_clears_all(tmp_path: Path):
+    from whyline_relay import failover
+
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    failover.write_override(
+        root, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "t"),
+        storage_path=failover.chat_path(root),
+    )
+    failover.write_override(
+        root, "codex",
+        failover.ActiveOverride("grok", "codex", "auth", "t"),
+        storage_path=failover.chat_path(root),
+    )
+    lines = iter(["/reset-backup", "/exit"])
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(lines),
+        print_fn=lambda *a, **k: None,
+        run_fn=_fake_run_fn,
+        which=lambda name: "/bin/x",
+    )
+    assert failover.read_overrides(root, failover.chat_path(root)) == {}
+
+
+def test_repl_prints_the_failover_notice_when_present(tmp_path: Path):
+    import subprocess
+
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[chat.backup]\nclaude = "codex"\n')
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    # codex's "pong" response has no rate-limit marker, so the post-retry
+    # failover_reason check falls through to a login-status re-check -- fake
+    # the subprocess runner so this never shells out for real.
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    lines = iter(["hello", "/exit"])
+    printed = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(lines),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=fake_run_fn,
+        which=lambda name: "/bin/x",
+        runner=fake_login_ok,
+    )
+    assert any("trying its backup" in line for line in printed)

@@ -274,7 +274,10 @@ def run_turn(
     return record
 
 
-SLASH_COMMANDS = ("/default", "/agents", "/history", "/clear", "/exit")
+SLASH_COMMANDS = (
+    "/default", "/agents", "/history", "/clear", "/exit",
+    "/backups", "/reset-backup",
+)
 
 
 def _agent_status_lines(settings: "config.Config", which) -> list[str]:
@@ -302,6 +305,7 @@ def repl(
     run_fn=None,
     which=None,
     setup_answers=None,
+    runner=None,
 ) -> None:
     input_fn = input_fn if input_fn is not None else input
     print_fn = print_fn if print_fn is not None else print
@@ -352,6 +356,24 @@ def repl(
                 chatlog.clear(root)
                 print_fn("History cleared.")
             continue
+        if line == "/backups":
+            overrides = failover.read_overrides(root, failover.chat_path(root))
+            if not overrides:
+                print_fn("No active backups.")
+            for agent_name, override in overrides.items():
+                print_fn(
+                    f"{agent_name} -> {override.agent} "
+                    f"({override.reason}, since {override.since})"
+                )
+            continue
+        if line.startswith("/reset-backup"):
+            parts = line.split(maxsplit=1)
+            target = parts[1].strip() if len(parts) == 2 else None
+            removed = failover.clear_overrides(
+                root, role=target, storage_path=failover.chat_path(root)
+            )
+            print_fn(f"Cleared {removed} backup override(s).")
+            continue
         if line.startswith("/default"):
             parts = line.split(maxsplit=1)
             if len(parts) == 2 and parts[1].strip() in CHAT_AGENTS:
@@ -372,7 +394,8 @@ def repl(
 
         try:
             record = run_turn(
-                root, agent=agent, prompt=prompt, settings=settings, run_fn=run_fn
+                root, agent=agent, prompt=prompt, settings=settings, run_fn=run_fn,
+                **({"runner": runner} if runner is not None else {}),
             )
         except AgentUnavailable as error:
             print_fn(str(error))
@@ -384,6 +407,8 @@ def repl(
             print_fn(f"{error} -- try again, or /default another agent.")
             continue
 
+        if record.get("failover_notice"):
+            print_fn(record["failover_notice"])
         print_fn(f"[{record['agent']}] {record['response']}")
         if record["rate_limited"]:
             print_fn(
