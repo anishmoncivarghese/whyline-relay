@@ -1110,7 +1110,7 @@
 
   ---
 
-- [ ] CF-5: README — document chat's automatic backup
+- [x] CF-5: README — document chat's automatic backup
 
   Global constraints:
   - No new runtime dependency.
