@@ -7,6 +7,20 @@ import pytest
 from whyline_relay import chat, chatlog, config
 
 
+def _deliver(command: list[str], text: str) -> None:
+    """Write `text` to a chat `-o` path when the command has one.
+
+    Codex's adapter sets uses_output_file, so run_turn reads the response
+    from that file and ignores RunResult.output. The file is the last
+    message as plain text (extract_response strips it); it is not Claude's
+    JSON envelope. A fake that only returns RunResult leaves the backup's
+    raw text empty, so a rate limit on the backup is invisible and the
+    login-status check can run for real.
+    """
+    if "-o" in command:
+        Path(command[command.index("-o") + 1]).write_text(text, encoding="utf-8")
+
+
 def _init_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
@@ -220,3 +234,109 @@ def test_run_turn_does_not_generate_permission_files_for_generic_agents(tmp_path
         tmp_path, agent="grok", prompt="ping", settings=settings, run_fn=fake_run_fn
     )
     assert not (relay / "claude-settings.json").exists()
+
+
+def test_run_turn_switches_to_the_backup_and_retries_automatically(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[chat.backup]\nclaude = "codex"\n')
+    settings = config.load(tmp_path)
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        text = "pong from backup\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    # codex's own "pong from backup" response has no rate-limit marker, so
+    # the post-retry failover_reason check falls through to a login-status
+    # re-check -- fake the subprocess runner so this never shells out for
+    # real. "still logged in" is returncode 0, matching still_logged_in()'s
+    # own check.
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok,
+    )
+    assert calls == ["claude", "codex"]
+    assert record["agent"] == "codex"
+    assert record["response"] == "pong from backup"
+    assert "claude hit a usage or rate limit" in record["failover_notice"]
+    from whyline_relay import failover
+    override = failover.read_overrides(tmp_path, failover.chat_path(tmp_path))
+    assert override["claude"].agent == "codex"
+    assert override["claude"].reason == "rate-limit"
+
+
+def test_run_turn_reports_and_stops_when_the_backup_also_fails(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[chat.backup]\nclaude = "codex"\n')
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        text = "You have exceeded your usage limit. Try again later."
+        _deliver(command, text)
+        return RunResult(1, text)
+
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert record["agent"] == "codex"
+    assert "also" in record["failover_notice"]
+    assert "hit a usage or rate limit" in record["failover_notice"]
+
+
+def test_run_turn_uses_an_already_active_backup_silently(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[chat.backup]\nclaude = "codex"\n')
+    settings = config.load(tmp_path)
+    from whyline_relay import failover
+    failover.write_override(
+        tmp_path, "claude",
+        failover.ActiveOverride("codex", "claude", "rate-limit", "2026-01-01T00:00:00"),
+        storage_path=failover.chat_path(tmp_path),
+    )
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        calls.append(command[0])
+        text = "pong\n"
+        _deliver(command, text)
+        return RunResult(0, text)
+    # codex's response has no rate-limit marker, so the already-on-a-backup
+    # branch's failover_reason check falls through to a login-status
+    # re-check -- fake the runner so this never shells out for real.
+    fake_login_ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, runner=fake_login_ok,
+    )
+    assert calls == ["codex"]
+    assert record["agent"] == "codex"
+    assert "failover_notice" not in record
+
+
+def test_run_turn_with_no_backup_configured_behaves_exactly_as_before(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        return RunResult(1, "You have exceeded your usage limit. Try again later.")
+
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings, run_fn=fake_run_fn
+    )
+    assert record["agent"] == "claude"
+    assert record["rate_limited"] is True
+    assert "failover_notice" not in record

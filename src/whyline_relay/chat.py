@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from whyline_relay import adapters, agents, chatlog, config, gitcheck, init, invocation
+from whyline_relay import adapters, agents, chatlog, config, failover, gitcheck, init, invocation
 
 CHAT_AGENTS = ("claude", "codex", "agy", "grok")
 
@@ -123,16 +125,13 @@ def _ensure_permission_files(root: Path, agent: str) -> bool:
     return created
 
 
-def run_turn(
-    root: Path,
-    *,
-    agent: str,
-    prompt: str,
-    settings: "config.Config | None" = None,
-    run_fn=None,
+def _execute_agent_call(
+    root: Path, agent: str, prompt: str, full_prompt: str,
+    settings: "config.Config", run_fn,
 ) -> dict:
-    settings = settings if settings is not None else config.load(root)
-    run_fn = run_fn if run_fn is not None else agents.run
+    """Runs one attempt against `agent`. No chatlog write, no failover
+    logic -- run_turn decides, after seeing the result, whether this was
+    the whole story or whether a backup needs a turn too."""
     command = resolve_command(settings, agent)
     adapter = config.adapter_for(settings, agent)
     if _ensure_permission_files(root, agent):
@@ -140,7 +139,6 @@ def run_turn(
         # diff-stat/files_changed reflects only what the agent did, not
         # one-time setup init would normally have already done.
         gitcheck.commit_all(root, f"chat: generate {agent}'s permission settings")
-    full_prompt = _build_prompt(root, prompt)
     turn_command = list(command)
     output_file: Path | None = None
     if adapter.uses_output_file:
@@ -167,7 +165,6 @@ def run_turn(
         raw = result.output or ""
     response = adapter.extract_response(raw)
     ok = result.exit_code == 0
-    rate_limited = agents.rate_limited(raw)
     # commit_all stages everything and no-ops (returns False) when the tree
     # is already clean -- safe to call unconditionally rather than checking
     # is_dirty first, and it's the only reliable way to see a brand-new
@@ -176,16 +173,104 @@ def run_turn(
     committed = gitcheck.commit_all(root, f"chat: {agent} turn")
     diff_stat = gitcheck.commit_stat(root) if committed else ""
     files_changed = max(len(diff_stat.splitlines()) - 1, 0) if diff_stat else 0
+    return {
+        "raw": raw,
+        "response": response,
+        "ok": ok,
+        "adapter": adapter,
+        "command": turn_command,
+        "committed": committed,
+        "diff_stat": diff_stat,
+        "files_changed": files_changed,
+    }
+
+
+def run_turn(
+    root: Path,
+    *,
+    agent: str,
+    prompt: str,
+    settings: "config.Config | None" = None,
+    run_fn=None,
+    runner=subprocess.run,
+) -> dict:
+    settings = settings if settings is not None else config.load(root)
+    run_fn = run_fn if run_fn is not None else agents.run
+    requested = agent
+    resolved = failover.resolve_chat_agent(root, requested)
+    full_prompt = _build_prompt(root, prompt)
+    attempt = _execute_agent_call(root, resolved, prompt, full_prompt, settings, run_fn)
+    final_agent = resolved
+    failover_notice: str | None = None
+    if resolved == requested:
+        # Check `chat_backup` *before* calling failover_reason: that call can
+        # run a real login-status subprocess (via runner), and there is no
+        # point spending it -- or risking a real, unmocked subprocess call in
+        # a test that never configured [chat.backup] -- when there is no
+        # backup to switch to anyway. This also means every pre-existing
+        # chat test, none of which configure [chat.backup], never reaches
+        # failover_reason at all: zero behavior change for them.
+        backup = settings.chat_backup.get(requested)
+        if backup:
+            reason = failover.failover_reason(
+                attempt["adapter"], attempt["raw"], attempt["command"], runner=runner
+            )
+            if reason:
+                verb, _ = failover.REASON_TEXT[reason]
+                failover_notice = f"{requested} {verb}; trying its backup, {backup}..."
+                failover.write_override(
+                    root,
+                    requested,
+                    failover.ActiveOverride(
+                        agent=backup,
+                        backup_for=requested,
+                        reason=reason,
+                        since=datetime.now(timezone.utc).isoformat(),
+                    ),
+                    storage_path=failover.chat_path(root),
+                )
+                attempt = _execute_agent_call(
+                    root, backup, prompt, full_prompt, settings, run_fn
+                )
+                final_agent = backup
+                reason2 = failover.failover_reason(
+                    attempt["adapter"], attempt["raw"], attempt["command"],
+                    runner=runner,
+                )
+                if reason2:
+                    override = failover.read_overrides(
+                        root, failover.chat_path(root)
+                    ).get(requested)
+                    failover_notice = failover.pause_message(
+                        backup, requested, reason2, override
+                    )
+    else:
+        # Already on an active backup (someone configured [chat.backup] for
+        # `requested` at some point, and it already switched) -- detect a
+        # further failure but never chase a third agent (one hop only).
+        reason = failover.failover_reason(
+            attempt["adapter"], attempt["raw"], attempt["command"], runner=runner
+        )
+        if reason:
+            override = failover.read_overrides(root, failover.chat_path(root)).get(
+                requested
+            )
+            failover_notice = failover.pause_message(
+                resolved, requested, reason, override
+            )
+    rate_limited = agents.rate_limited(attempt["raw"])
     # append generates the timestamp and returns the record it persisted.
-    # rate_limited and diff_stat are return-only, so they are added after
-    # the write and never become part of the chatlog line.
+    # rate_limited, diff_stat, and failover_notice are return-only, so they
+    # are added after the write and never become part of the chatlog line.
     record = chatlog.append(
-        root, agent=agent, prompt=prompt, response=response,
-        files_changed=files_changed, ok=ok,
+        root, agent=final_agent, prompt=prompt, response=attempt["response"],
+        files_changed=attempt["files_changed"], ok=attempt["ok"],
     )
     record["rate_limited"] = rate_limited
-    if committed:
-        record["diff_stat"] = diff_stat
+    if attempt["committed"]:
+        record["diff_stat"] = attempt["diff_stat"]
+    if failover_notice:
+        record["failover_notice"] = failover_notice
     return record
 
 
