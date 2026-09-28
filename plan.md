@@ -156,7 +156,7 @@
 
   ---
 
-- [ ] RCP-2: Generalize the human gate into `planner.review_gate`
+- [x] RCP-2: Generalize the human gate into `planner.review_gate`
 
   ## Global Constraints
 
