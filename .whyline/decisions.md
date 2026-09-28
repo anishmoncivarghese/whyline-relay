@@ -3516,3 +3516,15 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: c47319e40687401181fe7d5cc9faaa4d -->
+
+## 2026-09-28 — Approve generate_plan_from_synthesis implementation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-3
+
+**Because:** The implementation matches RCP-3, validates non-empty parsed plans, retries only plan-format failures, propagates agent availability failures, and both focused and full test suites pass
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 7fb6553ca2a34c208650c845914488ff -->
