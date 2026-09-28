@@ -400,7 +400,7 @@
 
   ---
 
-- [ ] RCP-3: `brainstorm.py` -- `generate_plan_from_synthesis`
+- [x] RCP-3: `brainstorm.py` -- `generate_plan_from_synthesis`
 
   ## Global Constraints
 
