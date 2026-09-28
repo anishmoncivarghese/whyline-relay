@@ -129,32 +129,39 @@ def choose_plan_source(
 
 
 def run_role_wizard(root: Path, *, input_fn=None, print_fn=None) -> dict[str, str]:
-    """Asks implementer/tester/reviewer, writes config.toml and
-    prompts/test.md. Returns the three chosen agent names."""
+    """Asks implementer/tester/reviewer/backup, writes config.toml and
+    prompts/test.md. Returns the chosen agent names, "backup" as a
+    comma-joined string ("" if none was given)."""
     input_fn = input_fn if input_fn is not None else input
     print_fn = print_fn if print_fn is not None else print
-
     implementer = input_fn("Who implements? [codex]: ").strip() or "codex"
     tester = input_fn("Who tests?      [claude]: ").strip() or "claude"
     reviewer = input_fn("Who reviews?    [claude]: ").strip() or "claude"
-
+    backup_raw = input_fn(
+        "Backup chain (comma-separated, blank for none): "
+    ).strip()
+    backup_chain = [name.strip() for name in backup_raw.split(",") if name.strip()]
     relay = config.relay_dir(root)
     config_path = relay / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        PIPELINE_CONFIG_TEMPLATE.format(
-            implementer=implementer, tester=tester, reviewer=reviewer
-        ),
-        encoding="utf-8",
+    content = PIPELINE_CONFIG_TEMPLATE.format(
+        implementer=implementer, tester=tester, reviewer=reviewer
     )
+    if backup_chain:
+        chain_toml = ", ".join(f'"{name}"' for name in backup_chain)
+        content += f"\n[backup]\nchain = [{chain_toml}]\n"
+    config_path.write_text(content, encoding="utf-8")
     print_fn(f"Wrote {config_path.relative_to(root)}.")
-
     test_prompt_path = relay / "prompts" / "test.md"
     test_prompt_path.parent.mkdir(parents=True, exist_ok=True)
     test_prompt_path.write_text(TEST_PROMPT_TEMPLATE, encoding="utf-8")
     print_fn(f"Wrote {test_prompt_path.relative_to(root)}.")
-
-    return {"implementer": implementer, "tester": tester, "reviewer": reviewer}
+    return {
+        "implementer": implementer,
+        "tester": tester,
+        "reviewer": reviewer,
+        "backup": ", ".join(backup_chain),
+    }
 
 
 def _which(name: str) -> str | None:

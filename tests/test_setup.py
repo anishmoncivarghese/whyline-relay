@@ -84,13 +84,18 @@ def test_choose_plan_source_draft_handles_a_plan_already_in_progress(tmp_path: P
 
 
 def test_run_role_wizard_writes_config_and_test_prompt(tmp_path: Path):
-    answers = iter(["grok", "codex", ""])
+    answers = iter(["grok", "codex", "", ""])
     result = setup.run_role_wizard(
         tmp_path,
         input_fn=lambda prompt="": next(answers),
         print_fn=lambda *a, **k: None,
     )
-    assert result == {"implementer": "grok", "tester": "codex", "reviewer": "claude"}
+    assert result == {
+        "implementer": "grok",
+        "tester": "codex",
+        "reviewer": "claude",
+        "backup": "",
+    }
     config_text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
     assert 'implementer = "grok"' in config_text
     assert 'tester      = "codex"' in config_text
@@ -108,7 +113,7 @@ def test_run_role_wizard_config_parses_as_a_valid_pipeline(tmp_path: Path):
     # not just plausible-looking TOML. Uses only built-in agents so this
     # exercises the happy path; an unconfigured name is Task 2's concern
     # (doctor correctly reports it as a FAIL rather than crashing).
-    answers = iter(["codex", "claude", "claude"])
+    answers = iter(["codex", "claude", "claude", ""])
     setup.run_role_wizard(
         tmp_path,
         input_fn=lambda prompt="": next(answers),
@@ -131,7 +136,7 @@ def _init_repo(root: Path) -> None:
 
 def test_run_commits_setup_before_running_doctor(tmp_path: Path, monkeypatch):
     _init_repo(tmp_path)
-    answers = iter(["existing", "codex", "claude", "claude", "n"])
+    answers = iter(["existing", "codex", "claude", "claude", "", "n"])
     seen_dirty_at_doctor_time = []
 
     def fake_runner(*a, **k):
@@ -161,7 +166,7 @@ def test_run_commits_setup_before_running_doctor(tmp_path: Path, monkeypatch):
 
 def test_run_refuses_to_offer_start_on_a_fail(tmp_path: Path, monkeypatch):
     _init_repo(tmp_path)
-    answers = iter(["existing", "codex", "claude", "claude"])
+    answers = iter(["existing", "codex", "claude", "claude", ""])
 
     def fake_preflight_run(root, *a, **k):
         return [preflight.Check("FAIL", "grok is not on PATH", "install grok")]
@@ -180,7 +185,7 @@ def test_run_refuses_to_offer_start_on_a_fail(tmp_path: Path, monkeypatch):
 
 def test_run_asks_before_proceeding_on_a_warn_and_honors_no(tmp_path: Path, monkeypatch):
     _init_repo(tmp_path)
-    answers = iter(["existing", "codex", "claude", "claude", "n"])
+    answers = iter(["existing", "codex", "claude", "claude", "", "n"])
 
     def fake_preflight_run(root, *a, **k):
         return [preflight.Check("warn", "grok has no login check")]
@@ -200,7 +205,7 @@ def test_run_asks_before_proceeding_on_a_warn_and_honors_no(tmp_path: Path, monk
 
 def test_run_execs_into_start_when_clean_and_confirmed(tmp_path: Path, monkeypatch):
     _init_repo(tmp_path)
-    answers = iter(["existing", "codex", "claude", "claude", ""])  # "" accepts [Y]
+    answers = iter(["existing", "codex", "claude", "claude", "", ""])  # backup, then [Y]
 
     def fake_preflight_run(root, *a, **k):
         return [preflight.Check("ok", "all good")]
@@ -216,6 +221,42 @@ def test_run_execs_into_start_when_clean_and_confirmed(tmp_path: Path, monkeypat
     )
     assert calls == [("whyline-relay", ["whyline-relay", "start"])]
     assert code == 0
+
+
+def test_run_role_wizard_backup_chain_writes_backup_table(tmp_path: Path):
+    answers = iter(["codex", "claude", "claude", "aider, backup2"])
+    result = setup.run_role_wizard(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+    )
+    assert result["backup"] == "aider, backup2"
+    config_text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
+    assert "[backup]" in config_text
+    assert 'chain = ["aider", "backup2"]' in config_text
+
+
+def test_run_role_wizard_blank_backup_writes_no_backup_table(tmp_path: Path):
+    answers = iter(["codex", "claude", "claude", ""])
+    result = setup.run_role_wizard(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+    )
+    assert result["backup"] == ""
+    config_text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
+    assert "[backup]" not in config_text
+
+
+def test_run_role_wizard_backup_chain_config_loads_correctly(tmp_path: Path):
+    answers = iter(["codex", "claude", "claude", "claude"])
+    setup.run_role_wizard(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+    )
+    loaded = config.load(tmp_path)
+    assert loaded.backup_chain == ["claude"]
 
 
 def test_run_stops_early_when_no_plan_source_resolved(tmp_path: Path):
