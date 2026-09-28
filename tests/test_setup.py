@@ -271,3 +271,101 @@ def test_run_stops_early_when_no_plan_source_resolved(tmp_path: Path):
         which=lambda name: "/bin/x",
     )
     assert code == 1
+
+
+def _init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    (root / "README.md").write_text("x\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+
+
+def test_choose_plan_source_brainstorm_end_to_end_writes_a_real_plan(tmp_path: Path):
+    _init_git_repo(tmp_path)
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        from whyline_relay import brainstorm
+        # chat.run_turn prepends earlier turns, so match the instruction
+        # that was just sent, not a phrase that only appeared in history.
+        current = prompt.rsplit("\n\n", 1)[-1]
+        if "checkbox format" in current:
+            brainstorm.plan_draft_path(tmp_path).write_text(
+                "- [ ] T-1: build it\n  as synthesized.\n"
+            )
+        elif "Research" in current:
+            brainstorm.temp_path(tmp_path, "claude").parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            brainstorm.temp_path(tmp_path, "claude").write_text("some findings\n")
+        elif "Final Synthesis" in current:
+            pass  # the final-synthesis turn itself needs no file write here
+        return RunResult(0, '{"type":"result","result":"ok"}\n')
+
+    answers = iter([
+        "brainstorm",   # choose_plan_source's own choice
+        "build a widget",  # topic
+        "1",            # models: claude only
+        "0",            # passes: 0 (straight to synthesis)
+        "",             # final model: default (claude)
+        "a",            # review_gate: approve
+        "n",            # don't start now
+    ])
+    result = setup.choose_plan_source(
+        tmp_path, settings,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+        run_fn=fake_run_fn,
+    )
+    assert result is True
+    written = (tmp_path / settings.plan).read_text(encoding="utf-8")
+    assert "build it" in written
+    from whyline_relay import plan
+    assert len(plan.parse(written)) == 1
+
+
+def test_choose_plan_source_brainstorm_declined_at_availability_check(tmp_path: Path):
+    settings = config.load(tmp_path)
+    answers = iter([
+        "brainstorm", "build a widget", "4", "0", "", "n",  # "4" = grok, unavailable here; "n" declines
+    ])
+    result = setup.choose_plan_source(
+        tmp_path, settings,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: None,
+    )
+    assert result is False
+
+
+def test_choose_plan_source_brainstorm_nothing_to_synthesize_is_reported(
+    tmp_path: Path, capsys
+):
+    _init_git_repo(tmp_path)
+    settings = config.load(tmp_path)
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+        from whyline_relay import brainstorm
+        # Every model writes nothing. merge_pass_zero still leaves a
+        # title-only shared doc; drop that stub on the final-synthesis
+        # turn so there is nothing to turn into a plan.
+        current = prompt.rsplit("\n\n", 1)[-1]
+        if "Final Synthesis" in current:
+            shared = brainstorm.shared_path(tmp_path, "build a widget")
+            if shared.exists():
+                shared.unlink()
+        return RunResult(0, '{"type":"result","result":"ok"}\n')
+
+    printed = []
+    answers = iter(["brainstorm", "build a widget", "1", "0", ""])
+    result = setup.choose_plan_source(
+        tmp_path, settings,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=fake_run_fn,
+    )
+    assert result is False
+    assert any("nothing to turn into a plan" in line for line in printed)

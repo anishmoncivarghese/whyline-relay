@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from whyline_relay import config, gitcheck, planner, preflight
+from whyline_relay import agents, brainstorm, chat, config, gitcheck, plan, planner, preflight
 
 TEST_PROMPT_TEMPLATE = """\x7bsync_packet\x7d
 
@@ -81,6 +81,84 @@ rejected = "draft"
 """
 
 
+def _run_brainstorm_plan_source(
+    root: Path,
+    settings: "config.Config",
+    *,
+    input_fn=None,
+    print_fn=None,
+    run_fn=None,
+    runner=None,
+    confirm=None,
+) -> bool:
+    """The "brainstorm" choice: runs the existing brainstorm engine
+    unchanged, then turns its final synthesis into a real plan.md via the
+    shared review gate (RCP1)."""
+    input_fn = input_fn if input_fn is not None else input
+    print_fn = print_fn if print_fn is not None else print
+    # The review gate shares the wizard's input stream unless the caller
+    # passes its own confirm. Otherwise an answer sequence that approves
+    # the draft never reaches review_gate.
+    confirm = confirm if confirm is not None else input_fn
+
+    setup_answers = brainstorm.ask_brainstorm_setup(
+        root, settings, input_fn=input_fn, print_fn=print_fn
+    )
+    if setup_answers is None:
+        return (root / settings.plan).exists()
+
+    topic = setup_answers["topic"]
+    models = setup_answers["models"]
+    passes = setup_answers["passes"]
+    final_agent = setup_answers["final_agent"]
+    kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+    if runner is not None:
+        kwargs["runner"] = runner
+
+    actual_agents = brainstorm.run_pass_zero(
+        root, models, topic, settings=settings, print_fn=print_fn, **kwargs
+    )
+    brainstorm.merge_pass_zero(root, models, topic, actual_agents=actual_agents)
+    for pass_number in range(1, passes + 1):
+        actual_agents = brainstorm.run_review_pass(
+            root, models, topic, pass_number, settings=settings,
+            print_fn=print_fn, actual_agents=actual_agents, **kwargs,
+        )
+    brainstorm.run_final_synthesis(
+        root, final_agent, models, topic, settings=settings, **kwargs
+    )
+    try:
+        draft = brainstorm.generate_plan_from_synthesis(
+            root, settings, final_agent, models, topic, **kwargs
+        )
+    except brainstorm.NothingToSynthesize as error:
+        print_fn(str(error))
+        return (root / settings.plan).exists()
+    except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+        print_fn(f"Could not generate a plan from the synthesis: {error}")
+        return (root / settings.plan).exists()
+    except plan.PlanError as error:
+        print_fn(
+            f"The drafted plan still did not parse after retrying: {error}. "
+            f"Left at {brainstorm.plan_draft_path(root)} for you to fix by hand."
+        )
+        return (root / settings.plan).exists()
+
+    def revise(feedback: str) -> None:
+        brainstorm.generate_plan_from_synthesis(
+            root, settings, final_agent, models, topic, feedback=feedback, **kwargs
+        )
+
+    result = planner.review_gate(
+        root, settings, draft, topic,
+        drafted_by=f"brainstorm ({final_agent})",
+        revise_fn=revise,
+        confirm=confirm,
+    )
+    print_fn(result)
+    return (root / settings.plan).exists()
+
+
 def choose_plan_source(
     root: Path,
     settings: "config.Config",
@@ -88,9 +166,13 @@ def choose_plan_source(
     input_fn=None,
     print_fn=None,
     planner_start=None,
+    run_fn=None,
+    runner=None,
+    confirm=None,
 ) -> bool:
-    """Ask "use existing or draft a new plan?" and act on it. Returns True
-    once a plan file exists and setup should continue; False otherwise."""
+    """Ask whether to use an existing plan, draft one, or brainstorm one.
+    Returns True once a plan file exists and setup should continue; False
+    otherwise."""
     input_fn = input_fn if input_fn is not None else input
     print_fn = print_fn if print_fn is not None else print
     planner_start = planner_start if planner_start is not None else planner.start
@@ -99,8 +181,8 @@ def choose_plan_source(
     default_choice = "existing" if plan_path.exists() else "draft"
     choice = (
         input_fn(
-            f"Use the existing {settings.plan}, or draft a new one? "
-            f"[{default_choice}]: "
+            f"Use the existing {settings.plan}, draft a new one, or "
+            f"brainstorm one? [{default_choice}]: "
         ).strip().lower()
         or default_choice
     )
@@ -117,6 +199,12 @@ def choose_plan_source(
             return plan_path.exists()
         print_fn(summary)
         return plan_path.exists()
+
+    if choice == "brainstorm":
+        return _run_brainstorm_plan_source(
+            root, settings, input_fn=input_fn, print_fn=print_fn,
+            run_fn=run_fn, runner=runner, confirm=confirm,
+        )
 
     if not plan_path.exists():
         print_fn(
