@@ -3558,3 +3558,17 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/setup.py, tests/test_setup.py
 
 <!-- whyline-event: 0551d07e53b0415dbd3695304cc0d5fa -->
+
+## 2026-09-28 — Released whyline-relay 0.2.22 (relay create-a-plan via brainstorming)
+
+**Actor:** claude
+**Role:** releaser
+**Task:** RCP-RELEASE
+
+**Because:** RCP-1 through RCP-4 are all checked and approved, the full suite passed on main, and the release workflow verifies built artifacts before publishing
+
+**Rejected:**
+
+- publish without a version bump — would make the PyPI and GitHub release indistinguishable from 0.2.21
+
+<!-- whyline-event: 1cce424939d54e5e8957d374231dd605 -->
