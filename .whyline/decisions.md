@@ -3486,3 +3486,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 6501f0ec437e499c9c72b9ed8ec061bd -->
+
+## 2026-09-28 — Approve RCP-2 generalized human plan-review gate
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-2
+
+**Because:** review_gate implements the requested public contract, the legacy wrapper preserves existing planner behavior, direct coverage exercises approve revise and discard, and both focused and full suites pass
+
+**Rejected:**
+
+- request changes — no material defect found in implementation or coverage
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner.py
+
+<!-- whyline-event: 26bfbabe69aa42f3bed7a1b21f1f7ade -->
