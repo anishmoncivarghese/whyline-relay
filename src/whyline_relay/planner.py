@@ -289,21 +289,29 @@ def discard(root: Path) -> str:
     return f"Discarded. The draft is still at {saved.draft_path}, if you want it."
 
 
-def _human_gate(
+def review_gate(
     root: Path,
     settings: config.Config,
+    draft_path: Path,
     description: str,
     *,
+    drafted_by: str,
+    revise_fn,
+    on_settled=lambda: None,
     confirm=input,
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
 ) -> str:
-    """The three-way human approval gate, reached once the inner pipeline has
-    checkpointed "@complete". Reads the draft from disk, not from memory, so a
-    resumed session sees exactly the draft a crash interrupted (spec 5.4).
+    """The shared three-way human approval gate for any drafted plan.md.
+
+    `revise_fn(feedback)` is called on "request changes" and must leave a
+    revised draft at `draft_path` when it returns -- the gate then re-reads
+    it and asks again. `on_settled()` is called once, right after a discard
+    or right after a successful approve-write, so a caller with its own
+    session state (the simple planner's checkpoint; a future caller's own
+    equivalent) can clear it -- callers with none pass the default no-op.
     """
-    draft = draft_path(root)
-    text = draft.read_text(encoding="utf-8")
+    text = draft_path.read_text(encoding="utf-8")
     print(text)
     try:
         answer = confirm("Approve, [r]equest changes, or [d]iscard? [A/r/d] ").strip().lower()
@@ -314,23 +322,15 @@ def _human_gate(
             feedback = confirm("What should change? ").strip()
         except EOFError:
             feedback = ""
-        _run_pipeline(
-            root,
-            settings,
-            description,
-            current_stage_id="draft",
-            round_=1,
-            stage_visits={"draft": 1},
-            feedback=feedback,
-            echo=echo,
-            runner=runner,
-        )
-        return _human_gate(
-            root, settings, description, confirm=confirm, echo=echo, runner=runner
+        revise_fn(feedback)
+        return review_gate(
+            root, settings, draft_path, description,
+            drafted_by=drafted_by, revise_fn=revise_fn, on_settled=on_settled,
+            confirm=confirm, echo=echo, runner=runner,
         )
     if answer.startswith("d"):
-        state.clear_plan(root)
-        return f"Discarded. The draft is still at {draft}, if you want it."
+        on_settled()
+        return f"Discarded. The draft is still at {draft_path}, if you want it."
     target = root / settings.plan
     if target.exists():
         try:
@@ -340,10 +340,8 @@ def _human_gate(
         if not overwrite.startswith("y"):
             return f"Not approved: {target} already exists and was not replaced."
     target.write_text(text, encoding="utf-8")
-    gitcheck.commit_paths(
-        root, [target], f"docs: add plan drafted by {settings.planner.draft}"
-    )
-    state.clear_plan(root)
+    gitcheck.commit_paths(root, [target], f"docs: add plan drafted by {drafted_by}")
+    on_settled()
     try:
         start_now = confirm("Start whyline-relay on this plan now? [y/N] ").strip().lower()
     except EOFError:
@@ -354,3 +352,32 @@ def _human_gate(
     gitcheck.ensure_branch(root, branch)
     outcomes = loop.run_plan(root, settings, target, branch=branch, only=None)
     return f"Plan complete: {len(outcomes)} task(s) approved and committed."
+
+
+def _human_gate(
+    root: Path,
+    settings: config.Config,
+    description: str,
+    *,
+    confirm=input,
+    echo: bool = True,
+    runner: failover.Runner = subprocess.run,
+) -> str:
+    """The simple planner's own gate -- a thin wrapper over review_gate,
+    preserving exact prior behavior (revise re-runs the draft<->review
+    pipeline; settling clears this module's own checkpoint)."""
+
+    def revise(feedback: str) -> None:
+        _run_pipeline(
+            root, settings, description,
+            current_stage_id="draft", round_=1, stage_visits={"draft": 1},
+            feedback=feedback, echo=echo, runner=runner,
+        )
+
+    return review_gate(
+        root, settings, draft_path(root), description,
+        drafted_by=settings.planner.draft,
+        revise_fn=revise,
+        on_settled=lambda: state.clear_plan(root),
+        confirm=confirm, echo=echo, runner=runner,
+    )

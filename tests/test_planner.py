@@ -390,3 +390,79 @@ def test_resuming_at_complete_reprints_the_draft_without_rerunning_any_agent(
     monkeypatch.setattr(loop.agents, "run", run)
     result = planner.resume(repo, settings, saved, confirm=_confirm(["d"]))
     assert "Discarded" in result
+
+
+def test_review_gate_approve_writes_and_commits(tmp_path: Path):
+    from whyline_relay import gitcheck
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("x\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+    settings = settings_with_planner(tmp_path)
+    draft = tmp_path / ".whyline" / "relay" / "some-draft.md"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text("- [ ] T-1: x\n  y.\n")
+    result = planner.review_gate(
+        tmp_path, settings, draft, "a plan",
+        drafted_by="test-agent",
+        revise_fn=lambda feedback: (_ for _ in ()).throw(
+            AssertionError("must not be called on approve")
+        ),
+        confirm=_confirm(["a", "n"]),
+    )
+    assert "Wrote" in result
+    assert (tmp_path / settings.plan).read_text() == "- [ ] T-1: x\n  y.\n"
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        capture_output=True, text=True,
+    ).stdout
+    assert "test-agent" in log
+
+
+def test_review_gate_revise_calls_revise_fn_with_feedback(tmp_path: Path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("x\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+    settings = settings_with_planner(tmp_path)
+    draft = tmp_path / ".whyline" / "relay" / "some-draft.md"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text("- [ ] T-1: round 1\n  y.\n")
+    received = []
+
+    def revise(feedback: str) -> None:
+        received.append(feedback)
+        draft.write_text("- [ ] T-1: round 2\n  y.\n")
+
+    result = planner.review_gate(
+        tmp_path, settings, draft, "a plan",
+        drafted_by="test-agent", revise_fn=revise,
+        confirm=_confirm(["r", "make it shorter", "a", "n"]),
+    )
+    assert received == ["make it shorter"]
+    assert "round 2" in (tmp_path / settings.plan).read_text()
+
+
+def test_review_gate_discard_calls_on_settled_and_keeps_the_draft(tmp_path: Path):
+    settings = settings_with_planner(tmp_path)
+    draft = tmp_path / ".whyline" / "relay" / "some-draft.md"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text("- [ ] T-1: x\n  y.\n")
+    settled = []
+    result = planner.review_gate(
+        tmp_path, settings, draft, "a plan",
+        drafted_by="test-agent",
+        revise_fn=lambda feedback: (_ for _ in ()).throw(
+            AssertionError("must not be called on discard")
+        ),
+        on_settled=lambda: settled.append(True),
+        confirm=_confirm(["d"]),
+    )
+    assert "Discarded" in result
+    assert settled == [True]
+    assert draft.exists()
+    assert not (tmp_path / settings.plan).exists()

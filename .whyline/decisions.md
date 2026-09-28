@@ -3456,3 +3456,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 1bfe4e3244554771bddc32f4a46f4834 -->
+
+## 2026-09-28 — RCP-2 review: request changes because the implementation is absent
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-2
+
+**Because:** The checked-out branch has no planner.review_gate function and no direct review_gate tests; the only RCP-2 commit records auto-recovery metadata, so the task contract is unimplemented even though the pre-existing full suite passes
+
+**Rejected:**
+
+- approve — passing legacy tests cannot approve code and coverage that are missing
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner.py
+
+<!-- whyline-event: 61b19f4076aa49bc8067210d642113b0 -->
