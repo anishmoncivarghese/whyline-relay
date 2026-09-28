@@ -1,4 +1,4 @@
-- [ ] RCP-1: `run_role_wizard` gains a backup-chain question
+- [x] RCP-1: `run_role_wizard` gains a backup-chain question
 
   ## Global Constraints
 
