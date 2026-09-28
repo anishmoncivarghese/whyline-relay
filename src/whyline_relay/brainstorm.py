@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from whyline_relay import agents, chat, config, gitcheck
+from whyline_relay import agents, chat, config, gitcheck, plan
 
 MODEL_OPTIONS = (
     ("1", "claude", "Claude"),
@@ -370,3 +370,94 @@ def run_final_synthesis(
         exclude=exclude,
         **kwargs,
     )
+
+
+PLAN_GENERATION_PROMPT = (
+    'Read {shared_path} in full, especially its "## Final Synthesis" '
+    "section. Write a real plan.md at {draft_path} in whyline-relay's own "
+    'checkbox format: one "- [ ] TASK-ID: short description" line per '
+    "independently implementable and testable step, with indented detail "
+    "lines below each explaining what to build and how to verify it. Base "
+    "it on the Final Synthesis, translating its recommendation into "
+    "concrete, ordered tasks."
+)
+
+
+class NothingToSynthesize(RuntimeError):
+    """The shared brainstorm doc has no real content to turn into a plan."""
+
+
+def plan_draft_path(root: Path) -> Path:
+    return config.relay_dir(root) / "brainstorm-plan-draft.md"
+
+
+def generate_plan_from_synthesis(
+    root: Path,
+    settings: "config.Config",
+    final_agent: str,
+    models: list[tuple[str, str]],
+    topic: str,
+    *,
+    feedback: str | None = None,
+    run_fn=None,
+    runner=None,
+    max_attempts: int = 2,
+) -> Path:
+    """Prompts final_agent to turn its own synthesis into a real plan.md,
+    validating with plan.parse() and retrying once on a parse error. A draft
+    that parses to no tasks is a PlanError too: prose with no checkboxes
+    parses as an empty list. Raises NothingToSynthesize if the shared doc is
+    empty or missing, or the last plan.PlanError if still invalid after
+    max_attempts.
+    agents.AgentMissing/AgentTimeout/chat.AgentUnavailable propagate
+    immediately -- an availability failure is not a retry-worthy parse
+    failure, and there is no "keep the previous content" fallback here
+    since nothing has been generated yet."""
+    shared = shared_path(root, topic)
+    if not shared.exists() or not shared.read_text(encoding="utf-8").strip():
+        raise NothingToSynthesize(
+            f"{shared} is empty or missing -- nothing to turn into a plan"
+        )
+    draft = plan_draft_path(root)
+    exclude = frozenset(key for key, _ in models if key != final_agent)
+    kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+    if runner is not None:
+        kwargs["runner"] = runner
+    prompt = PLAN_GENERATION_PROMPT.format(shared_path=shared, draft_path=draft)
+    if feedback:
+        prompt += (
+            f"\n\nA human reviewed a previous draft at {draft} and asked "
+            f"for this change: {feedback}\n\nRewrite the whole file at "
+            f"{draft} to address it, keeping the same checkbox format."
+        )
+    last_error: plan.PlanError | None = None
+    for attempt in range(1, max_attempts + 1):
+        chat.run_turn(
+            root,
+            agent=final_agent,
+            prompt=prompt,
+            settings=settings,
+            commit_message=(
+                f'brainstorm: {final_agent} drafts plan.md from synthesis '
+                f'on "{topic}"'
+            ),
+            exclude=exclude,
+            **kwargs,
+        )
+        try:
+            tasks = plan.parse(draft.read_text(encoding="utf-8"))
+            if not tasks:
+                raise plan.PlanError(f"{draft} has no checklist tasks")
+            return draft
+        except plan.PlanError as error:
+            last_error = error
+            if attempt < max_attempts:
+                prompt = (
+                    PLAN_GENERATION_PROMPT.format(
+                        shared_path=shared, draft_path=draft
+                    )
+                    + f"\n\nYour previous attempt at {draft} did not parse "
+                    f"as a valid plan: {error}\n\nRewrite the whole file "
+                    f"at {draft}, fixing this."
+                )
+    raise last_error
