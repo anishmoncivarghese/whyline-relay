@@ -3426,3 +3426,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: b6812f3ae3594938be0a6911a56e24be -->
+
+## 2026-09-28 — RCP-1 review: approve backup-chain wizard
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-1
+
+**Because:** The implementation matches the requested return/config contract, updates every affected fixed-answer test, adds coverage for populated, blank, and loadable backup chains, and both the focused 15-test suite and full 652-test suite pass
+
+**Rejected:**
+
+- request changes — no functional, coverage, or safety defect found
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup.py
+
+<!-- whyline-event: 83ccf7e399c743328232848c8fe751f9 -->
