@@ -3542,3 +3542,19 @@ Append-only. Written by whyline; readable without it.
 - reset and redo — wastes correct, test-verified work
 
 <!-- whyline-event: 7a833b2dffa445eaa2f42ef973f8005e -->
+
+## 2026-09-28 — Approved brainstorm as a third end-to-end plan source
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-4
+
+**Because:** The implementation wires setup through every existing brainstorm phase and the shared review gate, the tests cover approval, availability decline, and empty synthesis, and the full suite passes
+
+**Rejected:**
+
+- request changes — no correctness or safety defect found; reusing input_fn for confirm improves dependency injection without changing CLI behavior
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup.py
+
+<!-- whyline-event: 0551d07e53b0415dbd3695304cc0d5fa -->
