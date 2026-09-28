@@ -689,7 +689,7 @@
 
   ---
 
-- [ ] RCP-4: Wire "brainstorm" into `choose_plan_source`, end to end
+- [x] RCP-4: Wire "brainstorm" into `choose_plan_source`, end to end
 
   ## Global Constraints
 
