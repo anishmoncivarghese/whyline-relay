@@ -1438,3 +1438,305 @@ def test_mixed_failures_during_final_synthesis_prints_guidance(
         encoding="utf-8"
     )
     assert "## Final Synthesis" not in shared_after
+
+
+def test_format_progress_table_empty():
+    assert brainstorm.format_progress_table([]) == ""
+
+
+def test_format_progress_table_layout_and_fields():
+    events = [
+        brainstorm.ProgressEvent(
+            status="succeeded",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=1,
+            total=2,
+            elapsed_seconds=1.2,
+        ),
+        brainstorm.ProgressEvent(
+            status="failed",
+            agent="codex",
+            label="Codex",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=2,
+            total=2,
+            elapsed_seconds=300.0,
+            reason=brainstorm.FAILURE_TIMEOUT,
+        ),
+        brainstorm.ProgressEvent(
+            status="succeeded",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_REVIEW,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=2.4,
+            pass_number=1,
+        ),
+        brainstorm.ProgressEvent(
+            status="skipped",
+            agent="grok",
+            label="Grok",
+            phase=brainstorm.PHASE_REVIEW,
+            ordinal=2,
+            total=2,
+            elapsed_seconds=0.1,
+            pass_number=1,
+            reason=brainstorm.FAILURE_MISSING,
+        ),
+        brainstorm.ProgressEvent(
+            status="succeeded",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_SYNTHESIS,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=75.0,
+        ),
+    ]
+
+    table = brainstorm.format_progress_table(events)
+    lines = table.splitlines()
+
+    # 1. Header row contains all five required column titles
+    header = lines[0]
+    for expected_col in ("Agent", "Phase", "State", "Elapsed Time", "Failure Reason"):
+        assert expected_col in header
+
+    # 2. Separator line follows header
+    separator = lines[1]
+    assert separator.startswith("------")
+    assert "-" in separator
+
+    # 3. Data rows contain agent, phase, state, formatted elapsed time, and reason
+    row_claude_p0 = lines[2]
+    assert "Claude" in row_claude_p0
+    assert "pass-zero" in row_claude_p0
+    assert "succeeded" in row_claude_p0
+    assert "1s" in row_claude_p0
+    assert "-" in row_claude_p0
+
+    row_codex_p0 = lines[3]
+    assert "Codex" in row_codex_p0
+    assert "pass-zero" in row_codex_p0
+    assert "failed" in row_codex_p0
+    assert "5m0s" in row_codex_p0
+    assert brainstorm.FAILURE_TIMEOUT in row_codex_p0
+
+    row_claude_rev = lines[4]
+    assert "Claude" in row_claude_rev
+    assert "review pass 1" in row_claude_rev
+    assert "succeeded" in row_claude_rev
+    assert "2s" in row_claude_rev
+    assert "-" in row_claude_rev
+
+    row_grok_rev = lines[5]
+    assert "Grok" in row_grok_rev
+    assert "review pass 1" in row_grok_rev
+    assert "skipped" in row_grok_rev
+    assert "0s" in row_grok_rev
+    assert brainstorm.FAILURE_MISSING in row_grok_rev
+
+    row_claude_synth = lines[6]
+    assert "Claude" in row_claude_synth
+    assert "final synthesis" in row_claude_synth
+    assert "succeeded" in row_claude_synth
+    assert "1m15s" in row_claude_synth
+    assert "-" in row_claude_synth
+
+
+def test_format_progress_table_deduplicates_by_turn_by_default():
+    # Stream of starting, running, succeeded for one turn
+    events = [
+        brainstorm.ProgressEvent(
+            status="starting",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=0.0,
+        ),
+        brainstorm.ProgressEvent(
+            status="running",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=0.0,
+        ),
+        brainstorm.ProgressEvent(
+            status="succeeded",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=1.5,
+        ),
+    ]
+
+    # Deduplicated by default -> exactly 1 data row showing final status
+    table_dedup = brainstorm.format_progress_table(events)
+    lines_dedup = table_dedup.splitlines()
+    assert len(lines_dedup) == 3  # header, separator, 1 data row
+    assert "succeeded" in lines_dedup[2]
+    assert "starting" not in table_dedup
+    assert "running" not in table_dedup
+
+    # deduplicate=False -> 3 data rows
+    table_all = brainstorm.format_progress_table(events, deduplicate=False)
+    lines_all = table_all.splitlines()
+    assert len(lines_all) == 5  # header, separator, 3 data rows
+
+
+def test_format_progress_table_accepts_serialized_event_dicts_for_tui():
+    event = brainstorm.ProgressEvent(
+        status="failed",
+        agent="grok",
+        label="Grok",
+        phase=brainstorm.PHASE_PASS_ZERO,
+        ordinal=1,
+        total=1,
+        elapsed_seconds=2.0,
+        reason=brainstorm.FAILURE_RATE_LIMIT,
+    )
+    # Serialize to JSON string then parse back to dict (as a TUI process would)
+    serialized_dict = json.loads(json.dumps(event.to_dict()))
+
+    table_from_event = brainstorm.format_progress_table([event])
+    table_from_dict = brainstorm.format_progress_table([serialized_dict])
+
+    assert table_from_dict == table_from_event
+    assert "Grok" in table_from_dict
+    assert "failed" in table_from_dict
+    assert brainstorm.FAILURE_RATE_LIMIT in table_from_dict
+
+
+def test_progress_event_to_dict_and_from_dict_round_trip():
+    event = brainstorm.ProgressEvent(
+        status="failed",
+        agent="codex",
+        label="Codex",
+        phase=brainstorm.PHASE_REVIEW,
+        ordinal=2,
+        total=3,
+        elapsed_seconds=12.5,
+        pass_number=2,
+        reason=brainstorm.FAILURE_AUTH,
+    )
+    # 1. to_dict matches asdict
+    assert event.to_dict() == asdict(event)
+
+    # 2. All 9 fields are present and JSON serializable
+    as_dict = event.to_dict()
+    assert set(as_dict.keys()) == {
+        "status",
+        "agent",
+        "label",
+        "phase",
+        "ordinal",
+        "total",
+        "elapsed_seconds",
+        "pass_number",
+        "reason",
+    }
+    json_bytes = json.dumps(as_dict)
+    loaded = json.loads(json_bytes)
+
+    # 3. from_dict reconstructs an equal ProgressEvent
+    reconstructed = brainstorm.ProgressEvent.from_dict(loaded)
+    assert reconstructed == event
+    assert reconstructed.status == "failed"
+    assert reconstructed.reason == brainstorm.FAILURE_AUTH
+    assert reconstructed.pass_number == 2
+    assert reconstructed.elapsed_seconds == 12.5
+
+    # 4. Dictionary-like item and get access
+    assert event["status"] == "failed"
+    assert event["reason"] == brainstorm.FAILURE_AUTH
+    assert event.get("phase") == brainstorm.PHASE_REVIEW
+    assert event.get("nonexistent", "fallback") == "fallback"
+
+
+def test_render_progress_table_invokes_print_fn():
+    printed: list[str] = []
+    events = [
+        brainstorm.ProgressEvent(
+            status="succeeded",
+            agent="claude",
+            label="Claude",
+            phase=brainstorm.PHASE_PASS_ZERO,
+            ordinal=1,
+            total=1,
+            elapsed_seconds=0.5,
+        )
+    ]
+    brainstorm.render_progress_table(events, print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
+    assert len(printed) == 1
+    assert "Agent" in printed[0]
+    assert "Claude" in printed[0]
+
+    # Empty events does not print
+    printed_empty: list[str] = []
+    brainstorm.render_progress_table([], print_fn=lambda *a, **k: printed_empty.append(" ".join(str(x) for x in a)))
+    assert printed_empty == []
+
+
+def test_tui_event_stream_round_trip_end_to_end(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    stream: list[brainstorm.ProgressEvent] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "independently" in prompt and agent == "codex":
+            return {
+                "agent": agent,
+                "response": "rate limit error 429",
+                "rate_limited": True,
+                "ok": False,
+            }
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} ok")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "tui-topic", settings=settings,
+        print_fn=lambda *a, **k: None, progress_fn=stream.append,
+    )
+    brainstorm.merge_pass_zero(tmp_path, models, "tui-topic", actual_agents=actual)
+    reviewed = brainstorm.run_review_pass(
+        tmp_path, models, "tui-topic", 1, settings=settings,
+        print_fn=lambda *a, **k: None, progress_fn=stream.append,
+        actual_agents=actual,
+    )
+    brainstorm.run_final_synthesis(
+        tmp_path, "claude", models, "tui-topic", settings=settings,
+        print_fn=lambda *a, **k: None, progress_fn=stream.append,
+        actual_agents=reviewed,
+    )
+
+    # All events are valid, serializable, and reconstructable
+    serialized_stream = []
+    for ev in stream:
+        d = ev.to_dict()
+        json_str = json.dumps(d)
+        deserialized = brainstorm.ProgressEvent.from_dict(json.loads(json_str))
+        assert deserialized == ev
+        serialized_stream.append(d)
+
+    # The table can be rendered directly from serialized payload dicts
+    table = brainstorm.format_progress_table(serialized_stream)
+    assert "Claude" in table
+    assert "Codex" in table
+    assert "pass-zero" in table
+    assert "review pass 1" in table
+    assert "final synthesis" in table
+    assert brainstorm.FAILURE_RATE_LIMIT in table

@@ -399,11 +399,13 @@ def repl(
             )
             if setup is None:
                 continue
+            events: list[brainstorm.ProgressEvent] = []
             actual_agents = brainstorm.run_pass_zero(
                 root, setup["models"], setup["topic"], settings=settings,
-                run_fn=run_fn, print_fn=print_fn,
+                run_fn=run_fn, print_fn=print_fn, progress_fn=events.append,
             )
             if not actual_agents:
+                brainstorm.render_progress_table(events, print_fn=print_fn)
                 print_fn(
                     "No selected agent succeeded; stopping brainstorm without synthesis. "
                     "Check agent availability, authentication, or quotas and try again."
@@ -416,13 +418,13 @@ def repl(
                 actual_agents = brainstorm.run_review_pass(
                     root, setup["models"], setup["topic"], pass_number,
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
-                    actual_agents=actual_agents,
+                    actual_agents=actual_agents, progress_fn=events.append,
                 )
             try:
                 record = brainstorm.run_final_synthesis(
                     root, setup["final_agent"], setup["models"], setup["topic"],
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
-                    actual_agents=actual_agents,
+                    actual_agents=actual_agents, progress_fn=events.append,
                 )
             except (
                 brainstorm.NothingToSynthesize,
@@ -430,8 +432,10 @@ def repl(
                 agents.AgentTimeout,
                 AgentUnavailable,
             ) as error:
+                brainstorm.render_progress_table(events, print_fn=print_fn)
                 print_fn(str(error))
                 continue
+            brainstorm.render_progress_table(events, print_fn=print_fn)
             if record and record.get("ok"):
                 print_fn(f"[{record['agent']}] {record['response']}")
             continue

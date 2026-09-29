@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -234,6 +234,42 @@ class ProgressEvent:
         if self.status not in PROGRESS_STATUSES:
             raise ValueError(f"unknown brainstorm progress status {self.status!r}")
 
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "agent": self.agent,
+            "label": self.label,
+            "phase": self.phase,
+            "ordinal": self.ordinal,
+            "total": self.total,
+            "elapsed_seconds": self.elapsed_seconds,
+            "pass_number": self.pass_number,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProgressEvent":
+        return cls(
+            status=data["status"],
+            agent=data["agent"],
+            label=data["label"],
+            phase=data["phase"],
+            ordinal=data["ordinal"],
+            total=data["total"],
+            elapsed_seconds=float(data["elapsed_seconds"]),
+            pass_number=data.get("pass_number"),
+            reason=data.get("reason"),
+        )
+
 
 def format_progress_line(event: ProgressEvent) -> str:
     """Human line for a start or terminal status.
@@ -260,6 +296,82 @@ def _progress_scope(event: ProgressEvent) -> str:
     if event.phase == PHASE_PASS_ZERO:
         return "pass-zero"
     return event.phase
+
+
+def format_progress_table(
+    events: Sequence[ProgressEvent | dict[str, Any]],
+    *,
+    deduplicate: bool = True,
+) -> str:
+    """Render a compact table showing agent, phase, state, elapsed time, and failure reason.
+
+    Accepts either ProgressEvent instances or serialized dict payloads for future-TUI
+    compatibility. By default, consolidates multiple lifecycle events for the same turn
+    into its latest state.
+    """
+    if not events:
+        return ""
+
+    parsed_events: list[ProgressEvent] = []
+    for item in events:
+        if isinstance(item, ProgressEvent):
+            parsed_events.append(item)
+        elif isinstance(item, dict):
+            parsed_events.append(ProgressEvent.from_dict(item))
+        else:
+            raise TypeError(f"expected ProgressEvent or dict, got {type(item).__name__}")
+
+    if deduplicate:
+        turns: dict[tuple[str, int | None, str], ProgressEvent] = {}
+        for ev in parsed_events:
+            key = (ev.phase, ev.pass_number, ev.agent)
+            turns[key] = ev
+        rows_to_render = list(turns.values())
+    else:
+        rows_to_render = parsed_events
+
+    headers = ("Agent", "Phase", "State", "Elapsed Time", "Failure Reason")
+    data_rows: list[tuple[str, str, str, str, str]] = []
+    for ev in rows_to_render:
+        agent_display = ev.label or ev.agent
+        phase_display = _progress_scope(ev)
+        state_display = ev.status
+        elapsed_display = agents.format_duration(ev.elapsed_seconds)
+        reason_display = ev.reason if ev.reason else "-"
+        data_rows.append((
+            agent_display,
+            phase_display,
+            state_display,
+            elapsed_display,
+            reason_display,
+        ))
+
+    col_widths = [
+        max(len(h), max((len(r[i]) for r in data_rows), default=0))
+        for i, h in enumerate(headers)
+    ]
+
+    header_line = "  ".join(h.ljust(w) for h, w in zip(headers, col_widths)).rstrip()
+    sep_line = "  ".join("-" * w for w in col_widths).rstrip()
+    lines = [header_line, sep_line]
+    for row in data_rows:
+        line = "  ".join(val.ljust(w) for val, w in zip(row, col_widths)).rstrip()
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def render_progress_table(
+    events: Sequence[ProgressEvent | dict[str, Any]],
+    print_fn: Callable[..., Any] | None = None,
+    *,
+    deduplicate: bool = True,
+) -> None:
+    """Render and print the compact progress table using print_fn."""
+    print_fn = print_fn if print_fn is not None else print
+    table = format_progress_table(events, deduplicate=deduplicate)
+    if table:
+        print_fn(table)
 
 
 class _TurnWatch:

@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from whyline_relay import chat, chatlog
+from whyline_relay import agents, chat, chatlog
+from whyline_relay.agents import RunResult
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -16,8 +17,6 @@ def _repo(tmp_path: Path) -> Path:
 
 
 def _fake_run_fn(command, prompt, **kwargs):
-    from whyline_relay.agents import RunResult
-
     return RunResult(0, '{"type":"result","result":"an answer"}\n')
 
 
@@ -345,3 +344,130 @@ def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path:
     )
     from whyline_relay import brainstorm
     assert not brainstorm.shared_path(root, "some topic").exists()
+
+
+def test_repl_brainstorm_renders_compact_progress_table_on_success(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    from whyline_relay import brainstorm
+
+    def brainstorm_run_fn(command, prompt, **kwargs):
+        if "independently" in prompt:
+            for agent in ("claude", "codex"):
+                path = brainstorm.temp_path(root, agent)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"research from {agent}\n", encoding="utf-8")
+        return _fake_run_fn(command, prompt, **kwargs)
+
+    answers = iter([
+        "/brainstorm",
+        "api architecture",
+        "1,2",  # claude, codex
+        "1",    # 1 review pass
+        "claude",
+        "/exit",
+    ])
+    printed: list[str] = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=brainstorm_run_fn,
+        which=lambda name: "/bin/x",
+    )
+
+    # 1. Output contains the table headers
+    assert any("Agent" in line and "Phase" in line and "State" in line for line in printed)
+    assert any("Elapsed Time" in line and "Failure Reason" in line for line in printed)
+
+    # 2. Output contains rows for pass-zero, review, and final synthesis
+    table_output = "\n".join(printed)
+    assert "Claude" in table_output
+    assert "Codex" in table_output
+    assert "pass-zero" in table_output
+    assert "review pass 1" in table_output
+    assert "final synthesis" in table_output
+    assert "succeeded" in table_output
+
+    # 3. Final answer is also printed
+    assert any("an answer" in line for line in printed)
+
+
+def test_repl_brainstorm_renders_progress_table_on_pass_zero_failure(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+
+    def failing_run_fn(command, prompt, **kwargs):
+        return RunResult(1, "quota exceeded: rate limit reached\n")
+
+    answers = iter([
+        "/brainstorm",
+        "failing topic",
+        "1,2",  # claude, codex
+        "0",
+        "claude",
+        "/exit",
+    ])
+    printed: list[str] = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=failing_run_fn,
+        which=lambda name: "/bin/x",
+    )
+
+    # 1. Progress table is rendered despite failure
+    table_output = "\n".join(printed)
+    assert "Agent" in table_output and "Failure Reason" in table_output
+    assert "Claude" in table_output
+    assert "Codex" in table_output
+    assert "failed" in table_output
+    assert "quota/rate-limit" in table_output
+
+    # 2. Actionable stopping message is printed
+    assert any("No selected agent succeeded; stopping brainstorm without synthesis" in line for line in printed)
+
+
+def test_repl_brainstorm_renders_progress_table_on_synthesis_failure(tmp_path: Path):
+    root = _repo(tmp_path)
+    chat.save_default_agent(root, "claude")
+    from whyline_relay import brainstorm
+
+    def synth_fail_run_fn(command, prompt, **kwargs):
+        if "Final Synthesis" in prompt:
+            raise agents.AgentTimeout("synthesis timed out")
+        if "independently" in prompt:
+            for agent in ("claude", "codex"):
+                path = brainstorm.temp_path(root, agent)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"research from {agent}\n", encoding="utf-8")
+            return _fake_run_fn(command, prompt, **kwargs)
+        return _fake_run_fn(command, prompt, **kwargs)
+
+    answers = iter([
+        "/brainstorm",
+        "synth fail topic",
+        "1",  # claude only
+        "0",
+        "claude",
+        "/exit",
+    ])
+    printed: list[str] = []
+    chat.repl(
+        root,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        run_fn=synth_fail_run_fn,
+        which=lambda name: "/bin/x",
+    )
+
+    # 1. Progress table rendered with pass-zero success and synthesis failure
+    table_output = "\n".join(printed)
+    assert "Agent" in table_output and "Failure Reason" in table_output
+    assert "pass-zero" in table_output
+    assert "final synthesis" in table_output
+    assert "timeout" in table_output
+
+    # 2. Error message printed
+    assert any("timed out" in line.lower() for line in printed)

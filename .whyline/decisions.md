@@ -3817,3 +3817,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
 
 <!-- whyline-event: 312490d8ce88435fa574fc15794dc0a2 -->
+
+## 2026-09-29 — Approve stable brainstorm progress table and REPL event stream
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PRG-4
+
+**Because:** The REPL now collects structured lifecycle events across all brainstorm phases and renders a compact serializable table with agent, phase, state, elapsed time, and failure reason; focused and full suites pass
+
+**Rejected:**
+
+- leave progress events callback-only — users would still lack a clear aggregate view and the future TUI would need to reconstruct state
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, tests/test_brainstorm_progress.py, tests/test_chat_repl.py
+
+<!-- whyline-event: bb0156fcff9045fd9aeaea1e21322fa4 -->

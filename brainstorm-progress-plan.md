@@ -36,7 +36,7 @@ Global constraints:
   successful sections and actual-agent attribution. Add focused tests for
   final-agent fallback and the all-agents-failed case.
 
-- [ ] PRG-4: Verify CLI progress output and future-TUI event compatibility
+- [x] PRG-4: Verify CLI progress output and future-TUI event compatibility
   Wire the event stream through the `/brainstorm` REPL and render a compact
   progress table showing agent, phase, state, elapsed time, and failure reason.
   Keep the event payload serializable and stable for the future full-screen
