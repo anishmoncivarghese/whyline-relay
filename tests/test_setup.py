@@ -368,4 +368,4 @@ def test_choose_plan_source_brainstorm_nothing_to_synthesize_is_reported(
         run_fn=fake_run_fn,
     )
     assert result is False
-    assert any("nothing to turn into a plan" in line for line in printed)
+    assert any("No selected agent succeeded" in line for line in printed)

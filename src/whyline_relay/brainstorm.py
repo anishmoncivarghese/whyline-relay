@@ -666,6 +666,13 @@ def merge_pass_zero(
     else:
         _save_actual_agents(root, actual_agents, topic)
 
+    if actual_agents is not None and not actual_agents:
+        for agent_key, _ in models:
+            p = temp_path(root, agent_key)
+            if p.exists():
+                p.unlink(missing_ok=True)
+        return
+
     sections = []
     used_paths = []
     for agent_key, label in models:
@@ -688,6 +695,81 @@ def merge_pass_zero(
         if p.exists():
             p.unlink(missing_ok=True)
     gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
+
+
+def _restore_shared(
+    root: Path,
+    shared: Path,
+    pre_turn_content: str | None,
+    topic: str,
+    agent_key: str,
+) -> None:
+    if pre_turn_content is not None:
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        shared.write_text(pre_turn_content, encoding="utf-8")
+        try:
+            gitcheck.commit_paths(
+                root,
+                [shared],
+                f'brainstorm: restore shared document after {agent_key} review failure on "{topic}"',
+            )
+        except Exception:
+            pass
+    elif shared.exists():
+        shared.unlink()
+        try:
+            gitcheck.commit_paths(
+                root,
+                [shared],
+                f'brainstorm: remove shared document after {agent_key} review failure on "{topic}"',
+            )
+        except Exception:
+            pass
+
+
+def _extract_research_sections(content: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    current_heading: str | None = None
+    current_lines: list[str] = []
+    for line in content.splitlines():
+        if line.startswith("## "):
+            if current_heading and current_heading != "Final Synthesis":
+                sections[current_heading] = "\n".join(current_lines).strip()
+            current_heading = line[3:].strip()
+            current_lines = []
+        elif current_heading is not None:
+            current_lines.append(line)
+    if current_heading and current_heading != "Final Synthesis":
+        sections[current_heading] = "\n".join(current_lines).strip()
+    return sections
+
+
+def _has_usable_research(
+    shared: Path,
+    agent_key: str,
+    label: str,
+    actual_key: str | None = None,
+) -> bool:
+    if not shared.exists():
+        return False
+    try:
+        content = shared.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    sections = _extract_research_sections(content)
+    model_labels = dict(MODEL_OPTIONS_BY_KEY)
+    possible_headings = {
+        label,
+        agent_key,
+        model_labels.get(agent_key, label),
+    }
+    if actual_key:
+        possible_headings.add(model_labels.get(actual_key, actual_key))
+        possible_headings.add(actual_key)
+    for h in possible_headings:
+        if h in sections and bool(sections[h].strip()):
+            return True
+    return False
 
 
 def run_review_pass(
@@ -756,6 +838,7 @@ def run_review_pass(
             total=total,
             pass_number=pass_number,
         )
+        pre_turn_content = shared.read_text(encoding="utf-8") if shared.exists() else None
         try:
             record = chat.run_turn(
                 root,
@@ -772,9 +855,22 @@ def run_review_pass(
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
             watch.emit("skipped", reason=str(error))
             print_fn(f"{label} could not review this pass: {error}")
+            _restore_shared(root, shared, pre_turn_content, topic, agent_key)
+            results[agent_key] = current_actual
+            continue
+        except Exception as error:
+            category = classify_failure(error=error)
+            watch.emit("failed", reason=category)
+            print_fn(f"{label} could not review this pass: {category}: {error}")
+            _restore_shared(root, shared, pre_turn_content, topic, agent_key)
             results[agent_key] = current_actual
             continue
         _emit_outcome(watch, record)
+        if not record["ok"]:
+            print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
+            _restore_shared(root, shared, pre_turn_content, topic, agent_key)
+            results[agent_key] = current_actual
+            continue
         actual_key = record["agent"]
         results[agent_key] = actual_key
         new_label = model_labels.get(actual_key, label)
@@ -796,10 +892,25 @@ def run_review_pass(
                     root, f'brainstorm: relabel section to {new_label} on "{topic}"'
                 )
         actual_map[agent_key] = actual_key
-        if not record["ok"]:
-            print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
     _save_actual_agents(root, results, topic)
     return results
+
+
+def _strip_final_synthesis(shared: Path) -> None:
+    if not shared.exists():
+        return
+    content = shared.read_text(encoding="utf-8")
+    if "## Final Synthesis" not in content:
+        return
+    cleaned = re.sub(
+        r"^##\s+Final Synthesis\s*?\n.*?(?=\n##\s|\Z)",
+        "",
+        content,
+        flags=re.DOTALL | re.MULTILINE,
+    ).strip()
+    if cleaned:
+        cleaned += "\n"
+    shared.write_text(cleaned, encoding="utf-8")
 
 
 def run_final_synthesis(
@@ -812,14 +923,73 @@ def run_final_synthesis(
     run_fn=None,
     runner=None,
     print_fn=None,
+    actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
 ) -> dict:
-    """One model writes the final synthesis. Availability failures still
-    propagate, after a skipped progress event, so callers see the same
-    exception they did before progress reporting existed.
+    """One model writes the final synthesis. If the requested final agent fails
+    at runtime, choose the first successful selected agent with usable research
+    and announce the substitution. If no selected agent succeeds, stop with an
+    actionable message and do not create an empty synthesis.
     """
     print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
+    kwargs = {"run_fn": run_fn} if run_fn is not None else {}
+    if runner is not None:
+        kwargs["runner"] = runner
+
+    # Determine candidates with usable research
+    if actual_agents is not None:
+        candidates = [m for m in models if m[0] in actual_agents]
+        actual_map = actual_agents
+    else:
+        disk_actual = (
+            _load_actual_agents(root, topic)
+            if _actual_agents_path(root, topic).exists()
+            else {}
+        )
+        candidates = [
+            m for m in models
+            if not disk_actual or m[0] in disk_actual
+        ]
+        actual_map = disk_actual
+
+    if shared.exists():
+        sections = _extract_research_sections(shared.read_text(encoding="utf-8"))
+        viable_candidates = [
+            m
+            for m in candidates
+            if _has_usable_research(
+                shared,
+                m[0],
+                m[1],
+                actual_map.get(m[0]) if actual_map else None,
+            )
+        ] if sections else []
+    else:
+        viable_candidates = []
+
+    if not viable_candidates:
+        msg = (
+            "No selected agent succeeded; stopping without synthesis. "
+            "Check agent availability, authentication, or quotas and try again."
+        )
+        print_fn(msg)
+        raise NothingToSynthesize(msg)
+
+    viable_keys = {m[0] for m in viable_candidates}
+    if final_agent not in viable_keys:
+        chosen_agent, chosen_label = viable_candidates[0]
+        failed_label = _model_label(models, final_agent)
+        print_fn(
+            f"{failed_label} failed at runtime; substituting "
+            f"{chosen_label} for final synthesis."
+        )
+        target_agents = [m[0] for m in viable_candidates]
+    else:
+        target_agents = [final_agent] + [
+            m[0] for m in viable_candidates if m[0] != final_agent
+        ]
+
     prompt = (
         f'All review passes are complete for this brainstorm on "{topic}". '
         f"Read {shared} in full and write a new \"## Final Synthesis\" "
@@ -827,34 +997,80 @@ def run_final_synthesis(
         "strongest ideas from every model's section into one clear, "
         "actionable recommendation."
     )
-    kwargs = {"run_fn": run_fn} if run_fn is not None else {}
-    if runner is not None:
-        kwargs["runner"] = runner
-    exclude = frozenset(key for key, _ in models if key != final_agent)
-    watch = _begin_turn(
-        print_fn=print_fn,
-        progress_fn=progress_fn,
-        agent=final_agent,
-        label=_model_label(models, final_agent),
-        phase=PHASE_SYNTHESIS,
-        ordinal=1,
-        total=1,
-    )
-    try:
-        record = chat.run_turn(
-            root,
-            agent=final_agent,
-            prompt=prompt,
-            settings=settings,
-            commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
-            exclude=exclude,
-            **kwargs,
+
+    last_error: BaseException | None = None
+    last_record: dict | None = None
+
+    for idx, current_agent in enumerate(target_agents):
+        current_label = _model_label(models, current_agent)
+        if idx > 0:
+            prev_agent = target_agents[idx - 1]
+            prev_label = _model_label(models, prev_agent)
+            print_fn(
+                f"{prev_label} failed at runtime; substituting "
+                f"{current_label} for final synthesis."
+            )
+
+        watch = _begin_turn(
+            print_fn=print_fn,
+            progress_fn=progress_fn,
+            agent=current_agent,
+            label=current_label,
+            phase=PHASE_SYNTHESIS,
+            ordinal=1,
+            total=1,
         )
-    except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
-        watch.emit("skipped", reason=str(error))
-        raise
-    _emit_outcome(watch, record)
-    return record
+        exclude = frozenset(key for key, _ in models if key != current_agent)
+        try:
+            record = chat.run_turn(
+                root,
+                agent=current_agent,
+                prompt=prompt,
+                settings=settings,
+                commit_message=f'brainstorm: {current_agent} final synthesis on "{topic}"',
+                exclude=exclude,
+                **kwargs,
+            )
+        except (agents.AgentMissing, chat.AgentUnavailable) as error:
+            watch.emit("skipped", reason=str(error))
+            _strip_final_synthesis(shared)
+            last_error = error
+            last_record = None
+            continue
+        except agents.AgentTimeout as error:
+            watch.emit("failed", reason=FAILURE_TIMEOUT)
+            _strip_final_synthesis(shared)
+            last_error = error
+            last_record = None
+            continue
+        except Exception as error:
+            category = classify_failure(error=error)
+            watch.emit("failed", reason=category)
+            _strip_final_synthesis(shared)
+            last_error = error
+            last_record = None
+            continue
+
+        _emit_outcome(watch, record)
+        if record["ok"]:
+            return record
+
+        _strip_final_synthesis(shared)
+        last_record = record
+        last_error = None
+        continue
+
+    # All attempted agents failed
+    _strip_final_synthesis(shared)
+    print_fn(
+        "No selected agent succeeded for final synthesis. "
+        "Check agent configurations, quotas, or credentials and try again."
+    )
+    if last_error is not None:
+        raise last_error
+    if last_record is not None:
+        return last_record
+    raise NothingToSynthesize("No selected agent succeeded for final synthesis.")
 
 
 PLAN_GENERATION_PROMPT = (

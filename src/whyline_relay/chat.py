@@ -403,6 +403,12 @@ def repl(
                 root, setup["models"], setup["topic"], settings=settings,
                 run_fn=run_fn, print_fn=print_fn,
             )
+            if not actual_agents:
+                print_fn(
+                    "No selected agent succeeded; stopping brainstorm without synthesis. "
+                    "Check agent availability, authentication, or quotas and try again."
+                )
+                continue
             brainstorm.merge_pass_zero(
                 root, setup["models"], setup["topic"], actual_agents=actual_agents
             )
@@ -412,11 +418,22 @@ def repl(
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
                     actual_agents=actual_agents,
                 )
-            record = brainstorm.run_final_synthesis(
-                root, setup["final_agent"], setup["models"], setup["topic"],
-                settings=settings, run_fn=run_fn, print_fn=print_fn,
-            )
-            print_fn(f"[{record['agent']}] {record['response']}")
+            try:
+                record = brainstorm.run_final_synthesis(
+                    root, setup["final_agent"], setup["models"], setup["topic"],
+                    settings=settings, run_fn=run_fn, print_fn=print_fn,
+                    actual_agents=actual_agents,
+                )
+            except (
+                brainstorm.NothingToSynthesize,
+                agents.AgentMissing,
+                agents.AgentTimeout,
+                AgentUnavailable,
+            ) as error:
+                print_fn(str(error))
+                continue
+            if record and record.get("ok"):
+                print_fn(f"[{record['agent']}] {record['response']}")
             continue
         if line.startswith("/default"):
             parts = line.split(maxsplit=1)

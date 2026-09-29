@@ -293,6 +293,16 @@ def test_repl_prints_the_failover_notice_when_present(tmp_path: Path, monkeypatc
 def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
     root = _repo(tmp_path)
     chat.save_default_agent(root, "claude")
+    from whyline_relay import brainstorm
+
+    def brainstorm_run_fn(command, prompt, **kwargs):
+        if "independently" in prompt:
+            for agent in ("claude", "codex"):
+                path = brainstorm.temp_path(root, agent)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"research from {agent}\n", encoding="utf-8")
+        return _fake_run_fn(command, prompt, **kwargs)
+
     answers = iter([
         "/brainstorm",
         "caching strategy",  # topic
@@ -306,11 +316,10 @@ def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
         root,
         input_fn=lambda prompt="": next(answers),
         print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
-        run_fn=_fake_run_fn,
+        run_fn=brainstorm_run_fn,
         which=lambda name: "/bin/x",
     )
     assert any("an answer" in line for line in printed)
-    from whyline_relay import brainstorm
     shared = brainstorm.shared_path(root, "caching strategy")
     assert shared.exists()
 

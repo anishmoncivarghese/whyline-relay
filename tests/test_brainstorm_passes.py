@@ -98,6 +98,10 @@ def test_run_final_synthesis_only_invokes_the_designated_model(tmp_path: Path):
             Path(command[command.index("-o") + 1]).write_text(text, encoding="utf-8")
         return RunResult(0, text)
 
+    brainstorm.shared_path(tmp_path, "my topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "my topic").write_text(
+        "# Brainstorm: my topic\n\n## Codex\n\nresearch\n", encoding="utf-8"
+    )
     record = brainstorm.run_final_synthesis(
         tmp_path, "codex", models, "my topic", settings=settings, run_fn=fake_run_fn
     )
@@ -177,6 +181,10 @@ def test_run_final_synthesis_excludes_other_selected_models(tmp_path: Path, monk
         return {"agent": agent, "response": "ok", "rate_limited": False, "ok": True}
 
     monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Codex\n\nresearch\n", encoding="utf-8"
+    )
     brainstorm.run_final_synthesis(tmp_path, "codex", models, "topic", settings=settings)
     assert len(captured_excludes) == 1
     assert captured_excludes[0] == ("codex", frozenset({"claude"}))

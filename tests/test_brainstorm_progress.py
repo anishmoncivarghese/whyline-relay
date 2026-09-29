@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import agents, brainstorm, chat, chatlog, config
+from whyline_relay import agents, brainstorm, chat, chatlog, config, gitcheck
 
 
 def _init_repo(root: Path) -> None:
@@ -63,9 +63,14 @@ def test_callback_order_across_pass_zero_review_and_synthesis(
         print_fn=lambda *a, **k: None, progress_fn=events.append,
         actual_agents=actual,
     )
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Claude\n\nresearch\n", encoding="utf-8"
+    )
     brainstorm.run_final_synthesis(
-        tmp_path, "codex", models, "topic", settings=settings,
+        tmp_path, "claude", models, "topic", settings=settings,
         print_fn=lambda *a, **k: None, progress_fn=events.append,
+        actual_agents=reviewed,
     )
 
     assert [(event.status, event.agent, event.phase, event.ordinal, event.pass_number) for event in events] == [
@@ -78,9 +83,9 @@ def test_callback_order_across_pass_zero_review_and_synthesis(
         ("starting", "claude", "review", 1, 1),
         ("running", "claude", "review", 1, 1),
         ("failed", "claude", "review", 1, 1),
-        ("starting", "codex", "synthesis", 1, None),
-        ("running", "codex", "synthesis", 1, None),
-        ("succeeded", "codex", "synthesis", 1, None),
+        ("starting", "claude", "synthesis", 1, None),
+        ("running", "claude", "synthesis", 1, None),
+        ("succeeded", "claude", "synthesis", 1, None),
     ]
     assert events[5].reason == brainstorm.FAILURE_TIMEOUT
     assert events[8].reason == brainstorm.FAILURE_GENERIC
@@ -125,6 +130,10 @@ def test_start_and_finish_lines_include_ordinal_label_and_elapsed(
         raise agents.AgentMissing("codex is not installed")
 
     monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Claude\n\nresearch\n", encoding="utf-8"
+    )
     printed: list[str] = []
     brainstorm.run_pass_zero(
         tmp_path, models, "topic", settings=settings,
@@ -170,6 +179,10 @@ def test_running_is_reported_to_the_callback_and_not_printed(tmp_path: Path, mon
         return _ok(agent, "final answer")
 
     monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Claude\n\nresearch\n", encoding="utf-8"
+    )
     printed: list[str] = []
     brainstorm.run_final_synthesis(
         tmp_path, "claude", [("claude", "Claude")], "topic", settings=settings,
@@ -192,6 +205,10 @@ def test_skipped_final_synthesis_reports_then_reraises(tmp_path: Path, monkeypat
         raise chat.AgentUnavailable("claude is not configured")
 
     monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Claude\n\nresearch\n", encoding="utf-8"
+    )
     printed: list[str] = []
     with pytest.raises(chat.AgentUnavailable, match="not configured"):
         brainstorm.run_final_synthesis(
@@ -204,6 +221,7 @@ def test_skipped_final_synthesis_reports_then_reraises(tmp_path: Path, monkeypat
     assert printed == [
         "[1/1] Claude starting final synthesis (0s)",
         "[1/1] Claude skipped final synthesis (0s): claude is not configured",
+        "No selected agent succeeded for final synthesis. Check agent configurations, quotas, or credentials and try again.",
     ]
 
 
@@ -247,6 +265,10 @@ def test_progress_lines_stay_out_of_the_agent_log_and_chat_history(tmp_path: Pat
         seen["log_path"] = log_path
         return agents.RunResult(0, '{"type":"result","result":"synthesized"}\n')
 
+    brainstorm.shared_path(tmp_path, "topic").parent.mkdir(parents=True, exist_ok=True)
+    brainstorm.shared_path(tmp_path, "topic").write_text(
+        "# Brainstorm: topic\n\n## Claude\n\nresearch\n", encoding="utf-8"
+    )
     printed: list[str] = []
     record = brainstorm.run_final_synthesis(
         tmp_path, "claude", [("claude", "Claude")], "topic",
@@ -283,6 +305,10 @@ def test_repl_prints_start_and_finish_lines_for_each_phase(tmp_path: Path):
     ])
 
     def fake_run_fn(command, prompt, **kwargs):
+        tpath = brainstorm.temp_path(tmp_path, "claude")
+        if not tpath.exists():
+            tpath.parent.mkdir(parents=True, exist_ok=True)
+            tpath.write_text("claude findings\n", encoding="utf-8")
         return agents.RunResult(0, '{"type":"result","result":"an answer"}\n')
 
     printed: list[str] = []
@@ -769,3 +795,646 @@ def test_review_pass_skips_pass_zero_failures_and_preserves_substitutions(
     persisted = brainstorm._load_actual_agents(tmp_path, "review-filter-topic")
     assert persisted == {"claude": "codex", "agy": "agy"}
     assert "grok" not in persisted
+
+
+def test_final_agent_fallback_when_requested_agent_fails_at_runtime(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    events: list[brainstorm.ProgressEvent] = []
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Final Synthesis" in prompt:
+            if agent == "claude":
+                return {
+                    "agent": "claude",
+                    "response": "rate limit exceeded: quota exhausted",
+                    "rate_limited": True,
+                    "ok": False,
+                }
+            shared = brainstorm.shared_path(root, "runtime-fallback-topic")
+            content = shared.read_text(encoding="utf-8")
+            shared.write_text(
+                content + "\n## Final Synthesis\n\nCodex recommendation\n",
+                encoding="utf-8",
+            )
+            return _ok("codex", "Codex recommendation")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "runtime-fallback-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "runtime-fallback-topic", actual_agents=actual
+    )
+    record = brainstorm.run_final_synthesis(
+        tmp_path,
+        "claude",
+        models,
+        "runtime-fallback-topic",
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        progress_fn=events.append,
+        actual_agents=actual,
+    )
+
+    # 1. Claude failed at runtime, Codex succeeded
+    assert record["agent"] == "codex"
+    assert record["ok"] is True
+    assert record["response"] == "Codex recommendation"
+
+    # 2. Progress events show Claude failing and Codex running and succeeding
+    synth_events = [e for e in events if e.phase == brainstorm.PHASE_SYNTHESIS]
+    assert [(e.agent, e.status) for e in synth_events] == [
+        ("claude", "starting"),
+        ("claude", "running"),
+        ("claude", "failed"),
+        ("codex", "starting"),
+        ("codex", "running"),
+        ("codex", "succeeded"),
+    ]
+    assert synth_events[2].reason == brainstorm.FAILURE_RATE_LIMIT
+
+    # 3. Substitution was announced
+    assert any(
+        "Claude failed at runtime; substituting Codex for final synthesis." in line
+        for line in printed
+    )
+
+    # 4. Final synthesis section in shared doc exists and was written by Codex
+    shared = brainstorm.shared_path(tmp_path, "runtime-fallback-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Final Synthesis" in shared
+    assert "Codex recommendation" in shared
+
+
+def test_final_agent_fallback_when_requested_agent_failed_in_pass_zero(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    events: list[brainstorm.ProgressEvent] = []
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "independently" in prompt and agent == "claude":
+            raise agents.AgentTimeout("claude turn timed out after 300s")
+        if "Final Synthesis" in prompt:
+            shared = brainstorm.shared_path(root, "pass0-fallback-topic")
+            content = shared.read_text(encoding="utf-8")
+            shared.write_text(
+                content + "\n## Final Synthesis\n\nCodex recommendation\n",
+                encoding="utf-8",
+            )
+            return _ok("codex", "Codex recommendation")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "pass0-fallback-topic", settings=settings
+    )
+    assert actual == {"codex": "codex"}
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "pass0-fallback-topic", actual_agents=actual
+    )
+
+    # Claude was requested, but failed in pass 0
+    record = brainstorm.run_final_synthesis(
+        tmp_path,
+        "claude",
+        models,
+        "pass0-fallback-topic",
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        progress_fn=events.append,
+        actual_agents=actual,
+    )
+
+    # 1. Claude was never invoked for final synthesis
+    synth_events = [e for e in events if e.phase == brainstorm.PHASE_SYNTHESIS]
+    assert not any(e.agent == "claude" for e in synth_events)
+    assert [(e.agent, e.status) for e in synth_events] == [
+        ("codex", "starting"),
+        ("codex", "running"),
+        ("codex", "succeeded"),
+    ]
+
+    # 2. Substitution was announced
+    assert any(
+        "Claude failed at runtime; substituting Codex for final synthesis." in line
+        for line in printed
+    )
+    assert record["agent"] == "codex"
+
+
+def test_all_agents_failed_in_pass_zero_stops_without_empty_synthesis(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    chat.save_default_agent(tmp_path, "claude")
+    models = [("claude", "Claude"), ("codex", "Codex")]
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if agent == "claude":
+            return {
+                "agent": "claude",
+                "response": "quota exhausted",
+                "rate_limited": True,
+                "ok": False,
+            }
+        raise agents.AgentTimeout("codex timed out")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    answers = iter([
+        "/brainstorm",
+        "all-failed-topic",
+        "1,2",  # Claude, Codex
+        "1",    # 1 pass
+        "claude",
+        "/exit",
+    ])
+    printed: list[str] = []
+    chat.repl(
+        tmp_path,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        which=lambda name: "/bin/x",
+    )
+
+    # 1. Actionable stopping message printed
+    assert any(
+        "No selected agent succeeded; stopping brainstorm without synthesis." in line
+        for line in printed
+    )
+    assert any(
+        "Check agent availability, authentication, or quotas and try again." in line
+        for line in printed
+    )
+
+    # 2. No shared doc or empty synthesis file was created
+    shared = brainstorm.shared_path(tmp_path, "all-failed-topic")
+    assert not shared.exists()
+
+    # 3. No review passes or final synthesis ran
+    assert not any("starting review pass" in line for line in printed)
+    assert not any("starting final synthesis" in line for line in printed)
+
+
+def test_all_agents_fail_during_final_synthesis_stops_without_empty_synthesis(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    events: list[brainstorm.ProgressEvent] = []
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Final Synthesis" in prompt:
+            # Both fail during final synthesis
+            return {
+                "agent": agent,
+                "response": f"{agent} internal error",
+                "rate_limited": False,
+                "ok": False,
+            }
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "synth-all-fail-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "synth-all-fail-topic", actual_agents=actual
+    )
+
+    record = brainstorm.run_final_synthesis(
+        tmp_path,
+        "claude",
+        models,
+        "synth-all-fail-topic",
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        progress_fn=events.append,
+        actual_agents=actual,
+    )
+
+    # 1. Returned record reports failure
+    assert record["ok"] is False
+
+    # 2. Both agents attempted final synthesis and failed
+    synth_events = [e for e in events if e.phase == brainstorm.PHASE_SYNTHESIS]
+    assert [(e.agent, e.status) for e in synth_events] == [
+        ("claude", "starting"),
+        ("claude", "running"),
+        ("claude", "failed"),
+        ("codex", "starting"),
+        ("codex", "running"),
+        ("codex", "failed"),
+    ]
+
+    # 3. Actionable message printed
+    assert any(
+        "No selected agent succeeded for final synthesis." in line
+        for line in printed
+    )
+
+    # 4. No empty or broken ## Final Synthesis in shared doc
+    shared = brainstorm.shared_path(tmp_path, "synth-all-fail-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Final Synthesis" not in shared
+
+
+def test_review_pass_preserves_section_and_attribution_on_failure(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Combined review pass" in prompt:
+            if agent == "claude":
+                # Claude mutates/corrupts the shared file before failing
+                shared = brainstorm.shared_path(root, "review-preserve-topic")
+                shared.write_text("# Corrupted by Claude\n\nAll sections deleted!", encoding="utf-8")
+                gitcheck.commit_all(root, "claude corrupted file")
+                return {
+                    "agent": "claude",
+                    "response": "unexpected crash",
+                    "rate_limited": False,
+                    "ok": False,
+                }
+            # Codex succeeds review and revises
+            shared = brainstorm.shared_path(root, "review-preserve-topic")
+            content = shared.read_text(encoding="utf-8")
+            revised = content.replace("Codex research", "Codex revised research")
+            shared.write_text(revised, encoding="utf-8")
+            return _ok("codex", "revised")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent.title()} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent.title()} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "review-preserve-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "review-preserve-topic", actual_agents=actual
+    )
+    shared_initial = brainstorm.shared_path(tmp_path, "review-preserve-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Claude\n\nClaude research" in shared_initial
+    assert "## Codex\n\nCodex research" in shared_initial
+
+    reviewed = brainstorm.run_review_pass(
+        tmp_path,
+        models,
+        "review-preserve-topic",
+        1,
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        actual_agents=actual,
+    )
+
+    # 1. Claude failure warning was printed
+    assert any("Claude's review pass 1 reported a failure." in line for line in printed)
+
+    # 2. Claude's section is preserved untouched in shared doc despite corruption
+    shared_after = brainstorm.shared_path(tmp_path, "review-preserve-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "Corrupted by Claude" not in shared_after
+    assert "## Claude\n\nClaude research" in shared_after
+    # Codex's section was updated
+    assert "Codex revised research" in shared_after
+
+    # 3. Attribution in returned map is preserved
+    assert reviewed == {"claude": "claude", "codex": "codex"}
+
+
+def test_setup_brainstorm_updates_attribution_on_synthesizer_fallback(
+    tmp_path: Path, monkeypatch
+):
+    from whyline_relay import setup, planner
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    seen_drafted_by = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "plan.md at" in prompt:
+            draft_path = brainstorm.plan_draft_path(root)
+            draft_path.parent.mkdir(parents=True, exist_ok=True)
+            draft_path.write_text(
+                "# Plan\n\n- [ ] TSK-1: implement feature\n    Indented detail\n",
+                encoding="utf-8",
+            )
+            return _ok(agent, "drafted plan")
+        if "Final Synthesis" in prompt:
+            # Claude fails final synthesis; Codex will substitute
+            if agent == "claude":
+                return {
+                    "agent": "claude",
+                    "response": "rate limited",
+                    "rate_limited": True,
+                    "ok": False,
+                }
+            shared = brainstorm.shared_path(root, "setup-attribution-topic")
+            content = shared.read_text(encoding="utf-8")
+            shared.write_text(content + "\n## Final Synthesis\n\nPlan here\n", encoding="utf-8")
+            return _ok("codex", "Plan here")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, "ok")
+
+    def fake_review_gate(root, settings, draft, topic, *, drafted_by, revise_fn, confirm):
+        seen_drafted_by.append(drafted_by)
+        (root / settings.plan).write_text(draft.read_text(encoding="utf-8"))
+        return "approved"
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    monkeypatch.setattr(planner, "review_gate", fake_review_gate)
+
+    answers = iter([
+        "brainstorm",
+        "setup-attribution-topic",
+        "1,2",  # Claude, Codex
+        "0",    # 0 review passes
+        "claude",  # requested final agent
+    ])
+    printed: list[str] = []
+    res = setup.choose_plan_source(
+        tmp_path,
+        settings,
+        input_fn=lambda prompt="": next(answers),
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        confirm=lambda prompt="": True,
+    )
+    assert res is True
+    # Attribution reflected the substituted agent (Codex), NOT Claude!
+    assert seen_drafted_by == ["brainstorm (codex)"]
+
+
+def test_fallback_skips_agent_reporting_success_without_writing_research(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    printed: list[str] = []
+    synthesis_agents_invoked = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Final Synthesis" in prompt:
+            synthesis_agents_invoked.append(agent)
+            shared = brainstorm.shared_path(root, "no-research-success-topic")
+            content = shared.read_text(encoding="utf-8")
+            shared.write_text(content + "\n## Final Synthesis\n\nCodex plan\n", encoding="utf-8")
+            return _ok(agent, "Codex plan")
+        # Pass 0:
+        if agent == "claude":
+            # Claude reports success but writes no temp file / research
+            return _ok("claude", "I am done without writing files")
+        # Codex writes research
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text("Codex valid research\n", encoding="utf-8")
+        return _ok(agent, "Codex valid research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "no-research-success-topic", settings=settings
+    )
+    # run_turn reported ok for both, so actual initially contains both
+    assert "claude" in actual
+    assert "codex" in actual
+
+    # merge_pass_zero skips Claude because no non-empty temp file exists
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "no-research-success-topic", actual_agents=actual
+    )
+
+    shared = brainstorm.shared_path(tmp_path, "no-research-success-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Claude" not in shared
+    assert "## Codex" in shared
+
+    # Run final synthesis requesting claude
+    record = brainstorm.run_final_synthesis(
+        tmp_path,
+        "claude",
+        models,
+        "no-research-success-topic",
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        actual_agents=actual,
+    )
+
+    assert record["ok"] is True
+    assert record["agent"] == "codex"
+    # Claude was skipped because it had no usable research; Codex was substituted
+    assert synthesis_agents_invoked == ["codex"]
+    assert any(
+        "Claude failed at runtime; substituting Codex for final synthesis." in line
+        for line in printed
+    )
+
+
+def test_review_pass_restores_shared_doc_on_exception_during_turn(
+    tmp_path: Path, monkeypatch
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Combined review pass" in prompt:
+            if agent == "claude":
+                # Claude corrupts the shared file and raises an exception
+                shared = brainstorm.shared_path(root, "review-exc-topic")
+                shared.write_text("# Corrupted before exception", encoding="utf-8")
+                gitcheck.commit_all(root, "claude corrupted file")
+                raise agents.AgentTimeout("Claude timed out during review")
+            return _ok("codex", "codex review ok")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, "research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "review-exc-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "review-exc-topic", actual_agents=actual
+    )
+
+    reviewed = brainstorm.run_review_pass(
+        tmp_path,
+        models,
+        "review-exc-topic",
+        1,
+        settings=settings,
+        print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+        actual_agents=actual,
+    )
+
+    # 1. Claude timeout message was printed
+    assert any("Claude could not review this pass" in line for line in printed)
+
+    # 2. Shared doc was restored despite corruption before timeout
+    shared_after = brainstorm.shared_path(tmp_path, "review-exc-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "Corrupted before exception" not in shared_after
+    assert "## Claude\n\nclaude research" in shared_after
+
+    # 3. Attribution preserved
+    assert reviewed == {"claude": "claude", "codex": "codex"}
+
+
+def test_all_agents_fail_by_exception_during_final_synthesis_prints_guidance(
+    tmp_path: Path, monkeypatch
+):
+    import pytest
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Final Synthesis" in prompt:
+            # Both fail by exception
+            shared = brainstorm.shared_path(root, "synth-exc-topic")
+            content = shared.read_text(encoding="utf-8")
+            shared.write_text(content + "\n## Final Synthesis\n\npartial\n", encoding="utf-8")
+            raise agents.AgentTimeout(f"{agent} timed out")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "synth-exc-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "synth-exc-topic", actual_agents=actual
+    )
+
+    with pytest.raises(agents.AgentTimeout):
+        brainstorm.run_final_synthesis(
+            tmp_path,
+            "claude",
+            models,
+            "synth-exc-topic",
+            settings=settings,
+            print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+            actual_agents=actual,
+        )
+
+    # 1. Substitution announcement was printed
+    assert any(
+        "Claude failed at runtime; substituting Codex for final synthesis." in line
+        for line in printed
+    )
+
+    # 2. Actionable message was printed BEFORE raising
+    assert any(
+        "No selected agent succeeded for final synthesis. Check agent configurations, quotas, or credentials and try again."
+        in line
+        for line in printed
+    )
+
+    # 3. Partial Final Synthesis stripped from shared doc
+    shared_after = brainstorm.shared_path(tmp_path, "synth-exc-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Final Synthesis" not in shared_after
+
+
+def test_mixed_failures_during_final_synthesis_prints_guidance(
+    tmp_path: Path, monkeypatch
+):
+    import pytest
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    models = [("claude", "Claude"), ("codex", "Codex")]
+    printed: list[str] = []
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kwargs):
+        if "Final Synthesis" in prompt:
+            if agent == "claude":
+                # Claude fails with ok=False
+                return {
+                    "agent": "claude",
+                    "response": "rate limit error",
+                    "rate_limited": True,
+                    "ok": False,
+                }
+            # Codex fails with AgentTimeout exception
+            raise agents.AgentTimeout("codex timed out")
+        tpath = brainstorm.temp_path(root, agent)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(f"{agent} research\n", encoding="utf-8")
+        return _ok(agent, f"{agent} research")
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    actual = brainstorm.run_pass_zero(
+        tmp_path, models, "synth-mixed-topic", settings=settings
+    )
+    brainstorm.merge_pass_zero(
+        tmp_path, models, "synth-mixed-topic", actual_agents=actual
+    )
+
+    with pytest.raises(agents.AgentTimeout):
+        brainstorm.run_final_synthesis(
+            tmp_path,
+            "claude",
+            models,
+            "synth-mixed-topic",
+            settings=settings,
+            print_fn=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+            actual_agents=actual,
+        )
+
+    # 1. Substitution announcement was printed
+    assert any(
+        "Claude failed at runtime; substituting Codex for final synthesis." in line
+        for line in printed
+    )
+
+    # 2. Actionable message was printed BEFORE raising
+    assert any(
+        "No selected agent succeeded for final synthesis. Check agent configurations, quotas, or credentials and try again."
+        in line
+        for line in printed
+    )
+
+    # 3. Partial Final Synthesis stripped from shared doc
+    shared_after = brainstorm.shared_path(tmp_path, "synth-mixed-topic").read_text(
+        encoding="utf-8"
+    )
+    assert "## Final Synthesis" not in shared_after

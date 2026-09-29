@@ -3727,3 +3727,93 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
 
 <!-- whyline-event: 4c6f6fc19fcd4e9c916dbfdaa1d21e9c -->
+
+## 2026-09-29 — Fallback to first viable selected agent with usable research and announce substitution when requested final synthesizer fails
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-3
+
+**Because:** Brainstorms should complete whenever at least one selected model produced usable research, substituting viable surviving models in selection order and announcing fallback on the CLI while preventing empty synthesis generation when all models fail
+
+**Rejected:**
+
+- abort synthesis immediately when requested synthesizer fails — discards all successful research when viable models are available
+- substitute unselected or failed models — violates model selection contract and risks empty or hallucinated synthesis
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, src/whyline_relay/setup.py
+
+<!-- whyline-event: b1ad36aa06cd4ca5874c5ed2cd10d3d2 -->
+
+## 2026-09-29 — Preserve existing review sections and actual-agent attribution across failed review turns
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-3
+
+**Because:** A failed review turn must not overwrite or misattribute previous research sections in the shared brainstorm document, ensuring only successful turns update content or relabel headers
+
+**Rejected:**
+
+- overwrite results with failed turn agent — misattributes the section to an agent whose review failed
+- delete the section on review failure — discards valid pass-zero research due to a transient review turn issue
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: ebc680da7811483b85d2ae82bebeb35e -->
+
+## 2026-09-29 — Request changes: PRG-3 does not yet preserve research across all failure modes
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-3
+
+**Because:** Final synthesis candidates are derived from success attribution without verifying usable research, failed review turns can leave partial shared-document edits in place, and all-exception synthesis exhaustion re-raises before printing the required actionable message.
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
+
+<!-- whyline-event: 7809fbf8220047999f4ff84f295ef0d2 -->
+
+## 2026-09-29 — Determine final-synthesis viability from non-empty merged research, restore shared doc on review failures, and print terminal guidance before raising exhausted synthesis exceptions
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-3
+
+**Because:** Prevents agents without research from synthesizing, guarantees corrupted reviews are reverted, and ensures guidance is printed before raising final synthesis exceptions
+
+**Rejected:**
+
+- pruning actual_agents in merge_pass_zero — breaks mock setups that run pass zero without file generation
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 638ac78d946f467fa6d8eb5944182b9d -->
+
+## 2026-09-29 — Request changes: PRG-3 still admits agents without merged research and restoration can commit unrelated changes
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-3
+
+**Because:** A missing or title-only shared document falls back to every pass-zero success instead of stopping, persisted attribution does not trigger preflight substitution unless passed explicitly, and _restore_shared uses repository-wide commit_all rather than committing only the shared document.
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
+
+<!-- whyline-event: b8a2248584dc4784a3a2a3fe3d2b457d -->
+
+## 2026-09-29 — Approve PRG-3 fallback and failure restoration fixes
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PRG-3
+
+**Because:** Final synthesis now requires an existing non-empty research section, uses persisted attribution for fallback selection, and review restoration stages only the shared document so unrelated changes cannot be committed; the complete suite passes
+
+**Rejected:**
+
+- resume the stalled relay round — it had the same three correctness gaps and no commit
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
+
+<!-- whyline-event: 312490d8ce88435fa574fc15794dc0a2 -->

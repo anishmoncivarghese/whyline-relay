@@ -118,19 +118,38 @@ def _run_brainstorm_plan_source(
     actual_agents = brainstorm.run_pass_zero(
         root, models, topic, settings=settings, print_fn=print_fn, **kwargs
     )
+    if not actual_agents:
+        print_fn(
+            "No selected agent succeeded; stopping brainstorm without synthesis. "
+            "Check agent availability, authentication, or quotas and try again."
+        )
+        return (root / settings.plan).exists()
+
     brainstorm.merge_pass_zero(root, models, topic, actual_agents=actual_agents)
     for pass_number in range(1, passes + 1):
         actual_agents = brainstorm.run_review_pass(
             root, models, topic, pass_number, settings=settings,
             print_fn=print_fn, actual_agents=actual_agents, **kwargs,
         )
-    brainstorm.run_final_synthesis(
-        root, final_agent, models, topic, settings=settings,
-        print_fn=print_fn, **kwargs,
-    )
+    try:
+        record = brainstorm.run_final_synthesis(
+            root, final_agent, models, topic, settings=settings,
+            print_fn=print_fn, actual_agents=actual_agents, **kwargs,
+        )
+    except brainstorm.NothingToSynthesize as error:
+        print_fn(str(error))
+        return (root / settings.plan).exists()
+    except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+        print_fn(f"Could not generate a synthesis: {error}")
+        return (root / settings.plan).exists()
+
+    if not record or not record.get("ok"):
+        return (root / settings.plan).exists()
+
+    synthesizer = record.get("agent", final_agent)
     try:
         draft = brainstorm.generate_plan_from_synthesis(
-            root, settings, final_agent, models, topic, **kwargs
+            root, settings, synthesizer, models, topic, **kwargs
         )
     except brainstorm.NothingToSynthesize as error:
         print_fn(str(error))
@@ -147,12 +166,12 @@ def _run_brainstorm_plan_source(
 
     def revise(feedback: str) -> None:
         brainstorm.generate_plan_from_synthesis(
-            root, settings, final_agent, models, topic, feedback=feedback, **kwargs
+            root, settings, synthesizer, models, topic, feedback=feedback, **kwargs
         )
 
     result = planner.review_gate(
         root, settings, draft, topic,
-        drafted_by=f"brainstorm ({final_agent})",
+        drafted_by=f"brainstorm ({synthesizer})",
         revise_fn=revise,
         confirm=confirm,
     )
