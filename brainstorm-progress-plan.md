@@ -28,7 +28,7 @@ Global constraints:
   Add tests for Claude quota responses, Codex timeout, missing agents, and
   generic failures.
 
-- [ ] PRG-3: Select a viable final synthesizer after failures
+- [x] PRG-3: Select a viable final synthesizer after failures
   If the requested final agent fails at runtime, choose the first successful
   selected agent with usable research and announce the substitution. If no
   selected agent succeeds, stop with an actionable message and do not create
