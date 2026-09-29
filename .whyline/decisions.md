@@ -3588,3 +3588,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/chat.py
 
 <!-- whyline-event: 500238b1876141439051387409c68caa -->
+
+## 2026-09-29 — Run brainstorm progress reporting as a separate relay plan
+
+**Actor:** codex
+**Role:** planner
+**Task:** PRG-PLAN
+
+**Because:** The fix spans lifecycle events, runtime failure classification, final-agent fallback, and future-TUI compatibility; isolating it from the completed RCP plan preserves review and release boundaries
+
+**Rejected:**
+
+- edit the completed RCP plan in place — would mix already-released work with a new behavioral change
+
+**Files:** brainstorm-progress-plan.md
+
+<!-- whyline-event: bda20e3500414de88137be659397c6e5 -->
