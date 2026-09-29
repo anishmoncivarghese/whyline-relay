@@ -19,7 +19,7 @@ Global constraints:
   Add focused tests for callback order, elapsed-time formatting, and the
   human-readable start/finish lines.
 
-- [ ] PRG-2: Classify runtime failures and exclude unsuccessful research
+- [x] PRG-2: Classify runtime failures and exclude unsuccessful research
   Classify quota/rate-limit, timeout, authentication, permission, missing
   executable, and generic non-zero failures from the `run_turn` record and
   exceptions. Make pass-zero print the reason, record the failed agent in its
