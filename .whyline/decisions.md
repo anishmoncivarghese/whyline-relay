@@ -3572,3 +3572,19 @@ Append-only. Written by whyline; readable without it.
 - publish without a version bump — would make the PyPI and GitHub release indistinguishable from 0.2.21
 
 <!-- whyline-event: 1cce424939d54e5e8957d374231dd605 -->
+
+## 2026-09-29 — Identify the uncommitted changes as Antigravity-name normalization, not brainstorm progress reporting
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RCP-FOLLOWUP-REVIEW
+
+**Because:** The diff only canonicalizes the antigravity agent key versus the agy executable, updates related setup/status tests, and synchronizes uv.lock; it does not add runtime lifecycle reporting for brainstorm passes
+
+**Rejected:**
+
+- fold progress reporting into this diff — would mix an unrelated behavior change with the active naming compatibility work
+
+**Files:** src/whyline_relay/chat.py
+
+<!-- whyline-event: 500238b1876141439051387409c68caa -->

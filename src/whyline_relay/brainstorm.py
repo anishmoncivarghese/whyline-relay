@@ -12,7 +12,7 @@ from whyline_relay import agents, chat, config, gitcheck, plan
 MODEL_OPTIONS = (
     ("1", "claude", "Claude"),
     ("2", "codex", "Codex"),
-    ("3", "agy", "Antigravity"),
+    ("3", "antigravity", "Antigravity"),
     ("4", "grok", "Grok"),
 )
 MODEL_OPTIONS_BY_KEY = {key: label for _, key, label in MODEL_OPTIONS}

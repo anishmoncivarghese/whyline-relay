@@ -18,14 +18,14 @@ def test_slugify_never_returns_empty():
 
 def test_parse_model_selection_comma_separated():
     assert brainstorm.parse_model_selection("1,3") == [
-        ("claude", "Claude"), ("agy", "Antigravity"),
+        ("claude", "Claude"), ("antigravity", "Antigravity"),
     ]
 
 
 def test_parse_model_selection_five_means_all():
     assert brainstorm.parse_model_selection("5") == [
         ("claude", "Claude"), ("codex", "Codex"),
-        ("agy", "Antigravity"), ("grok", "Grok"),
+        ("antigravity", "Antigravity"), ("grok", "Grok"),
     ]
 
 

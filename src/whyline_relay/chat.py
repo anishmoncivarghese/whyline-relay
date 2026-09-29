@@ -12,7 +12,37 @@ from pathlib import Path
 from whyline_relay import adapters, agents, brainstorm, chatlog, config, failover, gitcheck, init, invocation
 from whyline_relay.adapters import grok
 
-CHAT_AGENTS = ("claude", "codex", "agy", "grok")
+CHAT_AGENTS = ("claude", "codex", "antigravity", "grok")
+# Agent names are [agents.*] keys; this maps the ones whose executable is
+# named differently. Antigravity's documented key is `antigravity` (README
+# recipe, preflight), while its executable is `agy` -- using `agy` for both
+# made /agy, /default agy and brainstorm's Antigravity option all fail in a
+# repo configured the documented way.
+AGENT_BINARIES = {"antigravity": "agy"}
+# Other spellings still accepted: what users type, what older versions
+# saved as the default agent, and the `[agents.agy]` key older error text
+# pointed people to.
+AGENT_ALIASES = {"agy": "antigravity"}
+
+
+def canonical_agent(name: str) -> str:
+    return AGENT_ALIASES.get(name, name)
+
+
+def agent_binary(name: str) -> str:
+    return AGENT_BINARIES.get(canonical_agent(name), canonical_agent(name))
+
+
+def config_key(settings: "config.Config", agent: str) -> str:
+    """The [agents.*] key actually configured for `agent`, whichever
+    spelling the config uses; the canonical name if neither is."""
+    agent = canonical_agent(agent)
+    if agent in settings.agents:
+        return agent
+    for alias, canonical in AGENT_ALIASES.items():
+        if canonical == agent and alias in settings.agents:
+            return alias
+    return agent
 
 
 class NoAgentsInstalled(RuntimeError):
@@ -52,7 +82,7 @@ def run_setup_wizard(
     input_fn = input_fn if input_fn is not None else input
     print_fn = print_fn if print_fn is not None else print
 
-    installed = [name for name in CHAT_AGENTS if which(name) is not None]
+    installed = [name for name in CHAT_AGENTS if which(agent_binary(name)) is not None]
     if not installed:
         raise NoAgentsInstalled(
             "none of claude, codex, agy, grok were found on PATH"
@@ -65,7 +95,7 @@ def run_setup_wizard(
     default_hint = installed[0]
     while True:
         answer = input_fn(f"Pick your default agent [{default_hint}]: ").strip()
-        chosen = answer or default_hint
+        chosen = canonical_agent(answer or default_hint)
         if chosen in installed:
             break
         print_fn(f"{chosen} is not installed here -- pick one of: {', '.join(installed)}")
@@ -84,7 +114,7 @@ class AgentUnavailable(RuntimeError):
 
 
 def resolve_command(settings: "config.Config", agent: str) -> list[str]:
-    command = settings.agents.get(agent)
+    command = settings.agents.get(config_key(settings, agent))
     if command is None:
         raise AgentUnavailable(
             f"{agent} is not configured for chat in this repo -- see "
@@ -134,7 +164,7 @@ def _execute_agent_call(
     logic -- run_turn decides, after seeing the result, whether this was
     the whole story or whether a backup needs a turn too."""
     command = resolve_command(settings, agent)
-    adapter = config.adapter_for(settings, agent)
+    adapter = config.adapter_for(settings, config_key(settings, agent))
     if _ensure_permission_files(root, agent):
         # Committed on its own, before the turn -- so the turn's own
         # diff-stat/files_changed reflects only what the agent did, not
@@ -270,8 +300,8 @@ SLASH_COMMANDS = (
 def _agent_status_lines(settings: "config.Config", which) -> list[str]:
     lines = []
     for name in CHAT_AGENTS:
-        configured = name in settings.agents
-        found = which(name) is not None
+        configured = config_key(settings, name) in settings.agents
+        found = which(agent_binary(name)) is not None
         if configured and found:
             state = "installed, configured"
         elif found:
@@ -299,6 +329,8 @@ def repl(
     which = which if which is not None else shutil.which
 
     default_agent = load_default_agent(root)
+    if default_agent is not None:
+        default_agent = canonical_agent(default_agent)  # e.g. "agy" saved by an older relay
     if default_agent is None:
         wizard_input = input_fn
         if setup_answers is not None:
@@ -317,7 +349,7 @@ def repl(
         if line == "/exit":
             return
         if line.startswith("/") and line.split()[0] not in (
-            *(f"/{a}" for a in CHAT_AGENTS),
+            *(f"/{a}" for a in (*CHAT_AGENTS, *AGENT_ALIASES)),
             *SLASH_COMMANDS,
         ):
             print_fn(
@@ -388,9 +420,10 @@ def repl(
             continue
         if line.startswith("/default"):
             parts = line.split(maxsplit=1)
-            if len(parts) == 2 and parts[1].strip() in CHAT_AGENTS:
-                save_default_agent(root, parts[1].strip())
-                default_agent = parts[1].strip()
+            chosen = canonical_agent(parts[1].strip()) if len(parts) == 2 else ""
+            if chosen in CHAT_AGENTS:
+                save_default_agent(root, chosen)
+                default_agent = chosen
                 print_fn(f"Default agent is now {default_agent}.")
             else:
                 print_fn(f"Usage: /default <{'|'.join(CHAT_AGENTS)}>")
@@ -399,8 +432,8 @@ def repl(
         agent = default_agent
         prompt = line
         first_word = line.split(maxsplit=1)[0]
-        if first_word in (f"/{a}" for a in CHAT_AGENTS):
-            agent = first_word[1:]
+        if first_word in (f"/{a}" for a in (*CHAT_AGENTS, *AGENT_ALIASES)):
+            agent = canonical_agent(first_word[1:])
             rest = line.split(maxsplit=1)
             prompt = rest[1] if len(rest) == 2 else ""
 
