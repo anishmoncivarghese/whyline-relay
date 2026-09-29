@@ -125,7 +125,8 @@ def _run_brainstorm_plan_source(
             print_fn=print_fn, actual_agents=actual_agents, **kwargs,
         )
     brainstorm.run_final_synthesis(
-        root, final_agent, models, topic, settings=settings, **kwargs
+        root, final_agent, models, topic, settings=settings,
+        print_fn=print_fn, **kwargs,
     )
     try:
         draft = brainstorm.generate_plan_from_synthesis(

@@ -3604,3 +3604,31 @@ Append-only. Written by whyline; readable without it.
 **Files:** brainstorm-progress-plan.md
 
 <!-- whyline-event: bda20e3500414de88137be659397c6e5 -->
+
+## 2026-09-29 — Add ProgressEvent contract and lifecycle callbacks to brainstorm passes while preserving agy model label mapping
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-1
+
+**Because:** Brainstorm passes need structured progress callbacks and CLI progress lines without breaking existing agent output capture, log isolation, or agy backward compatibility
+
+**Rejected:**
+
+- print running state directly to CLI — would spam standard console output when intended for future interactive TUI
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: bb605a6cc32e4084aaaa772ef0a70d3e -->
+
+## 2026-09-29 — Approve structured brainstorm lifecycle reporting
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-1
+
+**Because:** Each brainstorm turn now emits ordered structured states and matching start/terminal CLI lines across pass-zero, review, and synthesis; focused coverage verifies timing, serialization, and log isolation, and the full suite passes
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 23fe4df95b02486fb517dbccea2c74b3 -->

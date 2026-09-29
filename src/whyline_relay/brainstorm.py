@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from whyline_relay import agents, chat, config, gitcheck, plan
@@ -16,6 +19,157 @@ MODEL_OPTIONS = (
     ("4", "grok", "Grok"),
 )
 MODEL_OPTIONS_BY_KEY = {key: label for _, key, label in MODEL_OPTIONS}
+MODEL_OPTIONS_BY_KEY["agy"] = "Antigravity"
+
+# Lifecycle of one agent turn. `running` is the in-progress state a future
+# TUI renders while the turn blocks; the CLI prints only the start line and
+# the terminal line.
+PROGRESS_STATUSES = ("starting", "running", "succeeded", "failed", "skipped")
+PHASE_PASS_ZERO = "pass-zero"
+PHASE_REVIEW = "review"
+PHASE_SYNTHESIS = "synthesis"
+# A non-ok chat record. Classifying why it failed belongs to a later task;
+# this only names the outcome so the event stays stable.
+TURN_FAILURE_REASON = "turn reported a failure"
+
+
+@dataclass(frozen=True)
+class ProgressEvent:
+    """One structured update for a brainstorm agent turn.
+
+    Every field is always present (`pass_number` and `reason` are null when
+    they do not apply) so a later TUI can serialize the event with
+    dataclasses.asdict and rely on the keys.
+    """
+
+    status: str
+    agent: str
+    label: str
+    phase: str
+    ordinal: int
+    total: int
+    elapsed_seconds: float
+    pass_number: int | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in PROGRESS_STATUSES:
+            raise ValueError(f"unknown brainstorm progress status {self.status!r}")
+
+
+def format_progress_line(event: ProgressEvent) -> str:
+    """Human line for a start or terminal status.
+
+    Includes the 1-based ordinal within this phase, the model label, and
+    the compact elapsed time. `running` is not printed.
+    """
+    elapsed = agents.format_duration(event.elapsed_seconds)
+    line = (
+        f"[{event.ordinal}/{event.total}] {event.label} "
+        f"{event.status} {_progress_scope(event)} ({elapsed})"
+    )
+    if event.reason:
+        return f"{line}: {event.reason}"
+    return line
+
+
+def _progress_scope(event: ProgressEvent) -> str:
+    if event.phase == PHASE_REVIEW:
+        number = event.pass_number if event.pass_number is not None else "?"
+        return f"review pass {number}"
+    if event.phase == PHASE_SYNTHESIS:
+        return "final synthesis"
+    if event.phase == PHASE_PASS_ZERO:
+        return "pass-zero"
+    return event.phase
+
+
+class _TurnWatch:
+    """Emits starting, running, then one terminal status for a single turn."""
+
+    def __init__(
+        self,
+        *,
+        print_fn,
+        progress_fn: Callable[[ProgressEvent], None] | None,
+        agent: str,
+        label: str,
+        phase: str,
+        ordinal: int,
+        total: int,
+        pass_number: int | None,
+    ) -> None:
+        self._print_fn = print_fn
+        self._progress_fn = progress_fn
+        self._agent = agent
+        self._label = label
+        self._phase = phase
+        self._ordinal = ordinal
+        self._total = total
+        self._pass_number = pass_number
+        self._started = time.monotonic()
+
+    def emit(self, status: str, reason: str | None = None) -> None:
+        elapsed = (
+            0.0
+            if status == "starting"
+            else max(0.0, time.monotonic() - self._started)
+        )
+        event = ProgressEvent(
+            status=status,
+            agent=self._agent,
+            label=self._label,
+            phase=self._phase,
+            ordinal=self._ordinal,
+            total=self._total,
+            elapsed_seconds=elapsed,
+            pass_number=self._pass_number,
+            reason=reason,
+        )
+        if status != "running":
+            self._print_fn(format_progress_line(event))
+        if self._progress_fn is not None:
+            self._progress_fn(event)
+
+
+def _begin_turn(
+    *,
+    print_fn,
+    progress_fn: Callable[[ProgressEvent], None] | None,
+    agent: str,
+    label: str,
+    phase: str,
+    ordinal: int,
+    total: int,
+    pass_number: int | None = None,
+) -> _TurnWatch:
+    watch = _TurnWatch(
+        print_fn=print_fn,
+        progress_fn=progress_fn,
+        agent=agent,
+        label=label,
+        phase=phase,
+        ordinal=ordinal,
+        total=total,
+        pass_number=pass_number,
+    )
+    watch.emit("starting")
+    watch.emit("running")
+    return watch
+
+
+def _emit_outcome(watch: _TurnWatch, record: dict) -> None:
+    if record["ok"]:
+        watch.emit("succeeded")
+        return
+    watch.emit("failed", reason=TURN_FAILURE_REASON)
+
+
+def _model_label(models: list[tuple[str, str]], agent_key: str) -> str:
+    for key, label in models:
+        if key == agent_key:
+            return label
+    return MODEL_OPTIONS_BY_KEY.get(agent_key, agent_key)
 
 
 
@@ -184,13 +338,20 @@ def run_pass_zero(
     run_fn=None,
     runner=None,
     print_fn=None,
+    progress_fn: Callable[[ProgressEvent], None] | None = None,
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run is skipped (spec B7) -- it simply leaves no temp file,
-    which merge_pass_zero already treats as absent, not an error."""
+    which merge_pass_zero already treats as absent, not an error.
+
+    `progress_fn`, when passed, receives a ProgressEvent for starting,
+    running, and the terminal status of each selected model. Who is merged
+    does not change.
+    """
     print_fn = print_fn if print_fn is not None else print
     actual_agents: dict[str, str] = {}
-    for agent_key, label in models:
+    total = len(models)
+    for ordinal, (agent_key, label) in enumerate(models, start=1):
         exclude = frozenset(key for key, _ in models if key != agent_key)
         prompt = (
             f'Research "{topic}" independently. Write your findings to '
@@ -201,6 +362,15 @@ def run_pass_zero(
         kwargs = {"run_fn": run_fn} if run_fn is not None else {}
         if runner is not None:
             kwargs["runner"] = runner
+        watch = _begin_turn(
+            print_fn=print_fn,
+            progress_fn=progress_fn,
+            agent=agent_key,
+            label=label,
+            phase=PHASE_PASS_ZERO,
+            ordinal=ordinal,
+            total=total,
+        )
         try:
             record = chat.run_turn(
                 root,
@@ -213,10 +383,13 @@ def run_pass_zero(
                 exclude=exclude,
                 **kwargs,
             )
-            actual_agents[agent_key] = record["agent"]
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+            watch.emit("skipped", reason=str(error))
             print_fn(f"{label} could not research this pass: {error}")
             actual_agents[agent_key] = agent_key
+            continue
+        _emit_outcome(watch, record)
+        actual_agents[agent_key] = record["agent"]
 
     _save_actual_agents(root, actual_agents, topic)
     return actual_agents
@@ -267,10 +440,15 @@ def run_review_pass(
     runner=None,
     print_fn=None,
     actual_agents: dict[str, str] | None = None,
+    progress_fn: Callable[[ProgressEvent], None] | None = None,
 ) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
-    keeps whatever it held from the last successful pass."""
+    keeps whatever it held from the last successful pass.
+
+    `progress_fn`, when passed, receives one lifecycle per selected model.
+    A model that cannot run is still skipped; its section is left alone.
+    """
     print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
     model_labels = dict(MODEL_OPTIONS_BY_KEY)
@@ -279,7 +457,8 @@ def run_review_pass(
     else:
         actual_map = dict(actual_agents)
     results: dict[str, str] = dict(actual_map)
-    for agent_key, label in models:
+    total = len(models)
+    for ordinal, (agent_key, label) in enumerate(models, start=1):
         exclude = frozenset(key for key, _ in models if key != agent_key)
         current_actual = actual_map.get(agent_key, agent_key)
         current_label = model_labels.get(current_actual, label)
@@ -295,6 +474,16 @@ def run_review_pass(
         kwargs = {"run_fn": run_fn} if run_fn is not None else {}
         if runner is not None:
             kwargs["runner"] = runner
+        watch = _begin_turn(
+            print_fn=print_fn,
+            progress_fn=progress_fn,
+            agent=agent_key,
+            label=label,
+            phase=PHASE_REVIEW,
+            ordinal=ordinal,
+            total=total,
+            pass_number=pass_number,
+        )
         try:
             record = chat.run_turn(
                 root,
@@ -308,31 +497,33 @@ def run_review_pass(
                 exclude=exclude,
                 **kwargs,
             )
-            actual_key = record["agent"]
-            results[agent_key] = actual_key
-            new_label = model_labels.get(actual_key, label)
-            if new_label != current_label and shared.exists():
-                content = shared.read_text(encoding="utf-8")
-                new_content, count = re.subn(
-                    rf"^##\s+{re.escape(current_label)}\s*$",
-                    f"## {new_label}",
-                    content,
-                    count=1,
-                    flags=re.MULTILINE,
-                )
-                if count == 0 and f"## {current_label}" in content:
-                    new_content = content.replace(f"## {current_label}", f"## {new_label}", 1)
-                    count = 1
-                if count > 0:
-                    shared.write_text(new_content, encoding="utf-8")
-                    gitcheck.commit_all(
-                        root, f'brainstorm: relabel section to {new_label} on "{topic}"'
-                    )
-            actual_map[agent_key] = actual_key
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+            watch.emit("skipped", reason=str(error))
             print_fn(f"{label} could not review this pass: {error}")
             results[agent_key] = current_actual
             continue
+        _emit_outcome(watch, record)
+        actual_key = record["agent"]
+        results[agent_key] = actual_key
+        new_label = model_labels.get(actual_key, label)
+        if new_label != current_label and shared.exists():
+            content = shared.read_text(encoding="utf-8")
+            new_content, count = re.subn(
+                rf"^##\s+{re.escape(current_label)}\s*$",
+                f"## {new_label}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if count == 0 and f"## {current_label}" in content:
+                new_content = content.replace(f"## {current_label}", f"## {new_label}", 1)
+                count = 1
+            if count > 0:
+                shared.write_text(new_content, encoding="utf-8")
+                gitcheck.commit_all(
+                    root, f'brainstorm: relabel section to {new_label} on "{topic}"'
+                )
+        actual_map[agent_key] = actual_key
         if not record["ok"]:
             print_fn(f"⚠ {label}'s review pass {pass_number} reported a failure.")
     _save_actual_agents(root, results, topic)
@@ -348,7 +539,14 @@ def run_final_synthesis(
     settings: "config.Config",
     run_fn=None,
     runner=None,
+    print_fn=None,
+    progress_fn: Callable[[ProgressEvent], None] | None = None,
 ) -> dict:
+    """One model writes the final synthesis. Availability failures still
+    propagate, after a skipped progress event, so callers see the same
+    exception they did before progress reporting existed.
+    """
+    print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
     prompt = (
         f'All review passes are complete for this brainstorm on "{topic}". '
@@ -361,15 +559,30 @@ def run_final_synthesis(
     if runner is not None:
         kwargs["runner"] = runner
     exclude = frozenset(key for key, _ in models if key != final_agent)
-    return chat.run_turn(
-        root,
+    watch = _begin_turn(
+        print_fn=print_fn,
+        progress_fn=progress_fn,
         agent=final_agent,
-        prompt=prompt,
-        settings=settings,
-        commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
-        exclude=exclude,
-        **kwargs,
+        label=_model_label(models, final_agent),
+        phase=PHASE_SYNTHESIS,
+        ordinal=1,
+        total=1,
     )
+    try:
+        record = chat.run_turn(
+            root,
+            agent=final_agent,
+            prompt=prompt,
+            settings=settings,
+            commit_message=f'brainstorm: {final_agent} final synthesis on "{topic}"',
+            exclude=exclude,
+            **kwargs,
+        )
+    except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
+        watch.emit("skipped", reason=str(error))
+        raise
+    _emit_outcome(watch, record)
+    return record
 
 
 PLAN_GENERATION_PROMPT = (

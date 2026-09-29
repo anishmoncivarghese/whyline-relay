@@ -414,7 +414,7 @@ def repl(
                 )
             record = brainstorm.run_final_synthesis(
                 root, setup["final_agent"], setup["models"], setup["topic"],
-                settings=settings, run_fn=run_fn,
+                settings=settings, run_fn=run_fn, print_fn=print_fn,
             )
             print_fn(f"[{record['agent']}] {record['response']}")
             continue
