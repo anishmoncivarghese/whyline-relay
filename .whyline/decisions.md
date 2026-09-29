@@ -3833,3 +3833,19 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, tests/test_brainstorm_progress.py, tests/test_chat_repl.py
 
 <!-- whyline-event: bb0156fcff9045fd9aeaea1e21322fa4 -->
+
+## 2026-09-29 — Prepare 0.2.23 release for brainstorm progress visibility
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PRG-RELEASE
+
+**Because:** The completed PRG feature is tested and the package metadata, lockfile, module version, and release notes must agree before publishing
+
+**Rejected:**
+
+- publish 0.2.22 again — it would omit the completed feature and violate the version consistency test
+
+**Files:** pyproject.toml, uv.lock, src/whyline_relay/__init__.py, docs/releases/v0.2.23.md
+
+<!-- whyline-event: 8d0d3123e220493b8884c975f30b9220 -->
