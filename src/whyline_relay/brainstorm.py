@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from whyline_relay import agents, chat, config, gitcheck, plan
 
@@ -28,9 +30,185 @@ PROGRESS_STATUSES = ("starting", "running", "succeeded", "failed", "skipped")
 PHASE_PASS_ZERO = "pass-zero"
 PHASE_REVIEW = "review"
 PHASE_SYNTHESIS = "synthesis"
-# A non-ok chat record. Classifying why it failed belongs to a later task;
-# this only names the outcome so the event stays stable.
+@dataclass(frozen=True)
+class AgentStatus:
+    """Explicit status representation for an agent in a brainstorm phase.
+
+    Stores the lifecycle status ('succeeded', 'failed', 'skipped') and classified
+    reason ('quota/rate-limit', 'timeout', etc., or None on success) separately.
+    """
+
+    status: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in PROGRESS_STATUSES:
+            raise ValueError(f"unknown brainstorm progress status {self.status!r}")
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "status":
+            return self.status
+        if key == "reason":
+            return self.reason
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "status":
+            return self.status
+        if key == "reason":
+            return self.reason
+        return default
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"status": self.status, "reason": self.reason}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentStatus":
+        return cls(status=data["status"], reason=data.get("reason"))
+
+
+TurnStatus = AgentStatus
+
+FAILURE_RATE_LIMIT = "quota/rate-limit"
+FAILURE_TIMEOUT = "timeout"
+FAILURE_AUTH = "authentication"
+FAILURE_PERMISSION = "permission"
+FAILURE_MISSING = "missing executable"
+FAILURE_GENERIC = "generic non-zero failure"
+
+FAILURE_CATEGORIES = (
+    FAILURE_RATE_LIMIT,
+    FAILURE_TIMEOUT,
+    FAILURE_AUTH,
+    FAILURE_PERMISSION,
+    FAILURE_MISSING,
+    FAILURE_GENERIC,
+)
+
 TURN_FAILURE_REASON = "turn reported a failure"
+
+
+def classify_failure(
+    record: dict | None = None,
+    error: BaseException | None = None,
+) -> str:
+    """Classify runtime failures from a run_turn record or an exception into
+    one of the canonical categories:
+    - "quota/rate-limit"
+    - "timeout"
+    - "authentication"
+    - "permission"
+    - "missing executable"
+    - "generic non-zero failure"
+    """
+    if error is not None:
+        if isinstance(error, (agents.AgentTimeout, subprocess.TimeoutExpired, TimeoutError)):
+            return FAILURE_TIMEOUT
+        if isinstance(error, (agents.AgentMissing, chat.AgentUnavailable, FileNotFoundError)):
+            return FAILURE_MISSING
+        if isinstance(error, PermissionError):
+            return FAILURE_PERMISSION
+        err_msg = str(error).lower()
+        if any(marker in err_msg for marker in agents.RATE_LIMIT_MARKERS) or "quota" in err_msg or "429" in err_msg:
+            return FAILURE_RATE_LIMIT
+        if any(m in err_msg for m in ("timed out", "timeout", "terminated")):
+            return FAILURE_TIMEOUT
+        if any(m in err_msg for m in ("not installed", "not on path", "command not found", "no such file")):
+            return FAILURE_MISSING
+        if any(m in err_msg for m in ("permission denied", "not permitted", "forbidden", "permission policy")):
+            return FAILURE_PERMISSION
+        if any(m in err_msg for m in ("not logged in", "authentication", "unauthorized", "login")):
+            return FAILURE_AUTH
+        return FAILURE_GENERIC
+
+    if record is not None and not record.get("ok", True):
+        if record.get("rate_limited"):
+            return FAILURE_RATE_LIMIT
+
+        notice = (record.get("failover_notice") or "").lower()
+        if "hit a usage or rate limit" in notice or "rate limit" in notice or "quota" in notice:
+            return FAILURE_RATE_LIMIT
+        if "is no longer logged in" in notice or "logged in" in notice or "auth" in notice:
+            return FAILURE_AUTH
+
+        response = str(record.get("response") or "")
+        raw = str(record.get("raw") or "")
+        text = f"{response}\n{raw}".lower()
+
+        if agents.rate_limited(text) or any(
+            m in text
+            for m in (
+                "quota",
+                "429",
+                "too many requests",
+                "resource_exhausted",
+                "credit balance",
+                "usage limit",
+                "rate limit",
+            )
+        ):
+            return FAILURE_RATE_LIMIT
+
+        if any(
+            m in text
+            for m in (
+                "timed out",
+                "timeout",
+                "exceeded",
+                "and was terminated",
+            )
+        ):
+            return FAILURE_TIMEOUT
+
+        if any(
+            m in text
+            for m in (
+                "not logged in",
+                "is no longer logged in",
+                "login required",
+                "please log in",
+                "please sign in",
+                "sign-in required",
+                "authentication",
+                "unauthorized",
+                "invalid api key",
+                "invalid_api_key",
+                "credentials",
+            )
+        ):
+            return FAILURE_AUTH
+
+        if any(
+            m in text
+            for m in (
+                "permission denied",
+                "denied permission",
+                "permission policy",
+                "permission_denials",
+                "forbidden",
+                "access denied",
+                "stopreason\": \"cancelled\"",
+                "operation not permitted",
+            )
+        ):
+            return FAILURE_PERMISSION
+
+        if any(
+            m in text
+            for m in (
+                "is not installed",
+                "not installed or not on path",
+                "command not found",
+                "no such file or directory",
+                "not configured for chat",
+                "is not configured",
+            )
+        ):
+            return FAILURE_MISSING
+
+        return FAILURE_GENERIC
+
+    return FAILURE_GENERIC
 
 
 @dataclass(frozen=True)
@@ -162,7 +340,8 @@ def _emit_outcome(watch: _TurnWatch, record: dict) -> None:
     if record["ok"]:
         watch.emit("succeeded")
         return
-    watch.emit("failed", reason=TURN_FAILURE_REASON)
+    reason = classify_failure(record=record)
+    watch.emit("failed", reason=reason)
 
 
 def _model_label(models: list[tuple[str, str]], agent_key: str) -> str:
@@ -329,6 +508,54 @@ def _save_actual_agents(root: Path, mapping: dict[str, str], topic: str) -> None
     path.write_text(json.dumps(mapping), encoding="utf-8")
 
 
+def _status_path(root: Path, topic: str) -> Path:
+    return config.relay_dir(root) / "brainstorm-tmp" / f".status-{slugify(topic)}.json"
+
+
+def _load_status_map(root: Path, topic: str) -> dict[str, AgentStatus]:
+    path = _status_path(root, topic)
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            result = {}
+            for agent, val in raw.items():
+                if isinstance(val, dict):
+                    result[agent] = AgentStatus(
+                        status=val.get("status", "failed"),
+                        reason=val.get("reason"),
+                    )
+                elif isinstance(val, str):
+                    result[agent] = AgentStatus(
+                        status=val if val in PROGRESS_STATUSES else "failed",
+                        reason=None if val in PROGRESS_STATUSES else val,
+                    )
+            return result
+        except Exception:
+            pass
+    return {}
+
+
+def _save_status_map(root: Path, mapping: dict[str, Any], topic: str) -> None:
+    path = _status_path(root, topic)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = {}
+    for agent, val in mapping.items():
+        if isinstance(val, AgentStatus):
+            serialized[agent] = val.to_dict()
+        elif isinstance(val, dict):
+            serialized[agent] = {"status": val.get("status"), "reason": val.get("reason")}
+        elif hasattr(val, "status") and hasattr(val, "reason"):
+            serialized[agent] = {"status": getattr(val, "status"), "reason": getattr(val, "reason")}
+        else:
+            serialized[agent] = {"status": str(val), "reason": None}
+    path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+
+
+load_status_map = _load_status_map
+save_status_map = _save_status_map
+status_path = _status_path
+
+
 def run_pass_zero(
     root: Path,
     models: list[tuple[str, str]],
@@ -339,17 +566,19 @@ def run_pass_zero(
     runner=None,
     print_fn=None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
+    status_map: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
-    that can't run is skipped (spec B7) -- it simply leaves no temp file,
-    which merge_pass_zero already treats as absent, not an error.
+    that can't run or fails at runtime is recorded in pass-zero's status map
+    and omitted from the returned successful-research map.
 
     `progress_fn`, when passed, receives a ProgressEvent for starting,
-    running, and the terminal status of each selected model. Who is merged
-    does not change.
+    running, and the terminal status of each selected model.
     """
     print_fn = print_fn if print_fn is not None else print
     actual_agents: dict[str, str] = {}
+    if status_map is None:
+        status_map = {}
     total = len(models)
     for ordinal, (agent_key, label) in enumerate(models, start=1):
         exclude = frozenset(key for key, _ in models if key != agent_key)
@@ -383,15 +612,38 @@ def run_pass_zero(
                 exclude=exclude,
                 **kwargs,
             )
-        except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
-            watch.emit("skipped", reason=str(error))
-            print_fn(f"{label} could not research this pass: {error}")
-            actual_agents[agent_key] = agent_key
+        except Exception as error:
+            category = classify_failure(error=error)
+            detail = str(error).strip()
+            status = (
+                "skipped"
+                if isinstance(error, (agents.AgentMissing, chat.AgentUnavailable))
+                else "failed"
+            )
+            watch.emit(status, reason=category)
+            msg = (
+                f"{label} could not research this pass: {category}: {detail}"
+                if detail and detail != category
+                else f"{label} could not research this pass: {category}"
+            )
+            print_fn(msg)
+            status_map[agent_key] = AgentStatus(status=status, reason=category)
             continue
+
+        if not record["ok"]:
+            category = classify_failure(record=record)
+            watch.emit("failed", reason=category)
+            print_fn(f"{label} could not research this pass: {category}")
+            status_map[agent_key] = AgentStatus(status="failed", reason=category)
+            continue
+
         _emit_outcome(watch, record)
-        actual_agents[agent_key] = record["agent"]
+        actual_key = record["agent"]
+        actual_agents[agent_key] = actual_key
+        status_map[agent_key] = AgentStatus(status="succeeded", reason=None)
 
     _save_actual_agents(root, actual_agents, topic)
+    _save_status_map(root, status_map, topic)
     return actual_agents
 
 
@@ -407,16 +659,21 @@ def merge_pass_zero(
     error (spec: "an empty/missing pass-0 temp file is skipped")."""
     model_labels = dict(MODEL_OPTIONS_BY_KEY)
     if actual_agents is None:
-        actual_agents = _load_actual_agents(root, topic)
+        if _actual_agents_path(root, topic).exists():
+            actual_agents = _load_actual_agents(root, topic)
+        else:
+            actual_agents = None
     else:
         _save_actual_agents(root, actual_agents, topic)
 
     sections = []
     used_paths = []
     for agent_key, label in models:
+        if actual_agents is not None and agent_key not in actual_agents:
+            continue
         path = temp_path(root, agent_key)
         if path.exists() and path.read_text(encoding="utf-8").strip():
-            actual = actual_agents.get(agent_key, agent_key)
+            actual = actual_agents.get(agent_key, agent_key) if actual_agents else agent_key
             actual_label = model_labels.get(actual, label)
             sections.append(f"## {actual_label}\n\n{path.read_text(encoding='utf-8').strip()}\n")
             used_paths.append(path)
@@ -426,6 +683,10 @@ def merge_pass_zero(
     target.write_text(body, encoding="utf-8")
     for path in used_paths:
         path.unlink()
+    for agent_key, _ in models:
+        p = temp_path(root, agent_key)
+        if p.exists():
+            p.unlink(missing_ok=True)
     gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
 
 
@@ -453,12 +714,23 @@ def run_review_pass(
     shared = shared_path(root, topic)
     model_labels = dict(MODEL_OPTIONS_BY_KEY)
     if actual_agents is None:
-        actual_map = _load_actual_agents(root, topic)
+        if _actual_agents_path(root, topic).exists():
+            actual_map = _load_actual_agents(root, topic)
+        else:
+            actual_map = None
     else:
         actual_map = dict(actual_agents)
-    results: dict[str, str] = dict(actual_map)
-    total = len(models)
-    for ordinal, (agent_key, label) in enumerate(models, start=1):
+
+    if actual_map is not None:
+        active_models = [m for m in models if m[0] in actual_map]
+        results: dict[str, str] = dict(actual_map)
+    else:
+        active_models = list(models)
+        actual_map = {agent_key: agent_key for agent_key, _ in models}
+        results = dict(actual_map)
+
+    total = len(active_models)
+    for ordinal, (agent_key, label) in enumerate(active_models, start=1):
         exclude = frozenset(key for key, _ in models if key != agent_key)
         current_actual = actual_map.get(agent_key, agent_key)
         current_label = model_labels.get(current_actual, label)

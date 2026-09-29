@@ -3632,3 +3632,98 @@ Append-only. Written by whyline; readable without it.
 **Files:** src/whyline_relay/brainstorm.py
 
 <!-- whyline-event: 23fe4df95b02486fb517dbccea2c74b3 -->
+
+## 2026-09-29 — Classify brainstorm turn failures into structured categories and exclude unsuccessful models from pass-zero research
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-2
+
+**Because:** Brainstorming must accurately diagnose quota, timeout, auth, permission, and missing agent failures, report reasons on the CLI, and omit failed agents from downstream merge and review while preserving backup chain failovers
+
+**Rejected:**
+
+- inspect only exit codes — non-zero exit codes alone do not distinguish quota or auth from crashes
+- keep failed models in the successful-research map — would contaminate downstream merge and review passes with empty or corrupted sections
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 9d7b68ab13304905ba0c5231f8808512 -->
+
+## 2026-09-29 — Request explicit brainstorm failure status and reason representation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-2
+
+**Because:** PRG-2 uses custom string equality to make one value compare equal to contradictory statuses and categories, while status-map persistence loses skipped status; this makes the status contract unreliable despite the passing suite
+
+**Rejected:**
+
+- approve the passing tests — permissive equality assertions conceal the broken round-trip and inconsistent timeout lifecycle
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: cdc72ddd0ccf43e6aa75b55ca12f11c2 -->
+
+## 2026-09-29 — Represent brainstorm turn status as an explicit AgentStatus dataclass storing status and reason separately with lossless JSON round-tripping
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-2
+
+**Because:** Separating lifecycle status from classified reason eliminates ambiguous string equality aliasing, preserves skipped status on persistence, and treats runtime timeouts consistently as failures
+
+**Rejected:**
+
+- subclass str with custom equality — allows contradictory comparisons between categories and lifecycle states while losing status on persistence
+- treat runtime timeout as skipped — timeouts during turn execution are active runtime failures, unlike missing or unconfigured executables which remain skipped
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 01563a6ee3b24707a41f13f240837dff -->
+
+## 2026-09-29 — Request exclusion of unsuccessful pass-zero agents from later review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-2
+
+**Because:** run_review_pass iterates every selected model even when actual_agents omits a failed pass-zero slot, so the failed agent is invoked and re-added despite PRG-2 requiring the successful-research map to govern later review
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: aa11ec3943e347c2a8ec24045aed7a11 -->
+
+## 2026-09-29 — Filter review passes to active models present in actual_agents map
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** PRG-2
+
+**Because:** reviewers should only evaluate sections produced by successful pass-zero research or backup substitutions, skipping agents that failed pass-zero completely without re-invoking or re-adding them
+
+**Rejected:**
+
+- looping over all configured models — re-invoked failed pass-zero models during review and re-added them to the active map
+- pruning failures inside turn loop — would still emit progress start events and increment ordinals for non-participating models
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: b48560c08e3f40ab86925c7296145fd4 -->
+
+## 2026-09-29 — Approve classified pass-zero failures and survivor-only review flow
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** PRG-2
+
+**Because:** runtime failure categories are represented explicitly, unsuccessful pass-zero slots are excluded from merge and every later review pass, backup substitutions remain mapped, progress totals reflect only surviving reviewers, and the full test suite passes
+
+**Rejected:**
+
+- request further changes — round-3 coverage proves failed slots receive neither review calls nor review lifecycle events and no correctness defect remains
+
+**Files:** src/whyline_relay/brainstorm.py, tests/test_brainstorm_progress.py
+
+<!-- whyline-event: 4c6f6fc19fcd4e9c916dbfdaa1d21e9c -->
