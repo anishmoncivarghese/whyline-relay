@@ -10,7 +10,7 @@ Global constraints:
 - Do not run real vendor agents in tests; inject runners and deterministic fake results.
 - Every existing test must pass after every task.
 
-- [ ] PRG-1: Add structured brainstorm progress events and lifecycle reporting
+- [x] PRG-1: Add structured brainstorm progress events and lifecycle reporting
   Add a small event/status contract for `starting`, `running`, `succeeded`,
   `failed`, and `skipped` agent turns. Pass an optional progress callback
   through pass-zero, review passes, and final synthesis. Print a clear CLI
