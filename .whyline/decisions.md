@@ -4072,3 +4072,33 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e07a1b7aba234870b35720ef8a783236 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:59:53.582Z"} -->
+
+## 2026-09-30 — Bump version to 0.2.26 and draft release notes for programmatic planning and setup
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** CRS-4
+
+**Because:** Prepares whyline-relay 0.2.26 release enabling headless planning and role configuration without interactive prompts
+
+**Rejected:**
+
+- reusing 0.2.25 — new public APIs in planner and setup require a new release version
+
+**Files:** pyproject.toml, src/whyline_relay/__init__.py, uv.lock, docs/releases/v0.2.26.md
+
+<!-- whyline-event: 6ae6e3d6237f431aa88be405c21215bb -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T17:05:14.997Z"} -->
+
+## 2026-09-30 — Approve whyline-relay 0.2.26 release metadata and notes
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CRS-4
+
+**Because:** The package, module, and lockfile versions agree; the release notes match the shipped CRS APIs; the full test suite passes
+
+**Files:** pyproject.toml, src/whyline_relay/__init__.py, uv.lock, docs/releases/v0.2.26.md
+
+<!-- whyline-event: 8445752085df420bb92826953fd2771e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T17:08:19.290Z"} -->
