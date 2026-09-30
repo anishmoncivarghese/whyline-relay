@@ -4004,3 +4004,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 1007529f3bc84abd8be908c9e94fdbf1 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:22:22.342Z"} -->
+
+## 2026-09-30 — Add programmatic planner draft, revise, and resume_draft APIs with stage announcer
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** CRS-2
+
+**Because:** Allows headless consumers such as consoles to drive plan drafting and revisions without terminal prompts while reporting stage progress
+
+**Rejected:**
+
+- reimplementing the pipeline loop outside _run_pipeline — duplicates handoff routing, checkpointing, and visit-cap enforcement
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner_api.py
+
+<!-- whyline-event: 2ddcac7300c3418795cd0387274f4add -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:38:43.179Z"} -->
+
+## 2026-09-30 — Approve CRS-2 programmatic drafting, revision, resume, and progress APIs
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CRS-2
+
+**Because:** The implementation matches the requested interfaces and checkpoint behavior, progress callbacks run before each agent stage, focused coverage exercises the new public behavior, and the full test suite passes
+
+**Rejected:**
+
+- request changes — no material defect or coverage gap found
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner_api.py
+
+<!-- whyline-event: a5f7f07a4a24455bbfe6aa58a2916e30 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:41:11.584Z"} -->

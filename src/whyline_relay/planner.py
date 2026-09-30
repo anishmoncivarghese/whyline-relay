@@ -160,6 +160,7 @@ def _run_pipeline(
     consult_handoff: bool = False,
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
+    on_stage=None,
 ) -> None:
     """Drive the draft<->review loop until "@complete" is checkpointed.
 
@@ -218,6 +219,8 @@ def _run_pipeline(
         _checkpoint(
             root, description, current_stage_id, round_, stage_visits, feedback
         )
+        if on_stage is not None:
+            on_stage(stage.id, agent)
         target = loop.run_agent(
             root,
             settings,
@@ -332,6 +335,109 @@ def discard(root: Path) -> str:
         return "Nothing to discard."
     state.clear_plan(root)
     return f"Discarded. The draft is still at {saved.draft_path}, if you want it."
+
+
+class NoPlanInProgress(RuntimeError):
+    """There is no checkpointed plan draft to revise or resume."""
+
+
+_STAGE_WORDS = {"draft": "drafting the plan", "review": "reviewing the draft"}
+
+
+def _announcer(print_fn):
+    if print_fn is None:
+        return None
+    return lambda stage_id, agent: print_fn(
+        f"{agent} is {_STAGE_WORDS.get(stage_id, stage_id)}"
+    )
+
+
+def pending_description(root: Path) -> str | None:
+    """What the checkpointed draft was asked to build, or None."""
+    saved = state.load_plan(root)
+    return saved.description if saved is not None else None
+
+
+def draft(
+    root: Path,
+    settings: config.Config,
+    description: str,
+    *,
+    print_fn=None,
+    runner: failover.Runner = subprocess.run,
+) -> Path:
+    """Runs the draft<->review pipeline with no terminal gate and returns the
+    draft's path. The checkpoint stays until approve(clear_checkpoint=True)
+    or discard()."""
+    if state.load_plan(root) is not None:
+        raise PlanAlreadyInProgress(
+            "a plan draft is already in progress; resume it or discard it first"
+        )
+    _run_pipeline(
+        root,
+        settings,
+        description,
+        echo=False,
+        runner=runner,
+        on_stage=_announcer(print_fn),
+    )
+    return draft_path(root)
+
+
+def revise(
+    root: Path,
+    settings: config.Config,
+    feedback: str,
+    *,
+    print_fn=None,
+    runner: failover.Runner = subprocess.run,
+) -> Path:
+    """Re-drafts with a human's requested change, then re-reviews."""
+    saved = state.load_plan(root)
+    if saved is None:
+        raise NoPlanInProgress("no plan draft is in progress")
+    _run_pipeline(
+        root,
+        settings,
+        saved.description,
+        current_stage_id="draft",
+        round_=1,
+        stage_visits={"draft": 1},
+        feedback=feedback,
+        echo=False,
+        runner=runner,
+        on_stage=_announcer(print_fn),
+    )
+    return draft_path(root)
+
+
+def resume_draft(
+    root: Path,
+    settings: config.Config,
+    *,
+    print_fn=None,
+    runner: failover.Runner = subprocess.run,
+) -> Path:
+    """Finishes a checkpointed draft (a crash, or a closed console) without
+    the terminal gate."""
+    saved = state.load_plan(root)
+    if saved is None:
+        raise NoPlanInProgress("no plan draft is in progress")
+    if saved.stage != "@complete":
+        _run_pipeline(
+            root,
+            settings,
+            saved.description,
+            current_stage_id=saved.stage,
+            round_=saved.round,
+            stage_visits=saved.stage_visits,
+            feedback=saved.feedback,
+            consult_handoff=True,
+            echo=False,
+            runner=runner,
+            on_stage=_announcer(print_fn),
+        )
+    return draft_path(root)
 
 
 def review_gate(

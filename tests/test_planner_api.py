@@ -82,3 +82,123 @@ def test_approve_can_clear_the_planner_checkpoint(repo: Path):
     draft.write_text("- [ ] T-1: x\n")
     planner.approve(repo, config.load(repo), draft, drafted_by="codex", clear_checkpoint=True)
     assert state.load_plan(repo) is None
+
+
+import sys
+from whyline_relay import loop
+
+FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
+
+
+def _settings(root: Path) -> config.Config:
+    base = config.load(root)
+    return config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={"codex": ["codex"], "claude": ["claude"]},
+        status_map=base.status_map,
+        planner=config.PlannerConfig(draft="codex", review="claude", max_visits=3),
+    )
+
+
+def _scripted(repo: Path, specs: list[str], prompts: list[str]):
+    """Each turn pops one "to_actor:status" spec; the drafting agent (codex)
+    also writes the draft file, like a real one would."""
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+    ):
+        prompts.append(prompt)
+        if agent_name == "codex":
+            planner.draft_path(repo).write_text("- [ ] T-1: build it\n")
+        result = subprocess.run(
+            [sys.executable, FAKE, specs.pop(0), str(cwd), prompt],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(result.stdout + result.stderr)
+        return result.returncode
+
+    return run
+
+
+@pytest.fixture
+def quiet_whyline(monkeypatch):
+    monkeypatch.setattr(
+        loop.whylinecmd, "sync", lambda root, task, runner=None: "PACKET"
+    )
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *a, **k: None)
+    monkeypatch.setattr(planner.whylinecmd, "claim", lambda *a, **k: None)
+
+
+def test_draft_returns_the_draft_and_reports_each_stage(
+    repo, monkeypatch, quiet_whyline
+):
+    prompts, lines = [], []
+    monkeypatch.setattr(
+        loop.agents, "run", _scripted(repo, ["claude:ready", "claude:approved"], prompts)
+    )
+    path = planner.draft(repo, _settings(repo), "a health check", print_fn=lines.append)
+    assert path == planner.draft_path(repo)
+    assert path.read_text() == "- [ ] T-1: build it\n"
+    assert lines == ["codex is drafting the plan", "claude is reviewing the draft"]
+    assert planner.pending_description(repo) == "a health check"
+
+
+def test_draft_refuses_while_another_draft_is_checkpointed(
+    repo, monkeypatch, quiet_whyline
+):
+    monkeypatch.setattr(
+        loop.agents, "run", _scripted(repo, ["claude:ready", "claude:approved"], [])
+    )
+    planner.draft(repo, _settings(repo), "first")
+    with pytest.raises(planner.PlanAlreadyInProgress):
+        planner.draft(repo, _settings(repo), "second")
+
+
+def test_revise_sends_the_feedback_to_the_drafting_agent(
+    repo, monkeypatch, quiet_whyline
+):
+    prompts = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted(
+            repo,
+            ["claude:ready", "claude:approved", "claude:ready", "claude:approved"],
+            prompts,
+        ),
+    )
+    planner.draft(repo, _settings(repo), "a health check")
+    planner.revise(repo, _settings(repo), "split T-1 into two tasks")
+    assert "split T-1 into two tasks" in prompts[2]
+
+
+def test_revise_without_a_draft_says_so(repo):
+    with pytest.raises(planner.NoPlanInProgress):
+        planner.revise(repo, _settings(repo), "anything")
+
+
+def test_resume_draft_at_complete_runs_no_agent(repo, monkeypatch, quiet_whyline):
+    monkeypatch.setattr(
+        loop.agents, "run", _scripted(repo, ["claude:ready", "claude:approved"], [])
+    )
+    planner.draft(repo, _settings(repo), "a health check")
+    monkeypatch.setattr(loop.agents, "run", lambda *a, **k: pytest.fail("ran an agent"))
+    assert planner.resume_draft(repo, _settings(repo)) == planner.draft_path(repo)
+
+
+def test_pending_description_is_none_without_a_draft(repo):
+    assert planner.pending_description(repo) is None
