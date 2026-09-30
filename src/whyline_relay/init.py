@@ -74,6 +74,32 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def ensure_permission_files(root: Path, agent: str) -> list[Path]:
+    """Generate a managed agent's permission file(s) (e.g. claude's
+    claude-settings.json) if this repo's own `init` was never run. Returns
+    the files it newly created.
+
+    claude's managed default_command references that file directly --
+    without it, the real claude CLI fails outright with "Settings file not
+    found". Chat, brainstorm and the planner all run agents before anyone
+    has run init (the console's Plan comes before Set up), so every path
+    that launches an agent calls this, and it never overwrites an existing
+    file, so a user's own customized settings are left alone.
+    """
+    if agent not in adapters.BUILTIN:
+        return []
+    stack = detect_stack(root)
+    relay = config.relay_dir(root)
+    created = []
+    for key, text in adapters.BUILTIN[agent].permission_files(stack).items():
+        path = relay / key
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            created.append(path)
+    return created
+
+
 def run(
     root: Path,
     *,

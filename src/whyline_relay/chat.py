@@ -132,33 +132,6 @@ def _build_prompt(root: Path, new_input: str) -> str:
     return f"{history}\n\n{new_input}" if history else new_input
 
 
-def _ensure_permission_files(root: Path, agent: str) -> list[Path]:
-    """Generate a managed agent's permission file(s) (e.g. claude's
-    claude-settings.json) if this repo's own `init` command was never run.
-    Returns the files it newly created.
-
-    claude's own managed default_command references that file directly --
-    without it, the real claude CLI fails outright with "Settings file not
-    found," which the init flow normally prevents by writing it up front.
-    chat must not assume init ever ran (spec D5: claude/codex work in chat
-    with zero relay config present), so it generates the same file here,
-    once, the same way init.run does -- and never overwrites an existing
-    one, so a user's own customized settings are left alone.
-    """
-    if agent not in adapters.BUILTIN:
-        return []
-    stack = init.detect_stack(root)
-    relay = config.relay_dir(root)
-    created = []
-    for key, text in adapters.BUILTIN[agent].permission_files(stack).items():
-        path = relay / key
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            created.append(path)
-    return created
-
-
 def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
@@ -170,7 +143,7 @@ def _execute_agent_call(
     the whole story or whether a backup needs a turn too."""
     command = resolve_command(settings, agent)
     adapter = config.adapter_for(settings, config_key(settings, agent))
-    generated = _ensure_permission_files(root, agent)
+    generated = init.ensure_permission_files(root, agent)
     if generated:
         # Committed on its own, before the turn -- so the turn's own
         # diff-stat/files_changed reflects only what the agent did, not

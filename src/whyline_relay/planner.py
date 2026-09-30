@@ -15,7 +15,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from whyline_relay import config, failover, gitcheck, handoff, invocation
+from whyline_relay import config, failover, gitcheck, handoff, init, invocation
 from whyline_relay import pipeline as pipeline_module
 from whyline_relay import plan, prompts, state, whylinecmd
 from whyline_relay import loop
@@ -181,6 +181,11 @@ def _run_pipeline(
     effective_agents = {name: role.agent for name, role in pipe.roles.items()}
     task = _task_for(description)
     gitcheck.ensure_relay_ignored(root)
+    # Planning runs before Set up/init, so no preflight has checked for the
+    # files claude's managed command names. Generated, never committed:
+    # planning commits only plan.md.
+    for name in effective_agents.values():
+        init.ensure_permission_files(root, config.adapter_for(settings, name).name)
     stage_visits = dict(stage_visits) if stage_visits else {current_stage_id: round_}
 
     if consult_handoff:
