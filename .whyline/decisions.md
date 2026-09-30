@@ -3880,3 +3880,7 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 20a8e1e58eb34143bc962ccf419b07f7 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T10:13:34.604Z"} -->
+
+<!-- whyline-attach: {"v":1,"note":"29ac297caadc482a8965fe2e8a8063c3","commit":"1686e387db3391d08172e179ac60999db7d81b30","ts":"2026-09-30T10:14:36.150Z"} -->
+
+<!-- whyline-attach: {"v":1,"note":"20a8e1e58eb34143bc962ccf419b07f7","commit":"1686e387db3391d08172e179ac60999db7d81b30","ts":"2026-09-30T10:14:36.218Z"} -->
