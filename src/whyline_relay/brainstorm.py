@@ -721,6 +721,7 @@ def run_pass_zero(
                 commit_message=(
                     f'brainstorm: {agent_key} independent research on "{topic}"'
                 ),
+                commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 **kwargs,
             )
@@ -806,7 +807,10 @@ def merge_pass_zero(
         p = temp_path(root, agent_key)
         if p.exists():
             p.unlink(missing_ok=True)
-    gitcheck.commit_all(root, f'brainstorm: merge independent research on "{topic}"')
+    gitcheck.commit_paths(
+        root, owned_paths(root, topic, models),
+        f'brainstorm: merge independent research on "{topic}"',
+    )
 
 
 def _restore_shared(
@@ -961,6 +965,7 @@ def run_review_pass(
                     f'brainstorm: {agent_key} review pass {pass_number} '
                     f'on "{topic}"'
                 ),
+                commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 **kwargs,
             )
@@ -1000,8 +1005,9 @@ def run_review_pass(
                 count = 1
             if count > 0:
                 shared.write_text(new_content, encoding="utf-8")
-                gitcheck.commit_all(
-                    root, f'brainstorm: relabel section to {new_label} on "{topic}"'
+                gitcheck.commit_paths(
+                    root, owned_paths(root, topic, models),
+                    f'brainstorm: relabel section to {new_label} on "{topic}"',
                 )
         actual_map[agent_key] = actual_key
     _save_actual_agents(root, results, topic)
@@ -1140,6 +1146,7 @@ def run_final_synthesis(
                 prompt=prompt,
                 settings=settings,
                 commit_message=f'brainstorm: {current_agent} final synthesis on "{topic}"',
+                commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 **kwargs,
             )
@@ -1204,6 +1211,20 @@ def plan_draft_path(root: Path) -> Path:
     return config.relay_dir(root) / "brainstorm-plan-draft.md"
 
 
+def owned_paths(root: Path, topic: str, models: Sequence[tuple[str, str]]) -> list[Path]:
+    """Every file a brainstorm on `topic` writes. Its commits include these
+    and nothing else: a brainstorm run while other work is uncommitted used to
+    sweep that work into "brainstorm: ..." commits via `git add -A`, and an
+    agent that strays outside its brief doesn't get that committed either."""
+    return [
+        *(temp_path(root, key) for key, _ in models),
+        shared_path(root, topic),
+        _actual_agents_path(root, topic),
+        _status_path(root, topic),
+        plan_draft_path(root),
+    ]
+
+
 def generate_plan_from_synthesis(
     root: Path,
     settings: "config.Config",
@@ -1254,6 +1275,7 @@ def generate_plan_from_synthesis(
                 f'brainstorm: {final_agent} drafts plan.md from synthesis '
                 f'on "{topic}"'
             ),
+            commit_paths=owned_paths(root, topic, models),
             exclude=exclude,
             **kwargs,
         )

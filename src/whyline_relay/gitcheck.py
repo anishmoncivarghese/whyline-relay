@@ -152,19 +152,30 @@ def dirty_paths(root: Path) -> list[str]:
     return [line.split(maxsplit=1)[1] for line in output.splitlines() if line.strip()]
 
 
-def commit_paths(root: Path, paths: list[Path], message: str) -> None:
+def commit_paths(root: Path, paths: list[Path], message: str) -> bool:
     """Commit only `paths`, leaving everything else in the tree alone.
 
-    Does nothing when those paths have no changes, so it is safe to repeat.
+    Returns whether a commit was made. Paths that neither exist nor are
+    tracked (a file a step was expected to write but didn't) are skipped
+    rather than failing the commit; a tracked path that was deleted is
+    committed as a deletion. Does nothing when those paths have no changes,
+    so it is safe to repeat.
     """
     try:
         relative = [str(Path(p).resolve().relative_to(root.resolve())) for p in paths]
     except ValueError as error:
         raise GitError(f"{error}: a path lies outside the repository") from error
+    relative = [
+        path for path in dict.fromkeys(relative)
+        if (root / path).exists() or tracked_paths(root, path)
+    ]
+    if not relative:
+        return False
     _git(root, "add", "--", *relative)
     if not _git(root, "diff", "--cached", "--name-only", "--", *relative):
-        return
+        return False
     _git(root, "commit", "-m", message, "--", *relative)
+    return True
 
 
 def commit_all(root: Path, message: str) -> bool:

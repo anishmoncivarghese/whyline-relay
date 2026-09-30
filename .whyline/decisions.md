@@ -3849,3 +3849,34 @@ Append-only. Written by whyline; readable without it.
 **Files:** pyproject.toml, uv.lock, src/whyline_relay/__init__.py, docs/releases/v0.2.23.md
 
 <!-- whyline-event: 8d0d3123e220493b8884c975f30b9220 -->
+
+## 2026-09-30 — Brainstorm turns commit only the brainstorm's own files (owned_paths), never git add -A
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RELAY-COMMITS
+
+**Because:** a brainstorm run with uncommitted work in whyline's repo swept that work into brainstorm-titled commits; a stray agent write must not be committed either
+
+**Rejected:**
+
+- stash the user's changes around each turn — rewrites their index and working tree, and a crash mid-turn loses the stash position
+- refuse to brainstorm on a dirty tree — blocks a read-mostly activity for no reason
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 29ac297caadc482a8965fe2e8a8063c3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T10:13:34.563Z"} -->
+
+## 2026-09-30 — The permission-file setup commit is path-limited; ordinary chat turns still commit everything
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RELAY-COMMITS
+
+**Because:** setup is not the user's work, so it must not absorb it; a chat turn's edits are the agent's work and committing them is intended
+
+**Files:** src/whyline_relay/chat.py
+
+<!-- whyline-event: 20a8e1e58eb34143bc962ccf419b07f7 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T10:13:34.604Z"} -->

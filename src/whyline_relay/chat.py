@@ -129,10 +129,10 @@ def _build_prompt(root: Path, new_input: str) -> str:
     return f"{history}\n\n{new_input}" if history else new_input
 
 
-def _ensure_permission_files(root: Path, agent: str) -> bool:
+def _ensure_permission_files(root: Path, agent: str) -> list[Path]:
     """Generate a managed agent's permission file(s) (e.g. claude's
     claude-settings.json) if this repo's own `init` command was never run.
-    Returns True if anything was newly created.
+    Returns the files it newly created.
 
     claude's own managed default_command references that file directly --
     without it, the real claude CLI fails outright with "Settings file not
@@ -143,33 +143,37 @@ def _ensure_permission_files(root: Path, agent: str) -> bool:
     one, so a user's own customized settings are left alone.
     """
     if agent not in adapters.BUILTIN:
-        return False
+        return []
     stack = init.detect_stack(root)
     relay = config.relay_dir(root)
-    created = False
+    created = []
     for key, text in adapters.BUILTIN[agent].permission_files(stack).items():
         path = relay / key
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-            created = True
+            created.append(path)
     return created
 
 
 def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
+    commit_paths: list[Path] | None = None,
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
     the whole story or whether a backup needs a turn too."""
     command = resolve_command(settings, agent)
     adapter = config.adapter_for(settings, config_key(settings, agent))
-    if _ensure_permission_files(root, agent):
+    generated = _ensure_permission_files(root, agent)
+    if generated:
         # Committed on its own, before the turn -- so the turn's own
         # diff-stat/files_changed reflects only what the agent did, not
-        # one-time setup init would normally have already done.
-        gitcheck.commit_all(root, f"chat: generate {agent}'s permission settings")
+        # one-time setup init would normally have already done. Only the
+        # generated files: anything else uncommitted in the tree is the
+        # user's, not setup's.
+        gitcheck.commit_paths(root, generated, f"chat: generate {agent}'s permission settings")
     turn_command = list(command)
     output_file: Path | None = None
     if adapter.uses_output_file:
@@ -201,7 +205,13 @@ def _execute_agent_call(
     # is_dirty first, and it's the only reliable way to see a brand-new
     # untracked file in the resulting stat (git diff on the working tree
     # never shows untracked files; the committed diff always does).
-    committed = gitcheck.commit_all(root, commit_message or f"chat: {agent} turn")
+    message = commit_message or f"chat: {agent} turn"
+    if commit_paths is not None:
+        # A caller that knows exactly what the turn is for (brainstorm) commits
+        # only that, so unrelated uncommitted work stays out of its commits.
+        committed = gitcheck.commit_paths(root, commit_paths, message)
+    else:
+        committed = gitcheck.commit_all(root, message)
     diff_stat = gitcheck.commit_stat(root) if committed else ""
     files_changed = max(len(diff_stat.splitlines()) - 1, 0) if diff_stat else 0
     return {
@@ -226,6 +236,7 @@ def run_turn(
     runner=subprocess.run,
     commit_message: str | None = None,
     exclude: frozenset[str] = frozenset(),
+    commit_paths: list[Path] | None = None,
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
@@ -235,6 +246,7 @@ def run_turn(
     attempt = _execute_agent_call(
         root, resolved, prompt, full_prompt, settings, run_fn,
         commit_message=commit_message,
+        commit_paths=commit_paths,
     )
     final_agent = resolved
     failover_notice: str | None = None
@@ -272,6 +284,7 @@ def run_turn(
         attempt = _execute_agent_call(
             root, backup, prompt, full_prompt, settings, run_fn,
             commit_message=commit_message,
+            commit_paths=commit_paths,
         )
         final_agent = backup
         current = backup
