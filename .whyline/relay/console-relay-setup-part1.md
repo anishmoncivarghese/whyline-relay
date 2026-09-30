@@ -205,7 +205,7 @@
   git commit -m "feat(planner): validate and approve a plan without prompting"
   ```
 
-- [ ] CRS-2: `planner.draft`, `planner.revise`, `planner.resume_draft` with progress
+- [x] CRS-2: `planner.draft`, `planner.revise`, `planner.resume_draft` with progress
 
   ## Global Constraints
 
