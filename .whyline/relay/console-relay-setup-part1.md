@@ -450,7 +450,7 @@
   git commit -m "feat(planner): draft, revise and resume a plan without prompting"
   ```
 
-- [ ] CRS-3: `setup.write_roles` with a scoped commit
+- [x] CRS-3: `setup.write_roles` with a scoped commit
 
   ## Global Constraints
 
