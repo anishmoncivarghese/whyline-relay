@@ -106,6 +106,9 @@ def run_setup_wizard(
     return chosen
 
 
+# Per agent turn for interactive chat. A brainstorm run passes its own
+# seconds when one was selected; omitting that value keeps this limit.
+# The non-interactive relay uses config timeout_minutes instead.
 CHAT_TIMEOUT_SECONDS = 300
 
 
@@ -160,6 +163,7 @@ def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
     commit_paths: list[Path] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
@@ -189,7 +193,9 @@ def _execute_agent_call(
         full_prompt,
         cwd=root,
         log_path=log_path,
-        timeout_seconds=CHAT_TIMEOUT_SECONDS,
+        timeout_seconds=(
+            CHAT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+        ),
         capture=True,
         echo=True,
         agent_name=agent,
@@ -237,6 +243,7 @@ def run_turn(
     commit_message: str | None = None,
     exclude: frozenset[str] = frozenset(),
     commit_paths: list[Path] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
@@ -247,6 +254,7 @@ def run_turn(
         root, resolved, prompt, full_prompt, settings, run_fn,
         commit_message=commit_message,
         commit_paths=commit_paths,
+        timeout_seconds=timeout_seconds,
     )
     final_agent = resolved
     failover_notice: str | None = None
@@ -285,6 +293,7 @@ def run_turn(
             root, backup, prompt, full_prompt, settings, run_fn,
             commit_message=commit_message,
             commit_paths=commit_paths,
+            timeout_seconds=timeout_seconds,
         )
         final_agent = backup
         current = backup

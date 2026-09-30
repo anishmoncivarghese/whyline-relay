@@ -3901,3 +3901,38 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 8eec9530e37044d6b64249900abfeeda -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:16:52.236Z"} -->
+
+## 2026-09-30 — Plumb optional per-run timeout_seconds through chat turns and brainstorm phases
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** TO-1
+
+**Because:** allows per-run brainstorm timeout overrides while preserving the 300s compatibility default when omitted
+
+**Rejected:**
+
+- mutate global CHAT_TIMEOUT_SECONDS — would cause side effects across turns and sessions
+- read timeout from config inside run_turn — brainstorm timeouts are per-session selections rather than repository configuration
+
+**Files:** src/whyline_relay/chat.py, src/whyline_relay/brainstorm.py, tests/test_brainstorm_timeout.py
+
+<!-- whyline-event: 1a3bb6bff0624fd9af6b822de205bc3f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:27:16.499Z"} -->
+
+## 2026-09-30 — Approve optional brainstorm timeout plumbing
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** TO-1
+
+**Because:** the selected seconds reach primary and backup chat attempts, pass-zero research, review passes, synthesis substitutions, and plan retries while omission preserves the 300-second compatibility default; the plain full test suite passes
+
+**Rejected:**
+
+- request broader orchestration wiring now — the setup selector is explicitly deferred to the follow-on task
+
+**Files:** src/whyline_relay/chat.py, src/whyline_relay/brainstorm.py, tests/test_brainstorm_timeout.py
+
+<!-- whyline-event: b9172eb221e04d21bf4f0a77b8d3c929 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:30:47.620Z"} -->

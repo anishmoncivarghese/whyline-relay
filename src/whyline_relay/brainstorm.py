@@ -679,6 +679,7 @@ def run_pass_zero(
     print_fn=None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     status_map: dict[str, Any] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run or fails at runtime is recorded in pass-zero's status map
@@ -686,6 +687,8 @@ def run_pass_zero(
 
     `progress_fn`, when passed, receives a ProgressEvent for starting,
     running, and the terminal status of each selected model.
+    `timeout_seconds` is the limit for every model in this pass. Omitted,
+    each turn keeps chat's current limit.
     """
     print_fn = print_fn if print_fn is not None else print
     actual_agents: dict[str, str] = {}
@@ -723,6 +726,7 @@ def run_pass_zero(
                 ),
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except Exception as error:
@@ -900,6 +904,7 @@ def run_review_pass(
     print_fn=None,
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
@@ -907,6 +912,8 @@ def run_review_pass(
 
     `progress_fn`, when passed, receives one lifecycle per selected model.
     A model that cannot run is still skipped; its section is left alone.
+    `timeout_seconds` is the limit for every model in this pass. Omitted,
+    each turn keeps chat's current limit.
     """
     print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
@@ -967,6 +974,7 @@ def run_review_pass(
                 ),
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
@@ -1043,11 +1051,16 @@ def run_final_synthesis(
     print_fn=None,
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     """One model writes the final synthesis. If the requested final agent fails
     at runtime, choose the first successful selected agent with usable research
     and announce the substitution. If no selected agent succeeds, stop with an
     actionable message and do not create an empty synthesis.
+
+    `timeout_seconds` is the limit for the synthesis turn and for any
+    substitute that runs after a failure. Omitted, the turn keeps chat's
+    current limit.
     """
     print_fn = print_fn if print_fn is not None else print
     shared = shared_path(root, topic)
@@ -1148,6 +1161,7 @@ def run_final_synthesis(
                 commit_message=f'brainstorm: {current_agent} final synthesis on "{topic}"',
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except (agents.AgentMissing, chat.AgentUnavailable) as error:
@@ -1236,6 +1250,7 @@ def generate_plan_from_synthesis(
     run_fn=None,
     runner=None,
     max_attempts: int = 2,
+    timeout_seconds: int | None = None,
 ) -> Path:
     """Prompts final_agent to turn its own synthesis into a real plan.md,
     validating with plan.parse() and retrying once on a parse error. A draft
@@ -1246,7 +1261,9 @@ def generate_plan_from_synthesis(
     agents.AgentMissing/AgentTimeout/chat.AgentUnavailable propagate
     immediately -- an availability failure is not a retry-worthy parse
     failure, and there is no "keep the previous content" fallback here
-    since nothing has been generated yet."""
+    since nothing has been generated yet.
+    `timeout_seconds` applies to every draft attempt. Omitted, each attempt
+    keeps chat's current limit."""
     shared = shared_path(root, topic)
     if not shared.exists() or not shared.read_text(encoding="utf-8").strip():
         raise NothingToSynthesize(
@@ -1277,6 +1294,7 @@ def generate_plan_from_synthesis(
             ),
             commit_paths=owned_paths(root, topic, models),
             exclude=exclude,
+            timeout_seconds=timeout_seconds,
             **kwargs,
         )
         try:
