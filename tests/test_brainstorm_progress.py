@@ -301,6 +301,7 @@ def test_repl_prints_start_and_finish_lines_for_each_phase(tmp_path: Path):
         "1",  # Claude only
         "1",  # one review pass
         "",  # final synthesis defaults to claude
+        "",  # timeout default (15m)
         "/exit",
     ])
 
@@ -963,6 +964,7 @@ def test_all_agents_failed_in_pass_zero_stops_without_empty_synthesis(
         "1,2",  # Claude, Codex
         "1",    # 1 pass
         "claude",
+        "",     # timeout default (15m)
         "/exit",
     ])
     printed: list[str] = []
@@ -1179,9 +1181,10 @@ def test_setup_brainstorm_updates_attribution_on_synthesizer_fallback(
         "brainstorm",
         "setup-attribution-topic",
         "1,2",  # Claude, Codex
-        "0",    # 0 review passes
-        "claude",  # requested final agent
-    ])
+            "0",    # 0 review passes
+            "claude",  # requested final agent
+            "",      # timeout default (15m)
+        ])
     printed: list[str] = []
     res = setup.choose_plan_source(
         tmp_path,

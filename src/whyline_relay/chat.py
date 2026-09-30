@@ -106,6 +106,9 @@ def run_setup_wizard(
     return chosen
 
 
+# Per agent turn for interactive chat. A brainstorm run passes its own
+# seconds when one was selected; omitting that value keeps this limit.
+# The non-interactive relay uses config timeout_minutes instead.
 CHAT_TIMEOUT_SECONDS = 300
 
 
@@ -160,6 +163,7 @@ def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
     commit_paths: list[Path] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
@@ -189,7 +193,9 @@ def _execute_agent_call(
         full_prompt,
         cwd=root,
         log_path=log_path,
-        timeout_seconds=CHAT_TIMEOUT_SECONDS,
+        timeout_seconds=(
+            CHAT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+        ),
         capture=True,
         echo=True,
         agent_name=agent,
@@ -237,6 +243,7 @@ def run_turn(
     commit_message: str | None = None,
     exclude: frozenset[str] = frozenset(),
     commit_paths: list[Path] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
@@ -247,6 +254,7 @@ def run_turn(
         root, resolved, prompt, full_prompt, settings, run_fn,
         commit_message=commit_message,
         commit_paths=commit_paths,
+        timeout_seconds=timeout_seconds,
     )
     final_agent = resolved
     failover_notice: str | None = None
@@ -285,6 +293,7 @@ def run_turn(
             root, backup, prompt, full_prompt, settings, run_fn,
             commit_message=commit_message,
             commit_paths=commit_paths,
+            timeout_seconds=timeout_seconds,
         )
         final_agent = backup
         current = backup
@@ -412,10 +421,16 @@ def repl(
             )
             if setup is None:
                 continue
+            timeout_seconds = setup.get("timeout_seconds")
+            if timeout_seconds is None:
+                timeout_seconds = brainstorm.DEFAULT_TIMEOUT_SECONDS
+            timeout_minutes = setup.get("timeout_minutes", timeout_seconds // 60)
+            print_fn(f"Per-agent timeout: {timeout_minutes} minutes.")
             events: list[brainstorm.ProgressEvent] = []
             actual_agents = brainstorm.run_pass_zero(
                 root, setup["models"], setup["topic"], settings=settings,
                 run_fn=run_fn, print_fn=print_fn, progress_fn=events.append,
+                timeout_seconds=timeout_seconds,
             )
             if not actual_agents:
                 brainstorm.render_progress_table(events, print_fn=print_fn)
@@ -432,12 +447,14 @@ def repl(
                     root, setup["models"], setup["topic"], pass_number,
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
                     actual_agents=actual_agents, progress_fn=events.append,
+                    timeout_seconds=timeout_seconds,
                 )
             try:
                 record = brainstorm.run_final_synthesis(
                     root, setup["final_agent"], setup["models"], setup["topic"],
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
                     actual_agents=actual_agents, progress_fn=events.append,
+                    timeout_seconds=timeout_seconds,
                 )
             except (
                 brainstorm.NothingToSynthesize,

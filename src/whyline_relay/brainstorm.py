@@ -461,7 +461,26 @@ def _model_label(models: list[tuple[str, str]], agent_key: str) -> str:
         if key == agent_key:
             return label
     return MODEL_OPTIONS_BY_KEY.get(agent_key, agent_key)
+TIMEOUT_OPTIONS = (15, 30, 45, 60)
+DEFAULT_TIMEOUT_MINUTES = 15
+DEFAULT_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_MINUTES * 60
 
+
+def parse_timeout_selection(raw: str, default: int = DEFAULT_TIMEOUT_MINUTES) -> int | None:
+    """Parses user input for timeout menu into minutes (15, 30, 45, or 60).
+
+    Returns None if input names nothing valid.
+    """
+    raw = raw.strip().lower()
+    if not raw:
+        return default
+    cleaned = re.sub(r"\s*(minutes|minute|mins|min|m)$", "", raw).strip()
+    if cleaned in {"15", "30", "45", "60"}:
+        return int(cleaned)
+    menu_numbers = {"1": 15, "2": 30, "3": 45, "4": 60}
+    if cleaned in menu_numbers:
+        return menu_numbers[cleaned]
+    return None
 
 
 def slugify(topic: str) -> str:
@@ -504,6 +523,38 @@ def check_availability(
     return unavailable
 
 
+def _timeout_path(root: Path, topic: str) -> Path:
+    return config.relay_dir(root) / "brainstorm-tmp" / f".timeout-{slugify(topic)}.json"
+
+
+def _load_timeout(root: Path, topic: str) -> int | None:
+    path = _timeout_path(root, topic)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return int(data.get("timeout_seconds", data.get("timeout_minutes", 0) * 60))
+            return int(data)
+        except Exception:
+            pass
+    return None
+
+
+def _save_timeout(root: Path, timeout_seconds: int, topic: str) -> None:
+    path = _timeout_path(root, topic)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "timeout_seconds": timeout_seconds,
+        "timeout_minutes": timeout_seconds // 60,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+load_timeout = _load_timeout
+save_timeout = _save_timeout
+timeout_path = _timeout_path
+
+
 def ask_brainstorm_setup(
     root: Path,
     settings: "config.Config",
@@ -511,9 +562,9 @@ def ask_brainstorm_setup(
     input_fn=None,
     print_fn=None,
 ) -> dict | None:
-    """Asks topic/models/passes/final-model, validating and reprompting.
-    Returns {"topic", "models", "passes", "final_agent"}, or None if the
-    user declined to proceed after an availability warning.
+    """Asks topic/models/passes/final-model/timeout, validating and reprompting.
+    Returns {"topic", "models", "passes", "final_agent", "timeout_seconds", "timeout_minutes"},
+    or None if the user declined to proceed after an availability warning.
     """
     input_fn = input_fn if input_fn is not None else input
     print_fn = print_fn if print_fn is not None else print
@@ -561,6 +612,25 @@ def ask_brainstorm_setup(
                 f"one of: {', '.join(valid_keys)}"
             )
 
+    persisted_timeout = _load_timeout(root, topic)
+    if persisted_timeout is not None and (persisted_timeout // 60) in TIMEOUT_OPTIONS:
+        default_timeout = persisted_timeout // 60
+    else:
+        default_timeout = DEFAULT_TIMEOUT_MINUTES
+
+    timeout_seconds = None
+    timeout_minutes = None
+    while timeout_seconds is None:
+        raw_timeout = input_fn(
+            f"Per-agent timeout: 15 (default), 30, 45, 60 minutes [{default_timeout}]: "
+        ).strip()
+        parsed_min = parse_timeout_selection(raw_timeout, default=default_timeout)
+        if parsed_min is not None:
+            timeout_minutes = parsed_min
+            timeout_seconds = parsed_min * 60
+        else:
+            print_fn("Enter a valid timeout: 15 (default), 30, 45, or 60 minutes.")
+
     unavailable = check_availability(settings, models)
     if unavailable:
         names = ", ".join(label for _, label in unavailable)
@@ -584,11 +654,14 @@ def ask_brainstorm_setup(
             final_agent = models[0][0]
             print_fn(f"Final synthesis will come from {models[0][1]} instead.")
 
+    _save_timeout(root, timeout_seconds, topic)
     return {
         "topic": topic,
         "models": models,
         "passes": passes,
         "final_agent": final_agent,
+        "timeout_seconds": timeout_seconds,
+        "timeout_minutes": timeout_minutes,
     }
 
 
@@ -679,6 +752,7 @@ def run_pass_zero(
     print_fn=None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     status_map: dict[str, Any] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run or fails at runtime is recorded in pass-zero's status map
@@ -686,8 +760,14 @@ def run_pass_zero(
 
     `progress_fn`, when passed, receives a ProgressEvent for starting,
     running, and the terminal status of each selected model.
+    `timeout_seconds` is the limit for every model in this pass. Omitted,
+    each turn keeps chat's current limit.
     """
     print_fn = print_fn if print_fn is not None else print
+    if timeout_seconds is None:
+        timeout_seconds = _load_timeout(root, topic)
+    elif timeout_seconds is not None:
+        _save_timeout(root, timeout_seconds, topic)
     actual_agents: dict[str, str] = {}
     if status_map is None:
         status_map = {}
@@ -723,6 +803,7 @@ def run_pass_zero(
                 ),
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except Exception as error:
@@ -900,6 +981,7 @@ def run_review_pass(
     print_fn=None,
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
@@ -907,8 +989,14 @@ def run_review_pass(
 
     `progress_fn`, when passed, receives one lifecycle per selected model.
     A model that cannot run is still skipped; its section is left alone.
+    `timeout_seconds` is the limit for every model in this pass. Omitted,
+    each turn keeps chat's current limit.
     """
     print_fn = print_fn if print_fn is not None else print
+    if timeout_seconds is None:
+        timeout_seconds = _load_timeout(root, topic)
+    elif timeout_seconds is not None:
+        _save_timeout(root, timeout_seconds, topic)
     shared = shared_path(root, topic)
     model_labels = dict(MODEL_OPTIONS_BY_KEY)
     if actual_agents is None:
@@ -967,6 +1055,7 @@ def run_review_pass(
                 ),
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
@@ -1043,13 +1132,22 @@ def run_final_synthesis(
     print_fn=None,
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
+    timeout_seconds: int | None = None,
 ) -> dict:
     """One model writes the final synthesis. If the requested final agent fails
     at runtime, choose the first successful selected agent with usable research
     and announce the substitution. If no selected agent succeeds, stop with an
     actionable message and do not create an empty synthesis.
+
+    `timeout_seconds` is the limit for the synthesis turn and for any
+    substitute that runs after a failure. Omitted, the turn keeps chat's
+    current limit.
     """
     print_fn = print_fn if print_fn is not None else print
+    if timeout_seconds is None:
+        timeout_seconds = _load_timeout(root, topic)
+    elif timeout_seconds is not None:
+        _save_timeout(root, timeout_seconds, topic)
     shared = shared_path(root, topic)
     kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     if runner is not None:
@@ -1148,6 +1246,7 @@ def run_final_synthesis(
                 commit_message=f'brainstorm: {current_agent} final synthesis on "{topic}"',
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
+                timeout_seconds=timeout_seconds,
                 **kwargs,
             )
         except (agents.AgentMissing, chat.AgentUnavailable) as error:
@@ -1221,6 +1320,7 @@ def owned_paths(root: Path, topic: str, models: Sequence[tuple[str, str]]) -> li
         shared_path(root, topic),
         _actual_agents_path(root, topic),
         _status_path(root, topic),
+        _timeout_path(root, topic),
         plan_draft_path(root),
     ]
 
@@ -1236,6 +1336,7 @@ def generate_plan_from_synthesis(
     run_fn=None,
     runner=None,
     max_attempts: int = 2,
+    timeout_seconds: int | None = None,
 ) -> Path:
     """Prompts final_agent to turn its own synthesis into a real plan.md,
     validating with plan.parse() and retrying once on a parse error. A draft
@@ -1246,7 +1347,13 @@ def generate_plan_from_synthesis(
     agents.AgentMissing/AgentTimeout/chat.AgentUnavailable propagate
     immediately -- an availability failure is not a retry-worthy parse
     failure, and there is no "keep the previous content" fallback here
-    since nothing has been generated yet."""
+    since nothing has been generated yet.
+    `timeout_seconds` applies to every draft attempt. Omitted, each attempt
+    keeps chat's current limit."""
+    if timeout_seconds is None:
+        timeout_seconds = _load_timeout(root, topic)
+    elif timeout_seconds is not None:
+        _save_timeout(root, timeout_seconds, topic)
     shared = shared_path(root, topic)
     if not shared.exists() or not shared.read_text(encoding="utf-8").strip():
         raise NothingToSynthesize(
@@ -1277,6 +1384,7 @@ def generate_plan_from_synthesis(
             ),
             commit_paths=owned_paths(root, topic, models),
             exclude=exclude,
+            timeout_seconds=timeout_seconds,
             **kwargs,
         )
         try:

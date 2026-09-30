@@ -111,9 +111,12 @@ def _run_brainstorm_plan_source(
     models = setup_answers["models"]
     passes = setup_answers["passes"]
     final_agent = setup_answers["final_agent"]
+    timeout_seconds = setup_answers.get("timeout_seconds")
     kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     if runner is not None:
         kwargs["runner"] = runner
+    if timeout_seconds is not None:
+        kwargs["timeout_seconds"] = timeout_seconds
 
     actual_agents = brainstorm.run_pass_zero(
         root, models, topic, settings=settings, print_fn=print_fn, **kwargs

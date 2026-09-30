@@ -308,6 +308,7 @@ def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
         "1,2",  # models: claude, codex
         "0",  # passes
         "claude",  # final synthesis model
+        "",  # timeout default (15m)
         "/exit",
     ])
     printed = []
@@ -318,6 +319,7 @@ def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
         run_fn=brainstorm_run_fn,
         which=lambda name: "/bin/x",
     )
+    assert any("Per-agent timeout: 15 minutes." in line for line in printed)
     assert any("an answer" in line for line in printed)
     shared = brainstorm.shared_path(root, "caching strategy")
     assert shared.exists()
@@ -332,6 +334,7 @@ def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path:
         "4",  # grok -- not configured for chat in this repo
         "0",
         "grok",
+        "",  # timeout default (15m)
         "n",  # decline to proceed without it
         "/exit",
     ])
@@ -365,6 +368,7 @@ def test_repl_brainstorm_renders_compact_progress_table_on_success(tmp_path: Pat
         "1,2",  # claude, codex
         "1",    # 1 review pass
         "claude",
+        "",     # timeout default (15m)
         "/exit",
     ])
     printed: list[str] = []
@@ -377,6 +381,7 @@ def test_repl_brainstorm_renders_compact_progress_table_on_success(tmp_path: Pat
     )
 
     # 1. Output contains the table headers
+    assert any("Per-agent timeout: 15 minutes." in line for line in printed)
     assert any("Agent" in line and "Phase" in line and "State" in line for line in printed)
     assert any("Elapsed Time" in line and "Failure Reason" in line for line in printed)
 
@@ -406,6 +411,7 @@ def test_repl_brainstorm_renders_progress_table_on_pass_zero_failure(tmp_path: P
         "1,2",  # claude, codex
         "0",
         "claude",
+        "",     # timeout default (15m)
         "/exit",
     ])
     printed: list[str] = []
@@ -451,6 +457,7 @@ def test_repl_brainstorm_renders_progress_table_on_synthesis_failure(tmp_path: P
         "1",  # claude only
         "0",
         "claude",
+        "",   # timeout default (15m)
         "/exit",
     ])
     printed: list[str] = []

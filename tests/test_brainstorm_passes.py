@@ -306,9 +306,10 @@ def test_repl_brainstorm_wires_actual_agents_through_reviews(tmp_path: Path, mon
         "/brainstorm",
         "distributed sync",  # topic
         "1,2",  # models: claude, codex
-        "2",  # 2 passes
-        "codex",  # final synthesis
-        "/exit",
+            "2",  # 2 passes
+            "codex",  # final synthesis
+            "",  # timeout default (15m)
+            "/exit",
     ])
 
     captured_prompts = []
