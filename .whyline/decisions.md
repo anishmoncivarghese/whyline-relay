@@ -3970,3 +3970,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: a7f39ebfd99e4213a466bdd84e5c39f9 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T13:06:12.614Z"} -->
+
+## 2026-09-30 — Add programmatic planner.validate and planner.approve APIs
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** CRS-1
+
+**Because:** Allows headless approval and validation without interactive prompts, while sharing the same approval and commit logic in review_gate
+
+**Rejected:**
+
+- duplicate validation and commit logic in review_gate — violates DRY and risks divergent behavior between CLI and API
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner_api.py
+
+<!-- whyline-event: 37b3409d438b4bb8b7a6921b33a71fa1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:19:52.525Z"} -->
+
+## 2026-09-30 — Approve CRS-1 programmatic plan validation and approval APIs
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CRS-1
+
+**Because:** The implementation matches the requested interfaces, review_gate reuses approve without changing its later flow, coverage exercises validation replacement path-scoped commits invalid drafts and checkpoint clearing, and the full test suite passes
+
+**Rejected:**
+
+- request changes — no material defect or coverage gap found
+
+**Files:** src/whyline_relay/planner.py, tests/test_planner_api.py
+
+<!-- whyline-event: 1007529f3bc84abd8be908c9e94fdbf1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:22:22.342Z"} -->

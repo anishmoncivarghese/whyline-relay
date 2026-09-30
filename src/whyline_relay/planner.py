@@ -28,6 +28,51 @@ class PlanAlreadyInProgress(RuntimeError):
     """A plan session is already checkpointed; resume or discard it first."""
 
 
+class PlanExists(RuntimeError):
+    """plan.md already exists and the caller did not ask to replace it."""
+
+
+def validate(text: str) -> list[str]:
+    """Problems that stop `text` being used as a plan; empty when it's fine.
+
+    Prose with no checkboxes parses as an empty list, so that is a problem
+    too.
+    """
+    try:
+        tasks = plan.parse(text)
+    except plan.PlanError as error:
+        return [str(error)]
+    if not tasks:
+        return ["no tasks found -- write each task as `- [ ] ID: title`"]
+    return []
+
+
+def approve(
+    root: Path,
+    settings: config.Config,
+    draft_path: Path,
+    *,
+    drafted_by: str,
+    replace: bool = False,
+    clear_checkpoint: bool = False,
+) -> Path:
+    """Writes the draft as the plan and commits only that file. Raises
+    plan.PlanError for a draft that isn't a usable plan, and PlanExists when
+    a plan is already there and `replace` is false."""
+    text = draft_path.read_text(encoding="utf-8")
+    problems = validate(text)
+    if problems:
+        raise plan.PlanError("; ".join(problems))
+    target = root / settings.plan
+    if target.exists() and not replace:
+        raise PlanExists(f"{target} already exists")
+    target.write_text(text, encoding="utf-8")
+    gitcheck.commit_paths(root, [target], f"docs: add plan drafted by {drafted_by}")
+    if clear_checkpoint:
+        state.clear_plan(root)
+    return target
+
+
 def draft_path(root: Path) -> Path:
     return config.relay_dir(root) / "draft-plan.md"
 
@@ -332,6 +377,7 @@ def review_gate(
         on_settled()
         return f"Discarded. The draft is still at {draft_path}, if you want it."
     target = root / settings.plan
+    replace = False
     if target.exists():
         try:
             overwrite = confirm(f"{target} already exists. Replace it? [y/N] ").strip().lower()
@@ -339,8 +385,11 @@ def review_gate(
             overwrite = "n"
         if not overwrite.startswith("y"):
             return f"Not approved: {target} already exists and was not replaced."
-    target.write_text(text, encoding="utf-8")
-    gitcheck.commit_paths(root, [target], f"docs: add plan drafted by {drafted_by}")
+        replace = True
+    try:
+        approve(root, settings, draft_path, drafted_by=drafted_by, replace=replace)
+    except plan.PlanError as error:
+        return f"Not approved: {error}. The draft is still at {draft_path}."
     on_settled()
     try:
         start_now = confirm("Start whyline-relay on this plan now? [y/N] ").strip().lower()
