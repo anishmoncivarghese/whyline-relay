@@ -710,7 +710,7 @@
   git commit -m "feat(setup): write roles without prompting and commit only setup files"
   ```
 
-- [ ] CRS-4: Release whyline-relay 0.2.26
+- [x] CRS-4: Release whyline-relay 0.2.26
 
   ## Global Constraints
 
