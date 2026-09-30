@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 
 from whyline_relay import agents, brainstorm, chat, config, gitcheck, plan, planner, preflight
@@ -79,6 +81,100 @@ prompt = "review"
 approved = "@complete"
 rejected = "draft"
 """
+
+
+def role_paths(root: Path) -> list[Path]:
+    relay = config.relay_dir(root)
+    return [relay / "config.toml", relay / "prompts" / "test.md"]
+
+
+def _has_pipeline(text: str) -> bool:
+    try:
+        return "pipeline" in tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+
+
+def _set_keys(text: str, table: str, values: dict[str, str]) -> str:
+    """Sets `key = "value"` lines inside [table], keeping every other line
+    (comments, other keys, alignment) as it was. Missing keys are added at
+    the end of the table."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == f"[{table}]"), None)
+    if start is None:
+        return text.rstrip("\n") + f"\n\n[{table}]\n" + "".join(
+            f'{key} = "{value}"\n' for key, value in values.items()
+        )
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("["):
+        end += 1
+    remaining = dict(values)
+    for index in range(start + 1, end):
+        for key in list(remaining):
+            match = re.match(rf"^(\s*{key}\s*=\s*).*$", lines[index])
+            if match:
+                lines[index] = f'{match.group(1)}"{remaining.pop(key)}"'
+    insert_at = end
+    while insert_at > start + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines[insert_at:insert_at] = [f'{key} = "{value}"' for key, value in remaining.items()]
+    return "\n".join(lines) + "\n"
+
+
+def _set_backup(text: str, chain: list[str]) -> str:
+    """Replaces the [backup] table (or removes it when `chain` is empty)."""
+    lines = text.splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() == "[backup]":
+            index += 1
+            while index < len(lines) and not lines[index].lstrip().startswith("["):
+                index += 1
+            continue
+        kept.append(lines[index])
+        index += 1
+    content = "\n".join(kept).rstrip("\n") + "\n"
+    if chain:
+        chain_toml = ", ".join(f'"{name}"' for name in chain)
+        content += f"\n[backup]\nchain = [{chain_toml}]\n"
+    return content
+
+
+def write_roles(
+    root: Path,
+    implementer: str,
+    tester: str,
+    reviewer: str,
+    backup=(),
+    *,
+    commit: bool = True,
+) -> list[Path]:
+    """Writes the role assignments without asking anything. A config with its
+    own [pipeline] keeps everything except the three role keys and the
+    backup chain; anything else gets the default pipeline template. Commits
+    only these files."""
+    config_file, test_prompt = role_paths(root)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    existing = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
+    if _has_pipeline(existing):
+        content = _set_keys(existing, "roles", {
+            "implementer": implementer, "tester": tester, "reviewer": reviewer,
+        })
+    else:
+        content = PIPELINE_CONFIG_TEMPLATE.format(
+            implementer=implementer, tester=tester, reviewer=reviewer
+        )
+    content = _set_backup(content, [name for name in backup if name])
+    config_file.write_text(content, encoding="utf-8")
+    test_prompt.parent.mkdir(parents=True, exist_ok=True)
+    test_prompt.write_text(TEST_PROMPT_TEMPLATE, encoding="utf-8")
+    if commit:
+        gitcheck.commit_paths(
+            root, [config_file, test_prompt],
+            "setup: assign implementer/tester/reviewer roles",
+        )
+    return [config_file, test_prompt]
 
 
 def _run_brainstorm_plan_source(
@@ -252,20 +348,10 @@ def run_role_wizard(root: Path, *, input_fn=None, print_fn=None) -> dict[str, st
         "Backup chain (comma-separated, blank for none): "
     ).strip()
     backup_chain = [name.strip() for name in backup_raw.split(",") if name.strip()]
-    relay = config.relay_dir(root)
-    config_path = relay / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    content = PIPELINE_CONFIG_TEMPLATE.format(
-        implementer=implementer, tester=tester, reviewer=reviewer
+    config_path, test_prompt_path = write_roles(
+        root, implementer, tester, reviewer, backup_chain, commit=False
     )
-    if backup_chain:
-        chain_toml = ", ".join(f'"{name}"' for name in backup_chain)
-        content += f"\n[backup]\nchain = [{chain_toml}]\n"
-    config_path.write_text(content, encoding="utf-8")
     print_fn(f"Wrote {config_path.relative_to(root)}.")
-    test_prompt_path = relay / "prompts" / "test.md"
-    test_prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    test_prompt_path.write_text(TEST_PROMPT_TEMPLATE, encoding="utf-8")
     print_fn(f"Wrote {test_prompt_path.relative_to(root)}.")
     return {
         "implementer": implementer,
@@ -305,7 +391,9 @@ def run(
 
     run_role_wizard(root, input_fn=input_fn, print_fn=print_fn)
 
-    if gitcheck.commit_all(root, "setup: assign implementer/tester/reviewer roles"):
+    if gitcheck.commit_paths(
+        root, role_paths(root), "setup: assign implementer/tester/reviewer roles"
+    ):
         print_fn("Committed setup.")
 
     preflight_kwargs = {} if runner is None else {"runner": runner}

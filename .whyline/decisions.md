@@ -4038,3 +4038,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: a5f7f07a4a24455bbfe6aa58a2916e30 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:41:11.584Z"} -->
+
+## 2026-09-30 — Extract role writing into write_roles with path-scoped commits
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** CRS-3
+
+**Because:** Allows programmatic configuration without interactive prompts while preserving existing pipeline settings and scoping Git commits only to setup files
+
+**Rejected:**
+
+- rewriting entire config on role updates — clobbers custom pipeline stages and user comments
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup_write_roles.py
+
+<!-- whyline-event: 4c3163010541468083bfab593d249e0e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:45:45.056Z"} -->
+
+## 2026-09-30 — Approve write_roles and scoped setup commits
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** CRS-3
+
+**Because:** The implementation preserves comments and custom pipeline keys while replacing only role and backup assignments, legacy configs receive the default pipeline, commits are limited to config.toml and prompts/test.md, and the full relay suite passes
+
+**Rejected:**
+
+- request changes — no behavioral, safety, or coverage defect remained after review
+
+**Files:** src/whyline_relay/setup.py, tests/test_setup_write_roles.py
+
+<!-- whyline-event: e07a1b7aba234870b35720ef8a783236 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T16:59:53.582Z"} -->
