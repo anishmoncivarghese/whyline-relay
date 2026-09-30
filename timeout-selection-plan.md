@@ -9,7 +9,7 @@ Global constraints:
 - Codex reviews and commits every task; implementers must not commit.
 - Run the focused tests and the complete suite after each task.
 
-- [ ] TO-1: Add configurable brainstorm timeout plumbing
+- [x] TO-1: Add configurable brainstorm timeout plumbing
   Replace the fixed interactive brainstorm timeout with an optional per-run
   timeout value passed through chat turns, pass-zero research, review passes,
   and final synthesis. Preserve the current timeout as a compatibility default
