@@ -1,11 +1,11 @@
 # whyline-relay configuration. Every key is optional.
-plan = "plan.md"
+plan = "timeout-selection-plan.md"
 max_rounds = 3
 timeout_minutes = 30
 branch_prefix = "relay/"
 
 [roles]
-implementer = "antigravity"
+implementer = "grok"
 reviewer = "codex"
 
 [agents.codex]

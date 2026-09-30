@@ -3884,3 +3884,20 @@ Append-only. Written by whyline; readable without it.
 <!-- whyline-attach: {"v":1,"note":"29ac297caadc482a8965fe2e8a8063c3","commit":"1686e387db3391d08172e179ac60999db7d81b30","ts":"2026-09-30T10:14:36.150Z"} -->
 
 <!-- whyline-attach: {"v":1,"note":"20a8e1e58eb34143bc962ccf419b07f7","commit":"1686e387db3391d08172e179ac60999db7d81b30","ts":"2026-09-30T10:14:36.218Z"} -->
+
+## 2026-09-30 — Use Grok then Antigravity for staged timeout implementation
+
+**Actor:** codex
+**Role:** planner
+**Task:** TIMEOUT-PLAN
+
+**Because:** The timeout feature has separable plumbing and setup/documentation work, so each requested implementer can own one bounded task while Codex remains the reviewer and committer
+
+**Rejected:**
+
+- use one implementer for all tasks — it would not satisfy the requested Grok plus Antigravity pairing
+
+**Files:** plan.md, .whyline/relay/config.toml
+
+<!-- whyline-event: 8eec9530e37044d6b64249900abfeeda -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:16:52.236Z"} -->
