@@ -3953,3 +3953,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 9da34a04d7a64bb989157841cee0d9e1 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:48:09.097Z"} -->
+
+## 2026-09-30 — Prepare 0.2.25 release for per-agent brainstorm timeout selection
+
+**Actor:** codex
+**Role:** releaser
+**Task:** TIMEOUT-RELEASE
+
+**Because:** v0.2.24 already exists for the previous commit-scope fix, so this timeout-selector feature needs a new version with synchronized metadata and release notes; the full suite and lock check pass
+
+**Rejected:**
+
+- reuse v0.2.24 — PyPI and GitHub tags are immutable for this published release
+
+**Files:** pyproject.toml, uv.lock, src/whyline_relay/__init__.py, docs/releases/v0.2.25.md
+
+<!-- whyline-event: a7f39ebfd99e4213a466bdd84e5c39f9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T13:06:12.614Z"} -->
