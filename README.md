@@ -515,6 +515,7 @@ What should we research? caching strategy for the API
 Which models? (1 Claude, 2 Codex, 3 Antigravity, 4 Grok, 5 all): 1,2
 How many passes? [1]: 1
 Which model gives the final synthesis? [claude]:
+Per-agent timeout: 15 (default), 30, 45, 60 minutes [15]:
 ```
 
 Each selected model independently researches the topic into its own
@@ -529,7 +530,10 @@ under the hood -- brainstorming inherits the same permission floor and
 automatic backup/failover chat already has for everything else. A model
 that can't run a given pass (missing, timed out, or not configured) is
 skipped for that pass rather than stopping the whole session; you're told
-which one and why.
+which one and why. The timeout applies separately to every agent turn,
+including research, review, final synthesis, and plan drafting; it is not a
+deadline for the whole brainstorm. The safe choices are 15 minutes (default),
+30, 45, and 60 minutes.
 
 ```
 $ whyline-relay chat

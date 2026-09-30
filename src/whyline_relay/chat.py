@@ -421,10 +421,16 @@ def repl(
             )
             if setup is None:
                 continue
+            timeout_seconds = setup.get("timeout_seconds")
+            if timeout_seconds is None:
+                timeout_seconds = brainstorm.DEFAULT_TIMEOUT_SECONDS
+            timeout_minutes = setup.get("timeout_minutes", timeout_seconds // 60)
+            print_fn(f"Per-agent timeout: {timeout_minutes} minutes.")
             events: list[brainstorm.ProgressEvent] = []
             actual_agents = brainstorm.run_pass_zero(
                 root, setup["models"], setup["topic"], settings=settings,
                 run_fn=run_fn, print_fn=print_fn, progress_fn=events.append,
+                timeout_seconds=timeout_seconds,
             )
             if not actual_agents:
                 brainstorm.render_progress_table(events, print_fn=print_fn)
@@ -441,12 +447,14 @@ def repl(
                     root, setup["models"], setup["topic"], pass_number,
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
                     actual_agents=actual_agents, progress_fn=events.append,
+                    timeout_seconds=timeout_seconds,
                 )
             try:
                 record = brainstorm.run_final_synthesis(
                     root, setup["final_agent"], setup["models"], setup["topic"],
                     settings=settings, run_fn=run_fn, print_fn=print_fn,
                     actual_agents=actual_agents, progress_fn=events.append,
+                    timeout_seconds=timeout_seconds,
                 )
             except (
                 brainstorm.NothingToSynthesize,

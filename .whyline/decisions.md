@@ -3936,3 +3936,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: b9172eb221e04d21bf4f0a77b8d3c929 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:30:47.620Z"} -->
+
+## 2026-09-30 — Approve per-agent brainstorm timeout selector
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** TO-2
+
+**Because:** The setup now offers only 15, 30, 45, and 60 minutes with 15 as default, persists the selected per-agent value across resumed runs, and threads it through every interactive brainstorm phase; full suite passes
+
+**Rejected:**
+
+- keep the timeout as a hidden fixed constant — users could not extend Codex beyond five minutes or understand the scope of the setting
+
+**Files:** src/whyline_relay/brainstorm.py, src/whyline_relay/chat.py, src/whyline_relay/setup.py, tests/test_brainstorm_setup.py, tests/test_brainstorm_progress.py, tests/test_chat_repl.py
+
+<!-- whyline-event: 9da34a04d7a64bb989157841cee0d9e1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T12:48:09.097Z"} -->

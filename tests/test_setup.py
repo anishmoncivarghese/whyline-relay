@@ -309,9 +309,10 @@ def test_choose_plan_source_brainstorm_end_to_end_writes_a_real_plan(tmp_path: P
         "brainstorm",   # choose_plan_source's own choice
         "build a widget",  # topic
         "1",            # models: claude only
-        "0",            # passes: 0 (straight to synthesis)
-        "",             # final model: default (claude)
-        "a",            # review_gate: approve
+            "0",            # passes: 0 (straight to synthesis)
+            "",             # final model: default (claude)
+            "",             # timeout default (15m)
+            "a",            # review_gate: approve
         "n",            # don't start now
     ])
     result = setup.choose_plan_source(
@@ -330,7 +331,7 @@ def test_choose_plan_source_brainstorm_end_to_end_writes_a_real_plan(tmp_path: P
 def test_choose_plan_source_brainstorm_declined_at_availability_check(tmp_path: Path):
     settings = config.load(tmp_path)
     answers = iter([
-        "brainstorm", "build a widget", "4", "0", "", "n",  # "4" = grok, unavailable here; "n" declines
+            "brainstorm", "build a widget", "4", "0", "", "", "n",  # "4" = grok, unavailable here; "n" declines
     ])
     result = setup.choose_plan_source(
         tmp_path, settings,
@@ -360,7 +361,7 @@ def test_choose_plan_source_brainstorm_nothing_to_synthesize_is_reported(
         return RunResult(0, '{"type":"result","result":"ok"}\n')
 
     printed = []
-    answers = iter(["brainstorm", "build a widget", "1", "0", ""])
+    answers = iter(["brainstorm", "build a widget", "1", "0", "", ""])
     result = setup.choose_plan_source(
         tmp_path, settings,
         input_fn=lambda prompt="": next(answers),
