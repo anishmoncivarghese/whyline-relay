@@ -7,7 +7,7 @@ the whole suite with `uv run pytest -q`. The plan's "Global Constraints"
 section applies to every task. Release steps are done by a human afterwards:
 never push, tag, bump the version or publish.
 
-- [ ] RPF-1: Built-in recipes for grok and antigravity
+- [x] RPF-1: Built-in recipes for grok and antigravity
   Implement "Task 1: Built-in recipes for grok and antigravity" from
   .whyline/relay/rpf/implementation-plan.md: create src/whyline_relay/recipes.py,
   apply the recipes in config.load (skipping a name the config already defines,
