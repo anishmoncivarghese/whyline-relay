@@ -7,7 +7,7 @@ run the whole suite with `uv run pytest -q`. The plan's "Global Constraints"
 apply. Release steps are done by a human afterwards: never push, tag, bump the
 version or publish.
 
-- [ ] RPF-8: The planner asks questions and takes answers
+- [x] RPF-8: The planner asks questions and takes answers
   Implement "Task 8: The planner asks questions and takes answers" from the
   plan: planner.PlanQuestions (a loop.Paused carrying questions, stage and
   agent), answer_feedback, answer() re-running the saved stage, questions
