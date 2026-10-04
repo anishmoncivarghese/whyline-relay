@@ -6,7 +6,7 @@ branch_prefix = "relay/"
 
 [roles]
 implementer = "antigravity"
-reviewer = "codex"
+reviewer = "claude"
 
 [agents.codex]
 command = ["codex", "exec", "-s", "workspace-write", "--color", "never"]
