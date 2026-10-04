@@ -4407,3 +4407,16 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 2c7bb36f5aac49a4b672b1575d228087 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:12:08.998Z"} -->
+
+## 2026-10-04 — Approve and release the attachments relay part (ATT-2..4) as whyline-relay 0.2.30
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** ATT-5
+
+**Because:** diff matches the plan (codex --image= with the prompt last, attachments through chat, brainstorm and planner, checkpoints backward compatible); suite passes with and without agent CLIs
+
+**Files:** src/whyline_relay/attachments.py, src/whyline_relay/planner.py
+
+<!-- whyline-event: de72e82b5ecb4338a5fb6d78451cc76c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:19:14.913Z"} -->
