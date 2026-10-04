@@ -4155,3 +4155,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 444241e03fa043848ecba5df47f6ead3 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:00:53.104Z"} -->
+
+## 2026-10-04 — Antigravity trust is written only by antigravity.trust, after a person agrees
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RPF-2
+
+**Because:** the settings file covers the whole machine, so trusting a repo loosens every agy session
+
+**Rejected:**
+
+- Trust automatically on first use — silently widens a machine-wide permission
+
+**Files:** src/whyline_relay/antigravity.py
+
+<!-- whyline-event: 24df544685d24a82a55f4572ba9b1273 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:05:56.781Z"} -->
+
+## 2026-10-04 — Approve Antigravity trust helpers and decline marker handling
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPF-2
+
+**Because:** The helpers match the specified interfaces, reject unsafe settings shapes without overwriting, write settings atomically in the destination directory, preserve existing keys, and the full test suite passes
+
+**Rejected:**
+
+- Request changes for missing failure-injection tests — the required malformed-input cases are covered and the same-directory temporary-file plus os.replace implementation is directly reviewable
+
+**Files:** src/whyline_relay/antigravity.py, src/whyline_relay/gitcheck.py, tests/test_antigravity_trust.py
+
+<!-- whyline-event: a5947d846f1f41468c508cb0ba9a8b49 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:08:29.898Z"} -->
