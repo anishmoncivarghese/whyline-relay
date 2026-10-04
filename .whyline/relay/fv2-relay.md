@@ -26,7 +26,7 @@ publish -- a human releases afterwards.
   brainstorm.final_synthesis and brainstorm.revise_synthesis.
   Verify: uv run pytest -q.
 
-- [ ] FV2-4: The relay commits approved work in every config format
+- [x] FV2-4: The relay commits approved work in every config format
   Implement "Task 4" from the plan: loop.commit_message, the two-role
   approval committing via _commit_and_approve unless the reviewer already
   committed, the REVIEW prompt saying "do not commit", and the golden prompt
