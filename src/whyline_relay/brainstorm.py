@@ -786,6 +786,7 @@ def run_pass_zero(
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     status_map: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run or fails at runtime is recorded in pass-zero's status map
@@ -837,6 +838,7 @@ def run_pass_zero(
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
+                attachments=attachments,
                 **kwargs,
             )
         except Exception as error:
@@ -1012,6 +1014,7 @@ def run_review_pass(
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
@@ -1086,6 +1089,7 @@ def run_review_pass(
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
+                attachments=attachments,
                 **kwargs,
             )
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
@@ -1162,6 +1166,7 @@ def run_final_synthesis(
     actual_agents: dict[str, str] | None = None,
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> dict:
     """One model writes the final synthesis. If the requested final agent fails
     at runtime, choose the first successful selected agent with usable research
@@ -1276,6 +1281,7 @@ def run_final_synthesis(
                 commit_paths=owned_paths(root, topic, models),
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
+                attachments=attachments,
                 **kwargs,
             )
         except (agents.AgentMissing, chat.AgentUnavailable) as error:
@@ -1369,6 +1375,7 @@ def generate_plan_from_synthesis(
     runner=None,
     max_attempts: int = 2,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> Path:
     """Prompts final_agent to turn its own synthesis into a real plan.md,
     validating with plan.parse() and retrying once on a parse error. A draft
@@ -1417,6 +1424,7 @@ def generate_plan_from_synthesis(
             commit_paths=owned_paths(root, topic, models),
             exclude=exclude,
             timeout_seconds=timeout_seconds,
+            attachments=attachments,
             **kwargs,
         )
         try:

@@ -6,10 +6,22 @@ import json
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from whyline_relay import adapters, agents, brainstorm, chatlog, config, failover, gitcheck, init, invocation
+from whyline_relay import (
+    adapters,
+    agents,
+    attachments as attachment_delivery,
+    brainstorm,
+    chatlog,
+    config,
+    failover,
+    gitcheck,
+    init,
+    invocation,
+)
 from whyline_relay.adapters import grok
 
 CHAT_AGENTS = ("claude", "codex", "antigravity", "grok")
@@ -137,6 +149,7 @@ def _execute_agent_call(
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
     commit_paths: list[Path] | None = None,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
@@ -152,6 +165,12 @@ def _execute_agent_call(
         # user's, not setup's.
         gitcheck.commit_paths(root, generated, f"chat: generate {agent}'s permission settings")
     turn_command = list(command)
+    turn_command = attachment_delivery.command_with_images(
+        turn_command, adapter.name, attachments
+    )
+    block = attachment_delivery.prompt_block(attachments, root)
+    if block:
+        full_prompt = f"{full_prompt}\n\n{block}"
     output_file: Path | None = None
     if adapter.uses_output_file:
         handle = tempfile.NamedTemporaryFile(
@@ -217,6 +236,7 @@ def run_turn(
     exclude: frozenset[str] = frozenset(),
     commit_paths: list[Path] | None = None,
     timeout_seconds: int | None = None,
+    attachments: Sequence[Path] = (),
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
@@ -228,6 +248,7 @@ def run_turn(
         commit_message=commit_message,
         commit_paths=commit_paths,
         timeout_seconds=timeout_seconds,
+        attachments=attachments,
     )
     final_agent = resolved
     failover_notice: str | None = None
@@ -267,6 +288,7 @@ def run_turn(
             commit_message=commit_message,
             commit_paths=commit_paths,
             timeout_seconds=timeout_seconds,
+            attachments=attachments,
         )
         final_agent = backup
         current = backup

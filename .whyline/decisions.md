@@ -4339,3 +4339,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 300570c417324d749d4b6a4855c3a85e -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T16:53:21.300Z"} -->
+
+## 2026-10-04 — Attachments block is appended in _execute_agent_call rather than stored in chat log
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** ATT-3
+
+**Because:** the chat log records the user's actual prompt text while ensuring every agent turn and backup attempt receives the attachment path and data block
+
+**Rejected:**
+
+- Append to user prompt before run_turn — pollutes persisted chat log history with attachment path blocks
+
+**Files:** src/whyline_relay/chat.py
+
+<!-- whyline-event: 9df630ee0f2e49c899d6a62f7619b6b9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T16:59:44.911Z"} -->
+
+## 2026-10-04 — Approve ATT-3 attachment delivery through chat and brainstorm turns
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** ATT-3
+
+**Because:** The implementation appends the safe attachment path block only at execution time, adds Codex image flags before agents.run appends the prompt, preserves attachments across failover and every brainstorm phase, and the full test suite passed
+
+**Rejected:**
+
+- Request broader console wiring — later tasks explicitly own the chat, brainstorm, and plan UI entry points
+
+**Files:** src/whyline_relay/chat.py, src/whyline_relay/brainstorm.py, tests/test_chat_attachments.py
+
+<!-- whyline-event: ad5a445f6c76440b90eec050c199d482 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:02:48.147Z"} -->
