@@ -454,6 +454,7 @@ def draft(
     settings: config.Config,
     description: str,
     *,
+    spec: Path | None = None,
     attachments: Sequence[Path] = (),
     print_fn=None,
     runner: failover.Runner = subprocess.run,
@@ -465,6 +466,16 @@ def draft(
     if state.load_plan(root, name=kind.state_name) is not None:
         raise PlanAlreadyInProgress(
             "a plan draft is already in progress; resume it or discard it first"
+        )
+    if spec is not None:
+        spec_path = Path(spec)
+        try:
+            spec_str = spec_path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            spec_str = str(spec)
+        description = (
+            f"Write the plan from this spec: {spec_str}. Read it in full first.\n\n"
+            + description
         )
     rel_attachments = [
         p.resolve().relative_to(root.resolve()).as_posix() for p in attachments

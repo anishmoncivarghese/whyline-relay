@@ -212,6 +212,10 @@ plan, hand off blocked with one --question per decision, and put the choices in
 the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
 anything you can reasonably decide yourself.
 
+A task that releases, publishes, tags or deploys must include the line
+`relay-profile: release` in its detail, so the relay hands it to whoever does
+releases.
+
 ## How to finish
 
 Exactly one of the outcomes listed below.
@@ -249,6 +253,9 @@ If a decision the description and reference documents don't settle blocks the
 plan, hand off blocked with one --question per decision, and put the choices in
 the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
 anything you can reasonably decide yourself.
+
+Send back a draft whose release, publish, tag or deploy tasks lack
+`relay-profile: release`.
 
 ## How to finish
 

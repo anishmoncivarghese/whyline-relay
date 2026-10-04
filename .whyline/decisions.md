@@ -4485,3 +4485,67 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 551990a8b1ef44fea6065e6c0961ae3b -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:40:09.176Z"} -->
+
+## 2026-10-04 — Prepend repo-relative spec instruction to planner.draft description, falling back to absolute string path outside repo
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-3
+
+**Because:** keeps prompt paths clean and portable when within the repo while remaining functional if a spec is referenced outside repo root
+
+**Rejected:**
+
+- pass spec as a separate prompt placeholder — requires modifying all planner templates and pipeline stages
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: 98a20d9d930a43949e619ee55a81a807 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:46:56.386Z"} -->
+
+## 2026-10-04 — Add relay-profile: release directive to PLAN_DRAFT and check to PLAN_REVIEW
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-3
+
+**Because:** ensures tasks that publish or deploy are explicitly marked for the release role during planning
+
+**Rejected:**
+
+- hardcoding keywords in the relay — prompt-level instruction ensures the plan itself contains the explicit profile tag
+
+**Files:** src/whyline_relay/prompts.py
+
+<!-- whyline-event: 0b7c34a42e7944e08f03d57a645fdf44 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:47:00.283Z"} -->
+
+## 2026-10-04 — Implement final_synthesis extraction and revise_synthesis via chat.run_turn
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-3
+
+**Because:** allows human feedback loop to iteratively update the synthesis section without disturbing individual model contributions
+
+**Rejected:**
+
+- re-running the entire brainstorm — wasteful and loses prior discussion context
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: d7f46d107fc1463d963ac531afc59fd3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:47:04.058Z"} -->
+
+## 2026-10-04 — Approve FV2-3: plan-from-spec, release marking, synthesis revision match the plan verbatim
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FV2-3
+
+**Because:** planner.draft(spec=...) computes the repo-relative path correctly with absolute fallback, relay-profile: release added to both PLAN_DRAFT and PLAN_REVIEW above How to finish, final_synthesis/revise_synthesis match the plan's reference code with an added path.exists() guard backed by its own test, and uv run pytest -q passes with exit 0
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/prompts.py, src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 923a523b414e41818d534dda309bcc30 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:51:32.482Z"} -->

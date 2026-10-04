@@ -1363,6 +1363,53 @@ def owned_paths(root: Path, topic: str, models: Sequence[tuple[str, str]]) -> li
     ]
 
 
+def final_synthesis(root: Path, topic: str) -> str:
+    path = shared_path(root, topic)
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    start = text.find("## Final Synthesis")
+    if start == -1:
+        return ""
+    body = text[start + len("## Final Synthesis"):]
+    end = body.find("\n## ")
+    return (body if end == -1 else body[:end]).strip()
+
+
+REVISE_SYNTHESIS_PROMPT = (
+    'Read {shared_path} in full. Rewrite only its "## Final Synthesis" section, '
+    "applying this feedback from the human: {feedback}\n\nKeep every model's own "
+    "section unchanged. Keep the section first, right after the title."
+)
+
+
+def revise_synthesis(
+    root,
+    settings,
+    agent,
+    models,
+    topic,
+    feedback,
+    *,
+    timeout_seconds=None,
+    attachments=(),
+    run_fn=None,
+    runner=None,
+) -> dict:
+    kwargs = {k: v for k, v in (("run_fn", run_fn), ("runner", runner)) if v is not None}
+    return chat.run_turn(
+        root,
+        agent=agent,
+        prompt=REVISE_SYNTHESIS_PROMPT.format(shared_path=shared_path(root, topic), feedback=feedback),
+        settings=settings,
+        commit_message=f'brainstorm: {agent} revises the synthesis on "{topic}"',
+        commit_paths=owned_paths(root, topic, models),
+        timeout_seconds=timeout_seconds,
+        attachments=attachments,
+        **kwargs,
+    )
+
+
 def generate_plan_from_synthesis(
     root: Path,
     settings: "config.Config",
