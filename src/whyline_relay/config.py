@@ -8,7 +8,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from whyline_relay import adapters, pipeline as pipeline_module
+from whyline_relay import adapters, pipeline as pipeline_module, recipes
 
 DEFAULTS = {
     "plan": "plan.md",
@@ -288,6 +288,13 @@ def load(root: Path) -> Config:
                     "adapter has no way to apply it"
                 )
             agents[name] = [*agents[name], *resolved_adapter.model_flag, model]
+
+    for name, command in recipes.RECIPES.items():
+        spellings = (name, *recipes.ALIASES.get(name, ()))
+        if any(spelling in agents for spelling in spellings):
+            continue
+        agents[name] = list(command)
+        configured_adapters[name] = "generic"
 
     role_values = raw.get("roles") or {}
     if "backup" in role_values:

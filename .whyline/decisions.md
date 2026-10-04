@@ -4120,3 +4120,38 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: edee3eda3e2545b384e568f9a91aab24 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T20:44:53.916Z"} -->
+
+## 2026-10-04 — grok and antigravity default to the README recipes as generic agents
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RPF-1
+
+**Because:** a repository with no relay config skipped them in chat and brainstorm; the recipes are already verified
+
+**Rejected:**
+
+- Probe PATH inside config.load — loading would depend on the machine and tests would flake
+- Make them built-in adapters — they still lack login checks and denial details, the reason they are generic
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/config.py
+
+<!-- whyline-event: b75ab03a91c44cb5a69a9f6772a0e5c0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T06:57:59.146Z"} -->
+
+## 2026-10-04 — Approve built-in recipes for grok and antigravity
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPF-1
+
+**Because:** config.load adds both verified recipes as generic agents without overriding repository-specific grok or legacy agy configurations, the focused tests and full suite pass, and the README documents the defaults
+
+**Rejected:**
+
+- Request changes — the implementation matches the task plan and preserves both documented precedence cases
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/recipes.py, tests/test_recipes.py, README.md
+
+<!-- whyline-event: 444241e03fa043848ecba5df47f6ead3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:00:53.104Z"} -->

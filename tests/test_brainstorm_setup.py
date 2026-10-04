@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from whyline_relay import brainstorm, config
+from whyline_relay import brainstorm, config, recipes
 
 
 def test_slugify_lowercases_and_hyphenates():
@@ -44,9 +44,9 @@ def test_parse_model_selection_deduplicates():
 def test_check_availability_reports_an_unconfigured_agent(tmp_path: Path):
     settings = config.load(tmp_path)
     unavailable = brainstorm.check_availability(
-        settings, [("claude", "Claude"), ("grok", "Grok")]
+        settings, [("claude", "Claude"), ("custom", "Custom")]
     )
-    assert unavailable == [("grok", "Grok")]
+    assert unavailable == [("custom", "Custom")]
 
 
 def test_check_availability_empty_when_all_configured(tmp_path: Path):
@@ -113,7 +113,8 @@ def test_ask_brainstorm_setup_rejects_a_final_model_not_selected(tmp_path: Path)
     assert result["timeout_seconds"] == 900
 
 
-def test_ask_brainstorm_setup_declines_and_aborts_on_unavailable_model(tmp_path: Path):
+def test_ask_brainstorm_setup_declines_and_aborts_on_unavailable_model(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(recipes, "RECIPES", {})
     settings = config.load(tmp_path)
     answers = iter(["topic", "1,4", "1", "claude", "", "n"])
     result = brainstorm.ask_brainstorm_setup(
@@ -124,7 +125,8 @@ def test_ask_brainstorm_setup_declines_and_aborts_on_unavailable_model(tmp_path:
     assert result is None
 
 
-def test_ask_brainstorm_setup_proceeds_without_an_unavailable_model(tmp_path: Path):
+def test_ask_brainstorm_setup_proceeds_without_an_unavailable_model(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(recipes, "RECIPES", {})
     settings = config.load(tmp_path)
     answers = iter(["topic", "1,4", "1", "claude", "", "y"])
     result = brainstorm.ask_brainstorm_setup(

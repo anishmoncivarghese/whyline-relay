@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from whyline_relay import agents, chat, chatlog
+from whyline_relay import agents, chat, chatlog, recipes
 from whyline_relay.agents import RunResult
 
 
@@ -325,7 +325,8 @@ def test_repl_brainstorm_runs_the_whole_flow(tmp_path: Path):
     assert shared.exists()
 
 
-def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path: Path):
+def test_repl_brainstorm_declined_after_unavailable_model_does_nothing(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(recipes, "RECIPES", {})
     root = _repo(tmp_path)
     chat.save_default_agent(root, "claude")
     answers = iter([

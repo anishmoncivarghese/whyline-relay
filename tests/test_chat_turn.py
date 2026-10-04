@@ -31,7 +31,7 @@ def test_resolve_command_works_for_claude_with_no_config_file(tmp_path: Path):
 def test_resolve_command_refuses_an_unconfigured_generic_agent(tmp_path: Path):
     settings = config.load(tmp_path)
     with pytest.raises(chat.AgentUnavailable):
-        chat.resolve_command(settings, "grok")
+        chat.resolve_command(settings, "custom")
 
 
 def test_resolve_command_works_for_a_configured_generic_agent(tmp_path: Path):

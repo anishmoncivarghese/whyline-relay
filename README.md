@@ -392,6 +392,8 @@ Only `codex` and `claude` are built in today. For a third option, see "Using Ant
 
 ### Using Antigravity (`agy`) today, via the generic adapter
 
+Since 0.2.28 the relay uses the recipe below automatically when the repository's config has no `[agents.<name>]` table of its own, so you only need the TOML when you want to change the command.
+
 Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no way to scope its permissions to a repository or an invocation, no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path — three real gaps that would make a "built-in" label dishonest about what the relay actually manages for it. This is also tracked upstream at [google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548) — headless mode's own permission enforcement is known to be unreliable; `doctor` links here directly if you configure Antigravity this way. Configure it like this:
 
 ```toml
@@ -431,6 +433,8 @@ test command and its result — you will report both in your handoff.
 **One more thing worth knowing:** `--new-project`, needed to pin each headless call to the right directory (without it, one call was measured operating on a stale prior project and reading the wrong file entirely), leaves a conversation directory behind under `~/.gemini/antigravity-cli/brain/<uuid>/` every single task, with no built-in cleanup.
 
 ### Using Grok (`grok`, "Grok Build") today, via the generic adapter
+
+Since 0.2.28 the relay uses the recipe below automatically when the repository's config has no `[agents.<name>]` table of its own, so you only need the TOML when you want to change the command.
 
 xAI's Grok Build CLI (`grok`) has genuinely better headless-mode fundamentals than Antigravity did when it was added — real per-invocation `--allow`/`--deny` permission flags, not one file global to the machine — verified directly: a full realistic implement turn (editing a file, *creating* a new one, running a verification command, recording a real `whyline note`, committing) and a full realistic reviewer turn (reading a diff, summarizing it accurately) both completed correctly with the recipe below, and an explicit `--deny` rule correctly beat a broader `--allow` for the same command, even with a project's own `.claude/settings.local.json` separately allowing it. It is still not a built-in, on purpose: `grok login` only ever starts a live device-code OAuth flow (there is no read-only status check `doctor` could run), and a denied action only reports `stopReason: "cancelled"`, never which command or file it needed — the same two gaps that keep Antigravity a generic agent too. The relay recognizes that structured cancellation, reports its likely permission-policy cause, and excludes Grok's private `thought` text from rate-limit detection; it still cannot name the denied command that Grok omitted. Configure it like this:
 
