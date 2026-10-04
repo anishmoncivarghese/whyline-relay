@@ -8,7 +8,7 @@ the whole suite with `uv run pytest -q`. The plan's "Global Constraints"
 apply. Tests must not depend on which agent CLIs are installed. Never push,
 tag, bump the version or publish -- a human releases afterwards.
 
-- [ ] ATT-2: The attachments module
+- [x] ATT-2: The attachments module
   Implement "Task 2: The `attachments` module" from the plan: create
   src/whyline_relay/attachments.py (Delivery, kind_of, delivery with the
   spike-verified table, prompt_block, command_with_images using one
