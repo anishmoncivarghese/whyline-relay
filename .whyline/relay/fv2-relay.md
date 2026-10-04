@@ -8,7 +8,7 @@ apply. Tests must not depend on installed agent CLIs, must not touch the real
 home folder, and must pass on Windows. Never push, tag, bump the version or
 publish -- a human releases afterwards.
 
-- [ ] FV2-1: Release role in the relay config
+- [x] FV2-1: Release role in the relay config
   Implement "Task 1" from the plan: Config.release_role ("human" by default,
   or a known agent), accepted in both config formats without breaking role
   validation; setup.write_release; write_roles keeps an existing release key.
