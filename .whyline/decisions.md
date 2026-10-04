@@ -4296,3 +4296,16 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 1799cbe749e74ec8ae744beaf34bd798 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:13:44.637Z"} -->
+
+## 2026-10-04 — Approve and release Part C (RPF-8, RPF-9) as whyline-relay 0.2.29
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RPF-10
+
+**Because:** diff matches the plan; write_roles on a copy of agentdock's real old-format config kept custom agents and max_rounds; full suite passes
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/setup.py
+
+<!-- whyline-event: 6a1e6be8480c4baf8823f853f8426418 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:21:14.239Z"} -->
