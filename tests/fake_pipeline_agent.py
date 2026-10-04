@@ -1,5 +1,5 @@
 """A fake agent for configured-pipeline tests: argv[1] is "to_actor:status",
-or "commit:to_actor:status" to also make a git commit before handing off."""
+optionally "#q1|q2" for a handoff's questions, or "commit:to_actor:status" to also make a git commit before handing off."""
 
 import json
 import re
@@ -10,6 +10,8 @@ from pathlib import Path
 
 def main() -> int:
     spec = sys.argv[1]
+    spec, _, asked = spec.partition("#")
+    questions = [q for q in asked.split("|") if q]
     root = Path(sys.argv[2])
     prompt = sys.argv[-1]
     match = re.search(r"^## Task (\S+)", prompt, re.M)
@@ -44,6 +46,7 @@ def main() -> int:
                 "status": status,
                 "summary": f"fake {spec}",
                 "from_actor": "",
+                "questions": questions,
             }
         )
     )

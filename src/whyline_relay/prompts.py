@@ -207,6 +207,11 @@ Record any genuine decision a future reader would wonder about:
     whyline note "<one-line decision>" --because "<why>" \\
       --file .whyline/relay/draft-plan.md --actor {actor} --role {role} --task {task_id}
 
+If a decision the description and reference documents don't settle blocks the
+plan, hand off blocked with one --question per decision, and put the choices in
+the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
+anything you can reasonably decide yourself.
+
 ## How to finish
 
 Exactly one of the outcomes listed below.
@@ -219,6 +224,8 @@ You are checking a drafted plan's structure only. Round {round}.
 ## Task {task_id}
 
 {task_text}
+
+{review_feedback}
 
 ## What to check
 
@@ -237,6 +244,11 @@ Record your judgment -- this is a decision a future reader would wonder about:
 
     whyline note "<one-line judgment>" --because "<why>" \\
       --file .whyline/relay/draft-plan.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+plan, hand off blocked with one --question per decision, and put the choices in
+the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
+anything you can reasonably decide yourself.
 
 ## How to finish
 

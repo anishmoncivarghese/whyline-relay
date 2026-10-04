@@ -1327,6 +1327,10 @@ PLAN_GENERATION_PROMPT = (
     "lines below each explaining what to build and how to verify it. Base "
     "it on the Final Synthesis, translating its recommendation into "
     "concrete, ordered tasks."
+    " If a decision the brainstorm does not settle blocks part of the plan, "
+    'list it as a numbered item under an "## Open questions" heading at the '
+    "top of the file, with the choices in the question itself, e.g. "
+    '"1. Which broker? (a) Kite (b) Upstox"; still write every task you can.'
 )
 
 

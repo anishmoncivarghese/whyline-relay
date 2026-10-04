@@ -12,6 +12,7 @@ Spec: docs/superpowers/specs/2026-09-25-relay-planner-workflow.md.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import subprocess
 from pathlib import Path
 
@@ -212,7 +213,8 @@ def _run_pipeline(
                 )
                 return
             elif decision.kind == "blocked":
-                raise loop.Paused(_blocked_reason(previous), None)
+                stage_agent = pipe.roles[pipe.stages[current_stage_id].role].agent
+                raise _blocked(previous, current_stage_id, stage_agent, None)
             # "unknown"/"no-handoff": current_stage_id/feedback stand; re-run it.
 
     while True:
@@ -268,7 +270,7 @@ def _run_pipeline(
                 target,
             )
         if decision.kind == "blocked":
-            raise loop.Paused(_blocked_reason(record), target)
+            raise _blocked(record, current_stage_id, agent, target)
         if decision.kind == "unknown":
             raise loop.Paused(
                 f"unrecognised outcome {record.status!r} for stage "
@@ -344,6 +346,33 @@ def discard(root: Path) -> str:
 
 class NoPlanInProgress(RuntimeError):
     """There is no checkpointed plan draft to revise or resume."""
+
+
+class PlanQuestions(loop.Paused):
+    """A plan stage stopped to ask a person something. The checkpoint keeps
+    the stage, so answer() re-runs exactly that stage."""
+
+    def __init__(self, reason, log_path, *, questions, stage: str, agent: str):
+        super().__init__(reason, log_path)
+        self.questions = tuple(questions)
+        self.stage = stage
+        self.agent = agent
+
+
+def _blocked(record: handoff.Handoff, stage: str, agent: str, target) -> loop.Paused:
+    if record.questions:
+        return PlanQuestions(
+            _blocked_reason(record), target,
+            questions=record.questions, stage=stage, agent=agent,
+        )
+    return loop.Paused(_blocked_reason(record), target)
+
+
+def answer_feedback(questions: Sequence[str], answers: str) -> str:
+    if not questions:
+        return f"The human answered your questions:\n{answers.strip()}"
+    asked = "\n".join(f"{number}. {q}" for number, q in enumerate(questions, 1))
+    return f"You asked:\n{asked}\nThe human answered:\n{answers.strip()}"
 
 
 _STAGE_WORDS = {"draft": "drafting the plan", "review": "reviewing the draft"}
@@ -442,6 +471,36 @@ def resume_draft(
             runner=runner,
             on_stage=_announcer(print_fn),
         )
+    return draft_path(root)
+
+
+def answer(
+    root: Path,
+    settings: config.Config,
+    answers: str,
+    *,
+    print_fn=None,
+    runner: failover.Runner = subprocess.run,
+) -> Path:
+    """Re-runs the stage that asked, with the person's answers as its
+    feedback. Raises PlanQuestions again if it still needs something."""
+    saved = state.load_plan(root)
+    if saved is None:
+        raise NoPlanInProgress("no plan draft is in progress")
+    record = handoff.read(root)
+    asked = record.questions if record is not None and record.task == PLAN_TASK_ID else ()
+    _run_pipeline(
+        root,
+        settings,
+        saved.description,
+        current_stage_id=saved.stage,
+        round_=saved.round,
+        stage_visits=saved.stage_visits,
+        feedback=answer_feedback(asked, answers),
+        echo=False,
+        runner=runner,
+        on_stage=_announcer(print_fn),
+    )
     return draft_path(root)
 
 

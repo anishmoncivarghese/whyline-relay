@@ -4236,3 +4236,33 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 51b292d48a8349198d084811299d4342 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:39:26.857Z"} -->
+
+## 2026-10-04 — Planner questions raise PlanQuestions; answer() re-runs the saved stage with the answers
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RPF-8
+
+**Because:** the user chose stop-and-resume (option A); the stage that asked is the one that needs the answer
+
+**Rejected:**
+
+- Restart from the draft stage — discards a review stage's work
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: e3810abf6bfd4083b3ab88894e1da26f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:03:37.260Z"} -->
+
+## 2026-10-04 — Approve planner question-and-answer flow
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPF-8
+
+**Because:** The implementation preserves the blocked stage checkpoint, exposes questions with stage and agent context, re-runs that exact stage with human answers, re-raises questions on resume, and passes the focused and full test suites
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: 07dda5b514ad4612bd31d445233b4006 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:07:04.360Z"} -->
