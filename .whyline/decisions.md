@@ -4266,3 +4266,33 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 07dda5b514ad4612bd31d445233b4006 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:07:04.360Z"} -->
+
+## 2026-10-04 — write_roles keeps every setting of an old config except roles, backup and status_map
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RPF-9
+
+**Because:** the template used to replace the whole file, silently dropping custom agent commands, max_rounds, plan and [planner]
+
+**Rejected:**
+
+- Carry over a list of known keys — any key not on the list would still be lost
+
+**Files:** src/whyline_relay/setup.py
+
+<!-- whyline-event: c03f0890b365463aa2f835e352fc4a84 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:11:11.314Z"} -->
+
+## 2026-10-04 — Approve named plan files and config writers
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPF-9
+
+**Because:** The implementation matches the planned interfaces, preserves all legacy config content except roles, backup and status_map when installing the pipeline, scopes commits correctly, and passes the focused and full test suites
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/setup.py, tests/test_plan_files.py
+
+<!-- whyline-event: 1799cbe749e74ec8ae744beaf34bd798 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:13:44.637Z"} -->

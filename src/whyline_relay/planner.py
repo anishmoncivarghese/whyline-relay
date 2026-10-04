@@ -56,6 +56,7 @@ def approve(
     drafted_by: str,
     replace: bool = False,
     clear_checkpoint: bool = False,
+    target: Path | None = None,
 ) -> Path:
     """Writes the draft as the plan and commits only that file. Raises
     plan.PlanError for a draft that isn't a usable plan, and PlanExists when
@@ -64,11 +65,18 @@ def approve(
     problems = validate(text)
     if problems:
         raise plan.PlanError("; ".join(problems))
-    target = root / settings.plan
+    named = target is not None
+    target = target if named else root / settings.plan
     if target.exists() and not replace:
         raise PlanExists(f"{target} already exists")
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    gitcheck.commit_paths(root, [target], f"docs: add plan drafted by {drafted_by}")
+    if named:
+        shown = target.relative_to(root).as_posix() if target.is_relative_to(root) else str(target)
+        message = f"docs: add plan {shown} drafted by {drafted_by}"
+    else:
+        message = f"docs: add plan drafted by {drafted_by}"
+    gitcheck.commit_paths(root, [target], message)
     if clear_checkpoint:
         state.clear_plan(root)
     return target

@@ -141,6 +141,71 @@ def _set_backup(text: str, chain: list[str]) -> str:
     return content
 
 
+def _set_top_level(text: str, key: str, value: str) -> str:
+    """Sets `key = "value"` above the first table, keeping everything else."""
+    lines = text.splitlines()
+    first_table = next(
+        (i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines)
+    )
+    for index in range(first_table):
+        match = re.match(rf"^(\s*{key}\s*=\s*).*$", lines[index])
+        if match:
+            lines[index] = f'{match.group(1)}"{value}"'
+            return "\n".join(lines).rstrip("\n") + "\n"
+    insert_at = first_table
+    while insert_at > 0 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    new = [f'{key} = "{value}"']
+    if first_table < len(lines):
+        new.append("")
+    lines[insert_at:first_table] = new
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _write_config(root: Path, change, message: str, commit: bool) -> Path:
+    config_file = role_paths(root)[0]
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    existing = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
+    config_file.write_text(change(existing).lstrip("\n"), encoding="utf-8")
+    if commit:
+        gitcheck.commit_paths(root, [config_file], message)
+    return config_file
+
+
+def write_plan(root: Path, plan: str, *, commit: bool = True) -> Path:
+    """Points the relay at `plan` (a path relative to the repository)."""
+    return _write_config(
+        root, lambda text: _set_top_level(text, "plan", plan), f"setup: run {plan}", commit
+    )
+
+
+def write_planner(root: Path, draft: str, review: str, *, commit: bool = True) -> Path:
+    """Who drafts and who reviews plans ([planner] draft / review)."""
+    return _write_config(
+        root,
+        lambda text: _set_keys(text, "planner", {"draft": draft, "review": review}),
+        f"setup: plans drafted by {draft}, reviewed by {review}",
+        commit,
+    )
+
+
+_TABLE_HEADER = re.compile(r"^\s*\[\[?([^\]]+)\]\]?\s*(#.*)?$")
+
+
+def _without_tables(text: str, names: set[str]) -> str:
+    """Drops the named top-level tables (header line through the line before
+    the next header), keeping every other line exactly as it was."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        header = _TABLE_HEADER.match(line)
+        if header:
+            skipping = header.group(1).strip() in names
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept).strip("\n")
+
+
 def write_roles(
     root: Path,
     implementer: str,
@@ -162,9 +227,11 @@ def write_roles(
             "implementer": implementer, "tester": tester, "reviewer": reviewer,
         })
     else:
-        content = PIPELINE_CONFIG_TEMPLATE.format(
+        template = PIPELINE_CONFIG_TEMPLATE.format(
             implementer=implementer, tester=tester, reviewer=reviewer
         )
+        kept = _without_tables(existing, {"roles", "backup", "status_map"})
+        content = f"{kept}\n\n{template}" if kept else template
     content = _set_backup(content, [name for name in backup if name])
     config_file.write_text(content, encoding="utf-8")
     test_prompt.parent.mkdir(parents=True, exist_ok=True)
