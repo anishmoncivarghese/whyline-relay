@@ -4420,3 +4420,34 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: de72e82b5ecb4338a5fb6d78451cc76c -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:19:14.913Z"} -->
+
+## 2026-10-04 — Pop release role before role table validation and store as Config.release_role
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-1
+
+**Because:** human is not an agent adapter and would fail pipeline role validation, while legacy configs restrict roles table keys
+
+**Rejected:**
+
+- include release in Roles dataclass — breaks legacy 2-role structure and status mapping
+- leave release in role_values — legacy role validation rejects unexpected keys
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/setup.py
+
+<!-- whyline-event: b685af14c28544cab6dba018f90dfdb7 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:16:10.968Z"} -->
+
+## 2026-10-04 — Approve release_role implementation: defaults to human, validated against builtin/configured/recipe agents, preserved by write_release and write_roles across both config formats
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FV2-1
+
+**Because:** pop-before-validate avoids legacy unexpected-key checks; _set_keys preserves release in pipeline format; migration branch explicitly re-applies the old release value before the roles table is dropped; full suite passes (uv run pytest -q, exit 0)
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/setup.py, tests/test_release_role.py
+
+<!-- whyline-event: ebc387c9dc2642f691ca79f73eead16d -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:21:50.952Z"} -->

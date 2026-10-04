@@ -218,6 +218,7 @@ class Config:
     pipeline: "pipeline_module.Pipeline | None" = None
     pipeline_fingerprint: str = ""
     planner: PlannerConfig = field(default_factory=PlannerConfig)
+    release_role: str = "human"
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -296,7 +297,18 @@ def load(root: Path) -> Config:
         agents[name] = list(command)
         configured_adapters[name] = "generic"
 
-    role_values = raw.get("roles") or {}
+    role_values = dict(raw.get("roles") or {})
+    release_role = role_values.pop("release", "human")
+    if not isinstance(release_role, str) or not release_role:
+        raise ConfigError('[roles] release must be "human" or an agent name')
+    if (
+        release_role != "human"
+        and release_role not in adapters.BUILTIN
+        and release_role not in configured_adapters
+    ):
+        raise ConfigError(
+            f'[roles] release must be "human" or a known agent, not {release_role!r}'
+        )
     if "backup" in role_values:
         raise ConfigError(
             "[roles] backup is no longer supported; configure a shared "
@@ -415,4 +427,5 @@ def load(root: Path) -> Config:
         pipeline=compiled_pipeline,
         pipeline_fingerprint=pipeline_fp,
         planner=planner_cfg,
+        release_role=release_role,
     )

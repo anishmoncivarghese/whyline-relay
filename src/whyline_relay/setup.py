@@ -189,6 +189,14 @@ def write_planner(root: Path, draft: str, review: str, *, commit: bool = True) -
     )
 
 
+def write_release(root: Path, value: str, *, commit: bool = True) -> Path:
+    """Who does the plan's release tasks: "human" (the default) or an agent."""
+    return _write_config(
+        root, lambda text: _set_keys(text, "roles", {"release": value}),
+        f"setup: release tasks by {value}", commit,
+    )
+
+
 _TABLE_HEADER = re.compile(r"^\s*\[\[?([^\]]+)\]\]?\s*(#.*)?$")
 
 
@@ -227,11 +235,21 @@ def write_roles(
             "implementer": implementer, "tester": tester, "reviewer": reviewer,
         })
     else:
+        existing_release = None
+        if existing:
+            try:
+                old = tomllib.loads(existing)
+                if isinstance(old.get("roles"), dict):
+                    existing_release = old["roles"].get("release")
+            except tomllib.TOMLDecodeError:
+                pass
         template = PIPELINE_CONFIG_TEMPLATE.format(
             implementer=implementer, tester=tester, reviewer=reviewer
         )
         kept = _without_tables(existing, {"roles", "backup", "status_map"})
         content = f"{kept}\n\n{template}" if kept else template
+        if isinstance(existing_release, str) and existing_release:
+            content = _set_keys(content, "roles", {"release": existing_release})
     content = _set_backup(content, [name for name in backup if name])
     config_file.write_text(content, encoding="utf-8")
     test_prompt.parent.mkdir(parents=True, exist_ok=True)
