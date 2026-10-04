@@ -16,7 +16,7 @@ tag, bump the version or publish -- a human releases afterwards.
   tests/test_attachments.py. Verify: uv run pytest tests/test_attachments.py -q,
   then uv run pytest -q.
 
-- [ ] ATT-3: Chat turns and brainstorm passes take attachments
+- [x] ATT-3: Chat turns and brainstorm passes take attachments
   Implement "Task 3" from the plan: chat.run_turn and _execute_agent_call take
   attachments (prompt block appended, codex image flags added, prompt still
   last), and run_pass_zero, run_review_pass, run_final_synthesis and
