@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +12,7 @@ from pathlib import Path
 from whyline_relay import (
     adapters,
     agents,
+    attachments as attachment_delivery,
     config,
     failover,
     gitcheck,
@@ -96,6 +97,7 @@ def run_agent(
     stage: str = "",
     profile: str = "",
     prompt_suffix: str = "",
+    attachments: Sequence[Path] = (),
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
@@ -125,6 +127,12 @@ def run_agent(
         stage=stage,
         profile=profile,
     ) + prompt_suffix
+    block = attachment_delivery.prompt_block(attachments, root)
+    if block:
+        prompt = f"{prompt}\n\n{block}"
+    command = attachment_delivery.command_with_images(
+        command, adapter.name, attachments
+    )
     log_role = (
         log_suffix
         if log_suffix is not None

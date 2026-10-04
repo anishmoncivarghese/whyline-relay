@@ -4373,3 +4373,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: ad5a445f6c76440b90eec050c199d482 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:02:48.147Z"} -->
+
+## 2026-10-04 — PlanState stores repo-relative attachment paths and reuses them on revise, resume, and answer
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** ATT-4
+
+**Because:** repo-relative paths keep checkpoints portable and JSON-serializable while ensuring all planner stages and resumes receive the user attachments
+
+**Rejected:**
+
+- absolute paths in PlanState — breaks portability across workspaces and machines
+
+**Files:** src/whyline_relay/state.py, src/whyline_relay/planner.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 28f3d0a3caa44315aea495bc20782ccf -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:09:27.394Z"} -->
+
+## 2026-10-04 — Approve planner attachment persistence and reuse
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** ATT-4
+
+**Because:** The implementation stores portable repo-relative attachment paths, preserves them across all planner checkpoints and continuation paths, delivers them through the shared agent runner, covers legacy checkpoints and native image delivery, and the full test suite passes
+
+**Rejected:**
+
+- Request changes — no functional, compatibility, safety, or test-coverage defect was found
+
+**Files:** src/whyline_relay/state.py, src/whyline_relay/loop.py, src/whyline_relay/planner.py, tests/test_planner_attachments.py
+
+<!-- whyline-event: 2c7bb36f5aac49a4b672b1575d228087 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T17:12:08.998Z"} -->

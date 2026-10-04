@@ -140,6 +140,8 @@ def _checkpoint(
     round_: int,
     stage_visits: dict[str, int],
     feedback: str,
+    *,
+    attachments: Sequence[str] = (),
 ) -> None:
     state.save_plan(
         root,
@@ -153,6 +155,7 @@ def _checkpoint(
             draft_path=str(draft_path(root)),
             paused_reason="",
             log_path="",
+            attachments=list(attachments),
         ),
     )
 
@@ -167,6 +170,7 @@ def _run_pipeline(
     stage_visits: dict[str, int] | None = None,
     feedback: str = "",
     consult_handoff: bool = False,
+    attachments: Sequence[str] = (),
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
     on_stage=None,
@@ -196,6 +200,7 @@ def _run_pipeline(
     for name in effective_agents.values():
         init.ensure_permission_files(root, config.adapter_for(settings, name).name)
     stage_visits = dict(stage_visits) if stage_visits else {current_stage_id: round_}
+    paths = [root / a for a in attachments]
 
     if consult_handoff:
         previous = handoff.read(root)
@@ -217,7 +222,13 @@ def _run_pipeline(
                 feedback = previous.summary
             elif decision.kind == "complete":
                 _checkpoint(
-                    root, description, "@complete", round_, stage_visits, feedback
+                    root,
+                    description,
+                    "@complete",
+                    round_,
+                    stage_visits,
+                    feedback,
+                    attachments=attachments,
                 )
                 return
             elif decision.kind == "blocked":
@@ -232,7 +243,13 @@ def _run_pipeline(
         previous_id = previous.event_id if previous else None
         whylinecmd.claim(root, task.task_id, agent, stage.role)
         _checkpoint(
-            root, description, current_stage_id, round_, stage_visits, feedback
+            root,
+            description,
+            current_stage_id,
+            round_,
+            stage_visits,
+            feedback,
+            attachments=attachments,
         )
         if on_stage is not None:
             on_stage(stage.id, agent)
@@ -256,6 +273,7 @@ def _run_pipeline(
             prompt_suffix=prompts.stage_footer(
                 stage, pipe, "default", effective_agents, agent, task.task_id
             ),
+            attachments=paths,
             runner=runner,
         )
         record = handoff.read(root)
@@ -286,7 +304,15 @@ def _run_pipeline(
                 target,
             )
         if decision.kind == "complete":
-            _checkpoint(root, description, "@complete", round_, stage_visits, feedback)
+            _checkpoint(
+                root,
+                description,
+                "@complete",
+                round_,
+                stage_visits,
+                feedback,
+                attachments=attachments,
+            )
             return
         feedback = record.summary
         current_stage_id = decision.target_stage
@@ -336,6 +362,7 @@ def resume(
             stage_visits=saved.stage_visits,
             feedback=saved.feedback,
             consult_handoff=True,
+            attachments=saved.attachments,
             echo=echo,
             runner=runner,
         )
@@ -405,6 +432,7 @@ def draft(
     settings: config.Config,
     description: str,
     *,
+    attachments: Sequence[Path] = (),
     print_fn=None,
     runner: failover.Runner = subprocess.run,
 ) -> Path:
@@ -415,10 +443,14 @@ def draft(
         raise PlanAlreadyInProgress(
             "a plan draft is already in progress; resume it or discard it first"
         )
+    rel_attachments = [
+        p.resolve().relative_to(root.resolve()).as_posix() for p in attachments
+    ]
     _run_pipeline(
         root,
         settings,
         description,
+        attachments=rel_attachments,
         echo=False,
         runner=runner,
         on_stage=_announcer(print_fn),
@@ -446,6 +478,7 @@ def revise(
         round_=1,
         stage_visits={"draft": 1},
         feedback=feedback,
+        attachments=saved.attachments,
         echo=False,
         runner=runner,
         on_stage=_announcer(print_fn),
@@ -475,6 +508,7 @@ def resume_draft(
             stage_visits=saved.stage_visits,
             feedback=saved.feedback,
             consult_handoff=True,
+            attachments=saved.attachments,
             echo=False,
             runner=runner,
             on_stage=_announcer(print_fn),
@@ -505,6 +539,7 @@ def answer(
         round_=saved.round,
         stage_visits=saved.stage_visits,
         feedback=answer_feedback(asked, answers),
+        attachments=saved.attachments,
         echo=False,
         runner=runner,
         on_stage=_announcer(print_fn),

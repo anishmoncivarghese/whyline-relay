@@ -39,6 +39,7 @@ class PlanState:
     draft_path: str
     paused_reason: str
     log_path: str
+    attachments: list[str] = field(default_factory=list)
 
 
 def path(root: Path) -> Path:
