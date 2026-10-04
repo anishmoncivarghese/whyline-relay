@@ -24,7 +24,7 @@ never push, tag, bump the version or publish.
   HOME/USERPROFILE at a temporary directory; never touch the real
   ~/.gemini/antigravity-cli/settings.json. Verify: uv run pytest -q, all passing.
 
-- [ ] RPF-3: Failures say why
+- [x] RPF-3: Failures say why
   Implement "Task 3: Failures say why" from
   .whyline/relay/rpf/implementation-plan.md: add Claude's limit wordings to
   agents.RATE_LIMIT_MARKERS, add brainstorm.failure_reason (category plus the
