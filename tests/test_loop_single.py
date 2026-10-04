@@ -245,11 +245,27 @@ def test_unknown_status_pauses(repo: Path):
     assert "banana" in raised.value.reason
 
 
-def test_approved_without_a_commit_pauses(repo: Path):
+def test_approved_without_a_reviewer_commit_is_committed_by_the_relay(
+    repo: Path,
+):
     settings = settings_using("review", "approve", repo)
     base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed is True
+
+
+def test_resume_of_approved_task_without_a_commit_pauses(repo: Path):
+    write_handoff(repo, "WL-1", "claude", "approved")
+    base = loop.gitcheck.head_commit(repo)
     with pytest.raises(loop.Paused) as raised:
-        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+        loop.run_task(
+            repo,
+            settings_using("review", "approve", repo),
+            TASK,
+            base_commit=base,
+            echo=False,
+            resume=True,
+        )
     assert "no commit" in raised.value.reason.lower()
 
 

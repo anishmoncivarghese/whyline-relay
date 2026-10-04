@@ -4549,3 +4549,34 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 923a523b414e41818d534dda309bcc30 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:51:32.482Z"} -->
+
+## 2026-10-04 — Commit approved work in two-role mode via _commit_and_approve unless reviewer already committed
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-4
+
+**Because:** unifies two-role and pipeline modes so the relay consistently creates the finishing commit while remaining backward-compatible with older review prompts
+
+**Rejected:**
+
+- require reviewer to commit — inconsistent with pipeline mode and leaves commits unstandardized
+- always commit without checking commit_verified — creates duplicate commits if reviewer already committed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/prompts.py
+
+<!-- whyline-event: 90f4f3e7b02747e5bfe230645f194d75 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T19:08:12.833Z"} -->
+
+## 2026-10-04 — Approve FV2-4: relay auto-commits approved work via _commit_and_approve unless already committed
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FV2-4
+
+**Because:** commit_message gives typed, task-id-suffixed messages; _run_task's APPROVED branch checks gitcheck.commit_verified first so older review prompts that already commit are not double-committed; REVIEW prompt and golden file updated to say reviewer does not commit; resume path still requires a real commit for a stale approved handoff rather than auto-committing it, preventing spurious commits on resume; uv run pytest -q passes 822/822
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/prompts.py, tests/test_auto_commit.py, tests/test_loop_single.py
+
+<!-- whyline-event: e9e5249fbdcc41bd8cb2e549b632b8f8 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T19:18:48.611Z"} -->

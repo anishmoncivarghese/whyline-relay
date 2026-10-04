@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from collections.abc import Callable, Sequence
@@ -202,6 +203,24 @@ def _approved(
     return Outcome(task_id=task.task_id, rounds=round_, committed=True)
 
 
+_TYPES = ("feat", "fix", "docs", "test", "chore", "refactor")
+_TYPE_PREFIX = re.compile(r"^(feat|fix|docs|test|chore|refactor)(\([^)]*\))?:\s*", re.I)
+
+
+def commit_message(task: plan.Task, summary: str) -> str:
+    summary = (summary or "").strip()
+    if not summary:
+        return f"chore: {task.task_id} needed no changes ({task.task_id})"
+    match = _TYPE_PREFIX.match(summary)
+    if match:
+        kind, summary = match.group(1).lower(), summary[match.end():]
+    else:
+        title = task.text.split(":", 1)[-1].strip().split(" ", 1)[0].lower()
+        kind = title if title in _TYPES[1:] else "feat"
+    first = re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0].rstrip(".")
+    return f"{kind}: {first[:72]} ({task.task_id})"
+
+
 def _commit_and_approve(
     root: Path,
     task: plan.Task,
@@ -225,8 +244,7 @@ def _commit_and_approve(
             f"{base_commit[:12]}` (your files stay), then resume",
             log,
         )
-    body = summary.strip() or f"chore: finish {task.task_id}"
-    gitcheck.commit_all(root, f"{body} ({task.task_id})")
+    gitcheck.commit_all(root, commit_message(task, summary))
     return _approved(root, task, base_commit, round_, log)
 
 
@@ -396,7 +414,9 @@ def _run_task(
                 target,
             )
         if move == routing.APPROVED:
-            return _approved(root, task, base_commit, round_, target)
+            if gitcheck.commit_verified(root, base_commit, task.task_id):
+                return _approved(root, task, base_commit, round_, target)  # an older review.md committed
+            return _commit_and_approve(root, task, base_commit, round_, target, record.summary)
         if move == routing.IMPLEMENT:
             feedback = record.summary
             round_ += 1

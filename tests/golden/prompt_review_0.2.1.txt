@@ -1,6 +1,6 @@
 PACKET
 
-You are the reviewer and committer for this task. Round 2.
+You are the reviewer for this task. Round 2.
 
 ## Task T-1
 
@@ -29,12 +29,10 @@ Record your ruling — reviewing is deciding:
 
 Exactly one of these outcomes.
 
-Approve: commit the work with the task id in the message, then hand off.
+Approve: do not commit -- whyline commits the approved work itself. Hand off:
 
-    git add -A
-    git commit -m "<type>: <what changed> (T-1)"
     whyline handoff T-1 --from claude --to claude --status approved \
-      --summary "<what you approved>"
+      --summary "<what changed, as a one-line commit summary>"
 
 Request changes: do not commit. Hand back with concrete, actionable feedback.
 

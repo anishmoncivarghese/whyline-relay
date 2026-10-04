@@ -63,7 +63,7 @@ reads that record to decide what happens next, and stops if it is missing.
 
 REVIEW = """{sync_packet}
 
-You are the reviewer and committer for this task. Round {round}.
+You are the reviewer for this task. Round {round}.
 
 ## Task {task_id}
 
@@ -91,12 +91,10 @@ Record your ruling — reviewing is deciding:
 
 Exactly one of these outcomes.
 
-Approve: commit the work with the task id in the message, then hand off.
+Approve: do not commit -- whyline commits the approved work itself. Hand off:
 
-    git add -A
-    git commit -m "<type>: <what changed> ({task_id})"
     whyline handoff {task_id} --from {reviewer} --to {reviewer} --status approved \\
-      --summary "<what you approved>"
+      --summary "<what changed, as a one-line commit summary>"
 
 Request changes: do not commit. Hand back with concrete, actionable feedback.
 
