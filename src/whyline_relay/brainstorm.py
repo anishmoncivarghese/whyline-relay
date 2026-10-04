@@ -211,6 +211,39 @@ def classify_failure(
     return FAILURE_GENERIC
 
 
+def _one_line(text: str) -> str:
+    """The detail worth showing: a JSON result's text, else the last
+    non-blank line; printable characters only, at most 160."""
+    from whyline_relay.adapters.base import json_object
+
+    parsed = json_object(text)
+    if isinstance(parsed, dict):
+        for key in ("result", "error", "message"):
+            if isinstance(parsed.get(key), str) and parsed[key].strip():
+                text = parsed[key]
+                break
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return "".join(ch for ch in lines[-1].strip() if ch.isprintable())[:160].strip()
+
+
+def failure_reason(
+    record: dict | None = None,
+    error: BaseException | None = None,
+) -> str:
+    """classify_failure's category plus the agent's own words, so a usage
+    limit or a crash reads as itself instead of "generic non-zero failure"."""
+    category = classify_failure(record=record, error=error)
+    if error is not None:
+        detail = _one_line(str(error))
+    else:
+        detail = _one_line(str((record or {}).get("response") or "")) or _one_line(
+            str((record or {}).get("raw") or "")
+        )
+    return f"{category} — {detail}" if detail and detail != category else category
+
+
 @dataclass(frozen=True)
 class ProgressEvent:
     """One structured update for a brainstorm agent turn.
@@ -452,7 +485,7 @@ def _emit_outcome(watch: _TurnWatch, record: dict) -> None:
     if record["ok"]:
         watch.emit("succeeded")
         return
-    reason = classify_failure(record=record)
+    reason = failure_reason(record=record)
     watch.emit("failed", reason=reason)
 
 
@@ -808,27 +841,24 @@ def run_pass_zero(
             )
         except Exception as error:
             category = classify_failure(error=error)
-            detail = str(error).strip()
             status = (
                 "skipped"
                 if isinstance(error, (agents.AgentMissing, chat.AgentUnavailable))
                 else "failed"
             )
-            watch.emit(status, reason=category)
-            msg = (
-                f"{label} could not research this pass: {category}: {detail}"
-                if detail and detail != category
-                else f"{label} could not research this pass: {category}"
-            )
-            print_fn(msg)
+            reason = failure_reason(error=error)
+            watch.emit(status, reason=reason)
+            print_fn(f"{label} could not research this pass: {reason}")
             status_map[agent_key] = AgentStatus(status=status, reason=category)
             continue
 
         if not record["ok"]:
-            category = classify_failure(record=record)
-            watch.emit("failed", reason=category)
-            print_fn(f"{label} could not research this pass: {category}")
-            status_map[agent_key] = AgentStatus(status="failed", reason=category)
+            reason = failure_reason(record=record)
+            watch.emit("failed", reason=reason)
+            print_fn(f"{label} could not research this pass: {reason}")
+            status_map[agent_key] = AgentStatus(
+                status="failed", reason=classify_failure(record=record)
+            )
             continue
 
         _emit_outcome(watch, record)
@@ -1065,9 +1095,8 @@ def run_review_pass(
             results[agent_key] = current_actual
             continue
         except Exception as error:
-            category = classify_failure(error=error)
-            watch.emit("failed", reason=category)
-            print_fn(f"{label} could not review this pass: {category}: {error}")
+            watch.emit("failed", reason=failure_reason(error=error))
+            print_fn(f"{label} could not review this pass: {failure_reason(error=error)}")
             _restore_shared(root, shared, pre_turn_content, topic, agent_key)
             results[agent_key] = current_actual
             continue
@@ -1262,8 +1291,7 @@ def run_final_synthesis(
             last_record = None
             continue
         except Exception as error:
-            category = classify_failure(error=error)
-            watch.emit("failed", reason=category)
+            watch.emit("failed", reason=failure_reason(error=error))
             _strip_final_synthesis(shared)
             last_error = error
             last_record = None

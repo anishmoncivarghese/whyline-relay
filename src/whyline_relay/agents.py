@@ -34,6 +34,11 @@ RATE_LIMIT_MARKERS = (
     "rate_limit",
     "quota exceeded",
     "too many requests",
+    "hit your limit",
+    "limit reached",
+    "session limit",
+    "weekly limit",
+    "out of credits",
 )
 
 _terminal_lock = threading.Lock()

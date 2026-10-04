@@ -87,8 +87,8 @@ def test_callback_order_across_pass_zero_review_and_synthesis(
         ("running", "claude", "synthesis", 1, None),
         ("succeeded", "claude", "synthesis", 1, None),
     ]
-    assert events[5].reason == brainstorm.FAILURE_TIMEOUT
-    assert events[8].reason == brainstorm.FAILURE_GENERIC
+    assert events[5].reason == "timeout — codex exceeded 300s"
+    assert events[8].reason == "generic non-zero failure — nope"
     # Pass-zero excludes unsuccessful research from its returned map.
     assert actual == {"claude": "claude"}
     assert reviewed == {"claude": "claude"}
@@ -143,8 +143,8 @@ def test_start_and_finish_lines_include_ordinal_label_and_elapsed(
         "[1/2] Claude starting pass-zero (0s)",
         "[1/2] Claude succeeded pass-zero (2m5s)",
         "[2/2] Codex starting pass-zero (0s)",
-        "[2/2] Codex skipped pass-zero (4s): missing executable",
-        "Codex could not research this pass: missing executable: codex is not installed",
+        "[2/2] Codex skipped pass-zero (4s): missing executable — codex is not installed",
+        "Codex could not research this pass: missing executable — codex is not installed",
     ]
 
 
@@ -418,11 +418,11 @@ def test_claude_quota_response_is_classified_printed_and_omitted(tmp_path: Path,
     # 3. Progress event for Claude reports failed with quota/rate-limit
     claude_terminal = [e for e in events if e.agent == "claude" and e.status in ("failed", "skipped")][0]
     assert claude_terminal.status == "failed"
-    assert claude_terminal.reason == brainstorm.FAILURE_RATE_LIMIT
+    assert claude_terminal.reason == "quota/rate-limit — You have exceeded your usage limit. Try again later."
 
     # 4. Printed output includes start/finish lines and pass-zero explanation
-    assert "[1/2] Claude failed pass-zero (0s): quota/rate-limit" in printed
-    assert "Claude could not research this pass: quota/rate-limit" in printed
+    assert "[1/2] Claude failed pass-zero (0s): quota/rate-limit — You have exceeded your usage limit. Try again later." in printed
+    assert "Claude could not research this pass: quota/rate-limit — You have exceeded your usage limit. Try again later." in printed
     assert "[2/2] Codex succeeded pass-zero (0s)" in printed
 
     # 5. Merge pass-zero omits Claude
@@ -480,10 +480,10 @@ def test_codex_timeout_is_classified_printed_and_omitted(tmp_path: Path, monkeyp
     # Progress event
     codex_terminal = [e for e in events if e.agent == "codex" and e.status in ("failed", "skipped")][0]
     assert codex_terminal.status == "failed"
-    assert codex_terminal.reason == brainstorm.FAILURE_TIMEOUT
+    assert codex_terminal.reason == "timeout — codex exceeded 300s and was terminated"
 
     # 3. Printed lines include timeout detail
-    assert any("Codex could not research this pass: timeout: codex exceeded 300s" in line for line in printed)
+    assert any("Codex could not research this pass: timeout — codex exceeded 300s" in line for line in printed)
     assert any("[2/2] Codex failed pass-zero" in line and "timeout" in line for line in printed)
 
     # 4. Merge pass-zero omits Codex
@@ -541,10 +541,10 @@ def test_missing_agent_is_classified_printed_and_omitted(tmp_path: Path, monkeyp
     # Progress event
     grok_terminal = [e for e in events if e.agent == "grok" and e.status in ("failed", "skipped")][0]
     assert grok_terminal.status == "skipped"
-    assert grok_terminal.reason == brainstorm.FAILURE_MISSING
+    assert grok_terminal.reason == "missing executable — grok is not installed or not on PATH"
 
     # 3. Printed lines
-    assert any("Grok could not research this pass: missing executable: grok is not installed or not on PATH" in line for line in printed)
+    assert any("Grok could not research this pass: missing executable — grok is not installed or not on PATH" in line for line in printed)
     assert any("[2/2] Grok skipped pass-zero" in line and "missing executable" in line for line in printed)
 
     # 4. Merge pass-zero omits Grok
@@ -611,11 +611,11 @@ def test_generic_failure_is_classified_printed_and_omitted(tmp_path: Path, monke
     # Progress event
     claude_terminal = [e for e in events if e.agent == "claude" and e.status in ("failed", "skipped")][0]
     assert claude_terminal.status == "failed"
-    assert claude_terminal.reason == brainstorm.FAILURE_GENERIC
+    assert claude_terminal.reason == "generic non-zero failure — unexpected segmentation fault (core dumped)"
 
     # 3. Printed lines
-    assert "[1/2] Claude failed pass-zero (0s): generic non-zero failure" in printed
-    assert "Claude could not research this pass: generic non-zero failure" in printed
+    assert "[1/2] Claude failed pass-zero (0s): generic non-zero failure — unexpected segmentation fault (core dumped)" in printed
+    assert "Claude could not research this pass: generic non-zero failure — unexpected segmentation fault (core dumped)" in printed
 
     # 4. Merge pass-zero omits Claude and cleans up partial temp file
     brainstorm.merge_pass_zero(tmp_path, models, "generic-topic")
@@ -861,7 +861,7 @@ def test_final_agent_fallback_when_requested_agent_fails_at_runtime(
         ("codex", "running"),
         ("codex", "succeeded"),
     ]
-    assert synth_events[2].reason == brainstorm.FAILURE_RATE_LIMIT
+    assert synth_events[2].reason == "quota/rate-limit — rate limit exceeded: quota exhausted"
 
     # 3. Substitution was announced
     assert any(

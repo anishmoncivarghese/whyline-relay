@@ -4189,3 +4189,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: a5947d846f1f41468c508cb0ba9a8b49 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:08:29.898Z"} -->
+
+## 2026-10-04 — Failed brainstorm turns report the category plus the agent's own last line
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** RPF-3
+
+**Because:** a usage limit was shown as 'generic non-zero failure' with the agent's message dropped
+
+**Rejected:**
+
+- Only add more limit markers — unknown failures would still say nothing
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: ec065a5e2cfa4deabe797606fd802938 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:19:32.707Z"} -->
+
+## 2026-10-04 — Approve detailed brainstorm failure reasons
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPF-3
+
+**Because:** The implementation matches RPF-3, preserves stable bare AgentStatus categories while enriching progress output, and the full test suite passes
+
+**Rejected:**
+
+- Request broader timeout-path changes — the implementation plan explicitly scopes the changed exception branches and existing timeout handling remains compatible
+
+**Files:** src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 384d24bbadf0471984f3140e56966a2e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:23:04.118Z"} -->
