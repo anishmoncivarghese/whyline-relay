@@ -13,6 +13,7 @@ Spec: docs/superpowers/specs/2026-09-25-relay-planner-workflow.md.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 import subprocess
 from pathlib import Path
 
@@ -23,6 +24,19 @@ from whyline_relay import loop
 
 
 PLAN_TASK_ID = "__plan__"
+
+
+@dataclass(frozen=True)
+class _Kind:
+    task_id: str
+    draft_name: str
+    state_name: str
+    draft_prompt: str
+    review_prompt: str
+
+
+PLAN_KIND = _Kind(PLAN_TASK_ID, "draft-plan.md", "plan-state.json", "plan-draft", "plan-review")
+SPEC_KIND = _Kind("__spec__", "draft-spec.md", "spec-state.json", "spec-draft", "spec-review")
 
 
 class PlanAlreadyInProgress(RuntimeError):
@@ -82,11 +96,11 @@ def approve(
     return target
 
 
-def draft_path(root: Path) -> Path:
-    return config.relay_dir(root) / "draft-plan.md"
+def draft_path(root: Path, kind: _Kind = PLAN_KIND) -> Path:
+    return config.relay_dir(root) / kind.draft_name
 
 
-def _pipeline_for(settings: config.Config) -> pipeline_module.Pipeline:
+def _pipeline_for(settings: config.Config, kind: _Kind = PLAN_KIND) -> pipeline_module.Pipeline:
     cfg = settings.planner
     return pipeline_module.Pipeline(
         roles={
@@ -97,14 +111,14 @@ def _pipeline_for(settings: config.Config) -> pipeline_module.Pipeline:
             "draft": pipeline_module.Stage(
                 id="draft",
                 role="draft",
-                prompt="plan-draft",
+                prompt=kind.draft_prompt,
                 transitions={"ready": "@next", "blocked": "@blocked"},
                 max_visits=cfg.max_visits,
             ),
             "review": pipeline_module.Stage(
                 id="review",
                 role="review",
-                prompt="plan-review",
+                prompt=kind.review_prompt,
                 transitions={
                     "approved": "@complete",
                     "revise": "draft",
@@ -120,9 +134,9 @@ def _pipeline_for(settings: config.Config) -> pipeline_module.Pipeline:
     )
 
 
-def _task_for(description: str) -> plan.Task:
+def _task_for(description: str, kind: _Kind = PLAN_KIND) -> plan.Task:
     return plan.Task(
-        task_id=PLAN_TASK_ID, text=description, checked=False, line_index=0
+        task_id=kind.task_id, text=description, checked=False, line_index=0
     )
 
 
@@ -142,6 +156,7 @@ def _checkpoint(
     feedback: str,
     *,
     attachments: Sequence[str] = (),
+    kind: _Kind = PLAN_KIND,
 ) -> None:
     state.save_plan(
         root,
@@ -152,11 +167,12 @@ def _checkpoint(
             stage_visits=dict(stage_visits),
             agent="",
             feedback=feedback,
-            draft_path=str(draft_path(root)),
+            draft_path=str(draft_path(root, kind=kind)),
             paused_reason="",
             log_path="",
             attachments=list(attachments),
         ),
+        name=kind.state_name,
     )
 
 
@@ -174,6 +190,7 @@ def _run_pipeline(
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
     on_stage=None,
+    kind: _Kind = PLAN_KIND,
 ) -> None:
     """Drive the draft<->review loop until "@complete" is checkpointed.
 
@@ -190,9 +207,9 @@ def _run_pipeline(
     human-initiated "request changes" round, which must not reuse a stale
     handoff left over from the review stage's own prior "approved".
     """
-    pipe = _pipeline_for(settings)
+    pipe = _pipeline_for(settings, kind=kind)
     effective_agents = {name: role.agent for name, role in pipe.roles.items()}
-    task = _task_for(description)
+    task = _task_for(description, kind=kind)
     gitcheck.ensure_relay_ignored(root)
     # Planning runs before Set up/init, so no preflight has checked for the
     # files claude's managed command names. Generated, never committed:
@@ -229,6 +246,7 @@ def _run_pipeline(
                     stage_visits,
                     feedback,
                     attachments=attachments,
+                    kind=kind,
                 )
                 return
             elif decision.kind == "blocked":
@@ -250,6 +268,7 @@ def _run_pipeline(
             stage_visits,
             feedback,
             attachments=attachments,
+            kind=kind,
         )
         if on_stage is not None:
             on_stage(stage.id, agent)
@@ -312,6 +331,7 @@ def _run_pipeline(
                 stage_visits,
                 feedback,
                 attachments=attachments,
+                kind=kind,
             )
             return
         feedback = record.summary
@@ -371,11 +391,11 @@ def resume(
     )
 
 
-def discard(root: Path) -> str:
-    saved = state.load_plan(root)
+def discard(root: Path, *, kind: _Kind = PLAN_KIND) -> str:
+    saved = state.load_plan(root, name=kind.state_name)
     if saved is None:
         return "Nothing to discard."
-    state.clear_plan(root)
+    state.clear_plan(root, name=kind.state_name)
     return f"Discarded. The draft is still at {saved.draft_path}, if you want it."
 
 
@@ -413,17 +433,19 @@ def answer_feedback(questions: Sequence[str], answers: str) -> str:
 _STAGE_WORDS = {"draft": "drafting the plan", "review": "reviewing the draft"}
 
 
-def _announcer(print_fn):
+def _announcer(print_fn, kind: _Kind = PLAN_KIND):
     if print_fn is None:
         return None
+    noun = "the spec" if kind == SPEC_KIND else "the plan"
+    words = {"draft": f"drafting {noun}", "review": "reviewing the draft"}
     return lambda stage_id, agent: print_fn(
-        f"{agent} is {_STAGE_WORDS.get(stage_id, stage_id)}"
+        f"{agent} is {words.get(stage_id, stage_id)}"
     )
 
 
-def pending_description(root: Path) -> str | None:
+def pending_description(root: Path, *, kind: _Kind = PLAN_KIND) -> str | None:
     """What the checkpointed draft was asked to build, or None."""
-    saved = state.load_plan(root)
+    saved = state.load_plan(root, name=kind.state_name)
     return saved.description if saved is not None else None
 
 
@@ -435,11 +457,12 @@ def draft(
     attachments: Sequence[Path] = (),
     print_fn=None,
     runner: failover.Runner = subprocess.run,
+    kind: _Kind = PLAN_KIND,
 ) -> Path:
     """Runs the draft<->review pipeline with no terminal gate and returns the
     draft's path. The checkpoint stays until approve(clear_checkpoint=True)
     or discard()."""
-    if state.load_plan(root) is not None:
+    if state.load_plan(root, name=kind.state_name) is not None:
         raise PlanAlreadyInProgress(
             "a plan draft is already in progress; resume it or discard it first"
         )
@@ -453,9 +476,10 @@ def draft(
         attachments=rel_attachments,
         echo=False,
         runner=runner,
-        on_stage=_announcer(print_fn),
+        on_stage=_announcer(print_fn, kind=kind),
+        kind=kind,
     )
-    return draft_path(root)
+    return draft_path(root, kind=kind)
 
 
 def revise(
@@ -465,9 +489,10 @@ def revise(
     *,
     print_fn=None,
     runner: failover.Runner = subprocess.run,
+    kind: _Kind = PLAN_KIND,
 ) -> Path:
     """Re-drafts with a human's requested change, then re-reviews."""
-    saved = state.load_plan(root)
+    saved = state.load_plan(root, name=kind.state_name)
     if saved is None:
         raise NoPlanInProgress("no plan draft is in progress")
     _run_pipeline(
@@ -481,9 +506,10 @@ def revise(
         attachments=saved.attachments,
         echo=False,
         runner=runner,
-        on_stage=_announcer(print_fn),
+        on_stage=_announcer(print_fn, kind=kind),
+        kind=kind,
     )
-    return draft_path(root)
+    return draft_path(root, kind=kind)
 
 
 def resume_draft(
@@ -492,10 +518,11 @@ def resume_draft(
     *,
     print_fn=None,
     runner: failover.Runner = subprocess.run,
+    kind: _Kind = PLAN_KIND,
 ) -> Path:
     """Finishes a checkpointed draft (a crash, or a closed console) without
     the terminal gate."""
-    saved = state.load_plan(root)
+    saved = state.load_plan(root, name=kind.state_name)
     if saved is None:
         raise NoPlanInProgress("no plan draft is in progress")
     if saved.stage != "@complete":
@@ -511,9 +538,10 @@ def resume_draft(
             attachments=saved.attachments,
             echo=False,
             runner=runner,
-            on_stage=_announcer(print_fn),
+            on_stage=_announcer(print_fn, kind=kind),
+            kind=kind,
         )
-    return draft_path(root)
+    return draft_path(root, kind=kind)
 
 
 def answer(
@@ -523,14 +551,15 @@ def answer(
     *,
     print_fn=None,
     runner: failover.Runner = subprocess.run,
+    kind: _Kind = PLAN_KIND,
 ) -> Path:
     """Re-runs the stage that asked, with the person's answers as its
     feedback. Raises PlanQuestions again if it still needs something."""
-    saved = state.load_plan(root)
+    saved = state.load_plan(root, name=kind.state_name)
     if saved is None:
         raise NoPlanInProgress("no plan draft is in progress")
     record = handoff.read(root)
-    asked = record.questions if record is not None and record.task == PLAN_TASK_ID else ()
+    asked = record.questions if record is not None and record.task == kind.task_id else ()
     _run_pipeline(
         root,
         settings,
@@ -542,9 +571,10 @@ def answer(
         attachments=saved.attachments,
         echo=False,
         runner=runner,
-        on_stage=_announcer(print_fn),
+        on_stage=_announcer(print_fn, kind=kind),
+        kind=kind,
     )
-    return draft_path(root)
+    return draft_path(root, kind=kind)
 
 
 def review_gate(

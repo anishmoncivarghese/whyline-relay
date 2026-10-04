@@ -255,6 +255,88 @@ anything you can reasonably decide yourself.
 Exactly one of the outcomes listed below.
 """
 
+SPEC_DRAFT = """{sync_packet}
+
+You are drafting a design spec. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to draft
+
+Write a design spec at `.whyline/relay/draft-spec.md` with these sections:
+- `# <title>`
+- `## Why`
+- `## Decisions`
+- `## Design` (numbered `###` sections)
+- `## Error handling`
+- `## Testing`
+- `## Releases`
+
+Base it on the brainstorm document or the description named in the task, and on
+any attachments listed. Recommend rather than list options. Do not write
+placeholder text like "TBD", "TODO", or "fill in" anywhere -- every section must
+be concrete and specific.
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --file .whyline/relay/draft-spec.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+spec, hand off blocked with one --question per decision, and put the choices in
+the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
+anything you can reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+SPEC_REVIEW = """{sync_packet}
+
+You are checking a drafted design spec's structure and completeness. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+{review_feedback}
+
+## What to check
+
+Read `.whyline/relay/draft-spec.md`. Check that every required section exists:
+`# <title>`, `## Why`, `## Decisions`, `## Design`, `## Error handling`,
+`## Testing`, and `## Releases`. Confirm that nothing contradicts anything else,
+there is no placeholder text ("TBD", "TODO", "fill in"), and it is specific
+enough to plan from. Don't judge whether it is the right product -- that judgment
+belongs to a human, not you.
+
+If everything checks out, hand off with status `approved`. If something is
+genuinely missing, contradictory, or broken, hand off with status `revise` with
+concrete, specific feedback about exactly what to fix. If a human decision is
+needed to proceed, hand off with status `blocked`.
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file .whyline/relay/draft-spec.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+spec, hand off blocked with one --question per decision, and put the choices in
+the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
+anything you can reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
 TEMPLATES = {
     "implement": IMPLEMENT,
     "review": REVIEW,
@@ -262,6 +344,8 @@ TEMPLATES = {
     "security": SECURITY,
     "plan-draft": PLAN_DRAFT,
     "plan-review": PLAN_REVIEW,
+    "spec-draft": SPEC_DRAFT,
+    "spec-review": SPEC_REVIEW,
 }
 
 

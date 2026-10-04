@@ -4451,3 +4451,37 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: ebc387c9dc2642f691ca79f73eead16d -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:21:50.952Z"} -->
+
+## 2026-10-04 — Thread planner._Kind through planner and state to power the spec pipeline
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-2
+
+**Because:** allows spec and plan drafting to share stage logic, timeouts, and visit caps while having isolated checkpoints and draft files so both can be in flight simultaneously
+
+**Rejected:**
+
+- separate spec runner module — duplicates pipeline execution, handoff parsing, and error handling
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/specs.py, src/whyline_relay/state.py
+
+<!-- whyline-event: 8954a0c1c15f427796ce9e7535ea58f9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:31:52.853Z"} -->
+
+## 2026-10-04 — Approve FV2-2 spec pipeline: planner._Kind threading, specs.py, SPEC_DRAFT/SPEC_REVIEW prompts, RELAY_IGNORE entries
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FV2-2
+
+**Because:** diff matches Task 2 of the FV2 implementation plan verbatim (kind-parameterized planner functions, isolated state/draft files, specs.py reusing planner machinery instead of a separate runner); full suite passes (uv run pytest -q, exit 0) with existing planner tests unchanged; new tests cover checkpoint isolation between simultaneous spec/plan sessions, commit scoping (only the spec file is committed), answer-reruns-asking-stage, discard, and approve validation/replace
+
+**Rejected:**
+
+- requesting changes for the approve() logic duplication between planner.approve and specs.approve — not a defect -- plan.validate() requires checkbox tasks which a spec document correctly must not have, so specs.py needs its own write/commit path
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/specs.py, src/whyline_relay/state.py, src/whyline_relay/prompts.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: 551990a8b1ef44fea6065e6c0961ae3b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T18:40:09.176Z"} -->

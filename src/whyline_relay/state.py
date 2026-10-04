@@ -67,27 +67,27 @@ def clear(root: Path) -> None:
     path(root).unlink(missing_ok=True)
 
 
-def plan_path(root: Path) -> Path:
-    return config.relay_dir(root) / "plan-state.json"
+def plan_path(root: Path, name: str = "plan-state.json") -> Path:
+    return config.relay_dir(root) / name
 
 
-def save_plan(root: Path, value: PlanState) -> None:
+def save_plan(root: Path, value: PlanState, name: str = "plan-state.json") -> None:
     """Write atomically, exactly like save() -- a half-written checkpoint would
     strand a `resume` the same way for either kind of state."""
-    target = plan_path(root)
+    target = plan_path(root, name=name)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(asdict(value), indent=2), encoding="utf-8")
     os.replace(temporary, target)
 
 
-def load_plan(root: Path) -> PlanState | None:
+def load_plan(root: Path, name: str = "plan-state.json") -> PlanState | None:
     try:
-        record = json.loads(plan_path(root).read_text(encoding="utf-8"))
+        record = json.loads(plan_path(root, name=name).read_text(encoding="utf-8"))
         return PlanState(**record)
     except (OSError, json.JSONDecodeError, TypeError):
         return None
 
 
-def clear_plan(root: Path) -> None:
-    plan_path(root).unlink(missing_ok=True)
+def clear_plan(root: Path, name: str = "plan-state.json") -> None:
+    plan_path(root, name=name).unlink(missing_ok=True)
