@@ -15,7 +15,7 @@ never push, tag, bump the version or publish.
   README paragraph. Verify: uv run pytest tests/test_recipes.py -q, then
   uv run pytest -q, all passing.
 
-- [ ] RPF-2: Antigravity trust helpers
+- [x] RPF-2: Antigravity trust helpers
   Implement "Task 2: Antigravity trust helpers" from
   .whyline/relay/rpf/implementation-plan.md: create src/whyline_relay/antigravity.py
   (settings_path, is_trusted, trust, decline, is_declined, forget_decline,
