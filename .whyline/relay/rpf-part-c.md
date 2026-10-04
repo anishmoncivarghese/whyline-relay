@@ -18,7 +18,7 @@ version or publish.
   Verify: uv run pytest tests/test_planner_questions.py -q, then
   uv run pytest -q, all passing.
 
-- [ ] RPF-9: Named plan files and config writers
+- [x] RPF-9: Named plan files and config writers
   Implement "Task 9: Named plan files and config writers" from the plan:
   planner.approve(target=...), setup._set_top_level, setup.write_plan,
   setup.write_planner, and write_roles keeping every line of an older config
