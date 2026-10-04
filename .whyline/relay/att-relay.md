@@ -23,7 +23,7 @@ tag, bump the version or publish -- a human releases afterwards.
   generate_plan_from_synthesis pass them to every turn. Add
   tests/test_chat_attachments.py. Verify: uv run pytest -q.
 
-- [ ] ATT-4: The planner keeps attachments
+- [x] ATT-4: The planner keeps attachments
   Implement "Task 4" from the plan: PlanState.attachments (default empty, old
   checkpoints still load), loop.run_agent(attachments=...), and planner.draft
   saving them so revise, resume_draft and answer reuse them. Add
