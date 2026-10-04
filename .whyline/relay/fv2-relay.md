@@ -20,7 +20,7 @@ publish -- a human releases afterwards.
   SPEC_DRAFT and SPEC_REVIEW prompts, RELAY_IGNORE entries. Existing planner
   tests must pass unchanged. Verify: uv run pytest -q.
 
-- [ ] FV2-3: Plans from specs, release marking, synthesis revision
+- [x] FV2-3: Plans from specs, release marking, synthesis revision
   Implement "Task 3" from the plan: planner.draft(spec=...), the
   `relay-profile: release` rule in PLAN_DRAFT and PLAN_REVIEW,
   brainstorm.final_synthesis and brainstorm.revise_synthesis.
