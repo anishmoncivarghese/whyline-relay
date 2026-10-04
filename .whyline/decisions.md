@@ -4309,3 +4309,33 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 6a1e6be8480c4baf8823f853f8426418 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T12:21:14.239Z"} -->
+
+## 2026-10-04 — Codex uses --image=<path> flag instead of -i
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** ATT-2
+
+**Because:** codex CLI's -i takes multiple arguments and would swallow the prompt appended last
+
+**Rejected:**
+
+- -i <path> — consumes following positional arguments including the prompt
+
+**Files:** src/whyline_relay/attachments.py
+
+<!-- whyline-event: 678604cc7caf4b42985a4c54f6a2681e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T16:48:40.270Z"} -->
+
+## 2026-10-04 — ATT-2 review: approve the attachments module
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** ATT-2
+
+**Because:** The implementation matches the prescribed spike-verified delivery table and interfaces, uses one safe --image=<path> flag per Codex image, preserves other agent commands, and is covered by 8 focused tests; uv run pytest tests/test_attachments.py -q and uv run pytest -q both passed
+
+**Files:** src/whyline_relay/attachments.py
+
+<!-- whyline-event: 300570c417324d749d4b6a4855c3a85e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T16:53:21.300Z"} -->
