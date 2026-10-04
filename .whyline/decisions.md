@@ -4102,3 +4102,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 8445752085df420bb92826953fd2771e -->
 <!-- whyline-meta: {"v":1,"ts":"2026-09-30T17:08:19.290Z"} -->
+
+## 2026-09-30 — Planner generates managed agents' permission files itself instead of requiring init
+
+**Actor:** claude
+**Role:** implementer
+**Task:** PLAN-SETTINGS-FIX
+
+**Because:** Plan runs before Set up and has no preflight, so claude failed with 'Settings file not found' in repos that never ran init
+
+**Rejected:**
+
+- Generate in loop.run_agent — its extra commit broke the relay's 'commit naming the task' check, and relay start is already gated by preflight
+- Tell users to run init first — every new user hits it before the UI tells them to
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/init.py
+
+<!-- whyline-event: edee3eda3e2545b384e568f9a91aab24 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-09-30T20:44:53.916Z"} -->
