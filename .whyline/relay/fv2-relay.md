@@ -14,7 +14,7 @@ publish -- a human releases afterwards.
   validation; setup.write_release; write_roles keeps an existing release key.
   Verify: uv run pytest -q.
 
-- [ ] FV2-2: The spec pipeline
+- [x] FV2-2: The spec pipeline
   Implement "Task 2" from the plan: planner._Kind with PLAN_KIND and
   SPEC_KIND threaded through the planner, state file names, specs.py,
   SPEC_DRAFT and SPEC_REVIEW prompts, RELAY_IGNORE entries. Existing planner
