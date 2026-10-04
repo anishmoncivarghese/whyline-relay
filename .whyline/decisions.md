@@ -4223,3 +4223,16 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 384d24bbadf0471984f3140e56966a2e -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:23:04.118Z"} -->
+
+## 2026-10-04 — Approve and release Part A (RPF-1..3) as whyline-relay 0.2.28
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** RPF-4
+
+**Because:** diff matches the plan, test edits follow the new behaviour without weakening it, full suite passes, release workflow and PyPI confirmed
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/antigravity.py, src/whyline_relay/brainstorm.py
+
+<!-- whyline-event: 51b292d48a8349198d084811299d4342 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-04T07:39:26.857Z"} -->
