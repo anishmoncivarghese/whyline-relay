@@ -4751,3 +4751,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 41e31ec900064553b023788abe304d0a -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:51:31.929Z"} -->
+
+## 2026-10-05 — Approve and release guided flow v2 engine (FV2-1..5) as whyline-relay 0.2.31
+
+**Actor:** claude
+**Role:** reviewer
+**Task:** FV2-6
+
+**Because:** diffs match the plan; the edited loop test reflects the intended relay-commits behaviour; a real CLI drive of a release task paused, hinted on resume and ticked on done
+
+**Rejected:**
+
+- Fix the generic 'Resume with' line on release pauses now — cosmetic; resume already points to done and the console shows done/skip
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/specs.py
+
+<!-- whyline-event: 47a7b9aa6f8b4b7280d158175c98deb9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T05:00:30.892Z"} -->
