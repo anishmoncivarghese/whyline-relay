@@ -32,7 +32,7 @@ publish -- a human releases afterwards.
   committed, the REVIEW prompt saying "do not commit", and the golden prompt
   file updated. Verify: uv run pytest -q.
 
-- [ ] FV2-5: Release tasks pause for the human; done and skip
+- [x] FV2-5: Release tasks pause for the human; done and skip
   Implement "Task 5" from the plan: the release pause in _run_plan, the
   release agent path, mark_done / mark_skipped with skipped-tasks.json,
   `whyline relay done` / `skip`, the resume hint, and the preflight warning.
