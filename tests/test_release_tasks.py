@@ -9,6 +9,18 @@ from whyline_relay import cli, gitcheck, loop, plan, preflight, state
 
 FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
 
+
+@pytest.fixture(autouse=True)
+def no_whyline_binary(monkeypatch):
+    """CI installs whyline-relay alone: stub the calls to the whyline CLI
+    (preflight's `whyline sync`, the loop's sync and claim)."""
+    from whyline_relay import preflight, whylinecmd
+
+    monkeypatch.setattr(preflight, "_whyline",
+                        lambda root, runner: preflight._result("ok", "whyline is installed and initialised"))
+    monkeypatch.setattr(whylinecmd, "sync", lambda *a, **k: "PACKET")
+    monkeypatch.setattr(whylinecmd, "claim", lambda *a, **k: None)
+
 PLAN = (
     "- [ ] T-1: build\n"
     "  do it\n"
@@ -311,10 +323,6 @@ def test_human_first_pause_plus_skip_leaves_git_clean_with_real_preflight(two_ro
         "  x\n"
     )
     root = two_role_repo(human_first_plan)
-    # Initialize whyline so real preflight's whyline sync check passes
-    subprocess.run(["whyline", "init", "--yes"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init whyline"], cwd=root, check=True, capture_output=True)
 
     # Start relay; pauses on human release T-1
     code = cli.main(["start", "--repo", str(root)])
@@ -379,7 +387,6 @@ def test_preflight_allows_release_profile_under_pipeline(tmp_path):
     )
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "setup"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["whyline", "init", "--yes"], cwd=root, check=True, capture_output=True)
 
     checks = preflight.run(root, root / "plan.md", allow_dirty=True)
     # Must NOT fail on relay-profile: release
@@ -397,9 +404,6 @@ def test_cli_done_on_final_task_finishes_successfully(two_role_repo, monkeypatch
         "  Bump version and tag.\n"
     )
     root = two_role_repo(final_task_plan)
-    subprocess.run(["whyline", "init", "--yes"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init whyline"], cwd=root, check=True, capture_output=True)
 
     with pytest.raises(loop.Paused):
         loop.run_plan(root, loop.config.load(root), root / "plan.md", branch="relay/plan", echo=False)
@@ -418,9 +422,6 @@ def test_cli_done_on_final_task_finishes_successfully(two_role_repo, monkeypatch
 def test_cli_skip_switches_to_saved_branch_before_running(two_role_repo, monkeypatch):
     monkeypatch.setattr(cli, "_launch_checks", preflight.run)
     root = two_role_repo(PLAN.replace("- [ ] T-1", "- [x] T-1"))
-    subprocess.run(["whyline", "init", "--yes"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init whyline"], cwd=root, check=True, capture_output=True)
 
     with pytest.raises(loop.Paused):
         loop.run_plan(root, loop.config.load(root), root / "plan.md", branch="relay/plan", echo=False)
