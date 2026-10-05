@@ -18,9 +18,12 @@ def main() -> int:
     task_id = match.group(1) if match else "T-1"
     parts = spec.split(":")
     make_commit = parts[0] == "commit"
+    make_write = parts[0] in ("commit", "write")
     to_actor, status = parts[-2], parts[-1]
+    if make_write:
+        (root / "feature.txt").write_text(f"{task_id}\n")
+        (root / f"feature-{task_id}.txt").write_text(f"{task_id}\n")
     if make_commit:
-        (root / "feature.txt").write_text("x\n")
         subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", f"feat: x ({task_id})"],

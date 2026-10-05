@@ -277,6 +277,24 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
                 )
             )
 
+    if settings.release_role != "human":
+        agent = settings.release_role
+        command = settings.agents.get(agent) or []
+        if agent == "codex" and any("workspace-write" in arg for arg in command):
+            checks.append(
+                _result(
+                    "warn",
+                    "release tasks by codex: its workspace-write sandbox blocks network access and tag writes; release tasks will likely fail",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "warn",
+                    f"release tasks by {agent}: can't verify that it can push and tag; the first release task will show",
+                )
+            )
+
     if roles == config.Roles():
         return checks
 
@@ -348,7 +366,9 @@ def _plan_checks(
                 )
             )
         if task.profile is not None:
-            if pipeline is None:
+            if task.profile == "release":
+                pass
+            elif pipeline is None:
                 checks.append(
                     _result(
                         "warn",

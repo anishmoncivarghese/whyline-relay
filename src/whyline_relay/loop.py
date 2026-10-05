@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import re
 import subprocess
 import time
@@ -28,6 +30,8 @@ from whyline_relay import (
     whylinecmd,
 )
 from whyline_relay.adapters import bypass, grok
+
+RELEASE_PREFIX = "release task for you: "
 
 
 class Paused(RuntimeError):
@@ -805,6 +809,67 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
     gitcheck.commit_paths(root, [plan_path], f"chore: tick {task.task_id} in the plan")
 
 
+def _paused_release(root: Path, task_id: str) -> state.RelayState:
+    saved = state.load(root)
+    if saved is None or not saved.paused_reason.startswith(RELEASE_PREFIX):
+        raise ValueError("the relay is not paused on a release task")
+    if saved.task_id != task_id:
+        raise ValueError(f"the relay is paused on release task {saved.task_id}, not {task_id}")
+    return saved
+
+
+def mark_done(root: Path, task_id: str) -> None:
+    saved = _paused_release(root, task_id)
+    gitcheck.ensure_relay_ignored(root)
+    if saved.branch:
+        gitcheck.ensure_branch(root, saved.branch)
+    plan_path = Path(saved.plan) if Path(saved.plan).is_absolute() else root / saved.plan
+    current = plan_path.read_text(encoding="utf-8")
+    if plan.find(plan.parse(current), task_id) is None:
+        raise ValueError(f"{task_id} is no longer in {plan_path.name}")
+    plan_path.write_text(plan.tick(current, task_id), encoding="utf-8")
+    gitcheck.commit_paths(root, [plan_path], f"chore: release task {task_id} done by hand")
+    state.clear(root)
+
+
+def mark_skipped(root: Path, task_id: str) -> None:
+    saved = _paused_release(root, task_id)
+    gitcheck.ensure_relay_ignored(root)
+    if saved.branch:
+        gitcheck.ensure_branch(root, saved.branch)
+    skipped = config.relay_dir(root) / "skipped-tasks.json"
+    ids = json.loads(skipped.read_text(encoding="utf-8")) if skipped.exists() else []
+    if task_id not in ids:
+        ids.append(task_id)
+    skipped.parent.mkdir(parents=True, exist_ok=True)
+    skipped.write_text(json.dumps(ids), encoding="utf-8")
+    state.clear(root)
+
+
+def _skipped_tasks(root: Path) -> list[str]:
+    skipped = config.relay_dir(root) / "skipped-tasks.json"
+    if skipped.exists():
+        try:
+            data = json.loads(skipped.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [str(item) for item in data]
+        except Exception:
+            pass
+    return []
+
+
+def _with_release_implementer(settings: config.Config, release_agent: str) -> config.Config:
+    if settings.pipeline is None:
+        return dataclasses.replace(
+            settings, roles=config.Roles(release_agent, settings.roles.reviewer)
+        )
+    pipeline = settings.pipeline
+    roles = dict(pipeline.roles)
+    if "implementer" in roles:
+        roles["implementer"] = dataclasses.replace(roles["implementer"], agent=release_agent)
+    return dataclasses.replace(settings, pipeline=dataclasses.replace(pipeline, roles=roles))
+
+
 def _run_plan(
     root: Path,
     settings: config.Config,
@@ -824,6 +889,7 @@ def _run_plan(
     fresh base would make the approval unverifiable) and the round it was on,
     and `run_task` picks the next agent from the handoff record.
     """
+    gitcheck.ensure_relay_ignored(root)
     outcomes: list[Outcome] = []
     resuming = state.load(root) if resume else None
     while True:
@@ -831,15 +897,30 @@ def _run_plan(
             print("STOP file present; not starting another task.")
             return outcomes
         tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+        skipped_ids = _skipped_tasks(root)
         if only:
             task = plan.find(tasks, only)
             if task is None:
                 raise plan.PlanError(f"no task {only!r} in the plan")
         else:
-            task = plan.next_unchecked(tasks)
-        if task is None or task.checked:
+            task = plan.next_unchecked(tasks, skip=skipped_ids)
+        if task is None or task.checked or task.task_id in skipped_ids:
             state.clear(root)
             return outcomes
+
+        if task.profile == "release" and settings.release_role == "human":
+            checklist = "\n".join(l.strip() for l in task.text.splitlines()[1:]
+                                  if l.strip() and not l.strip().startswith("relay-profile:"))
+            reason = f"{RELEASE_PREFIX}{task.task_id}\n{checklist}" if checklist else f"{RELEASE_PREFIX}{task.task_id}"
+            gitcheck.ensure_relay_ignored(root)
+            _save_pause(root, plan_path, branch, task, gitcheck.head_commit(root),
+                        reason, None, only, {"round": 1, "last": None})
+            raise Paused(reason)
+        if task.profile == "release":  # an agent does releases
+            task_settings = _with_release_implementer(settings, settings.release_role)
+            task = dataclasses.replace(task, profile=None)
+        else:
+            task_settings = settings
 
         mid_task = resuming is not None and resuming.task_id == task.task_id
         base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(root)
@@ -855,7 +936,7 @@ def _run_plan(
         try:
             outcome = run_task(
                 root,
-                settings,
+                task_settings,
                 task,
                 base_commit=base_commit,
                 echo=echo,

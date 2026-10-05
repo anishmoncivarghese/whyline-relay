@@ -17,6 +17,7 @@ RELAY_IGNORE = (
     ".whyline/relay/running.json",
     ".whyline/relay/active-roles.json",
     ".whyline/relay/antigravity-declined",
+    ".whyline/relay/skipped-tasks.json",
 )
 
 

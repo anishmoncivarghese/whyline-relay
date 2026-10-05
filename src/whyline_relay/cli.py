@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Collection
 import shlex
 import signal
 import sys
@@ -114,6 +115,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the clean-working-tree check.",
     )
     resume.add_argument(
+        "--skip-checks",
+        action="store_true",
+        help="Skip the preflight checks.",
+    )
+
+    done_parser = subparsers.add_parser("done", help="Confirm a release task is done and continue")
+    done_parser.add_argument("task_id", help="The release task ID that was finished.")
+    done_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    done_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Skip the clean-working-tree check.",
+    )
+    done_parser.add_argument(
+        "--skip-checks",
+        action="store_true",
+        help="Skip the preflight checks.",
+    )
+
+    skip_parser = subparsers.add_parser("skip", help="Skip a release task and continue")
+    skip_parser.add_argument("task_id", help="The release task ID to skip.")
+    skip_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    skip_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Skip the clean-working-tree check.",
+    )
+    skip_parser.add_argument(
         "--skip-checks",
         action="store_true",
         help="Skip the preflight checks.",
@@ -260,10 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _task_for(tasks: list[plan.Task], only: str | None) -> plan.Task | None:
+def _task_for(
+    tasks: list[plan.Task], only: str | None, skip: Collection[str] = ()
+) -> plan.Task | None:
     if only is not None:
         return plan.find(tasks, only)
-    return plan.next_unchecked(tasks)
+    return plan.next_unchecked(tasks, skip=skip)
 
 
 def guard(root: Path, args: argparse.Namespace, branch: str) -> str | None:
@@ -310,6 +345,13 @@ def cmd_resume(args: argparse.Namespace) -> int:
     saved = state.load(root)
     if saved is None:
         print("Nothing to resume.", file=sys.stderr)
+        return EXIT_ERROR
+    if saved.paused_reason.startswith(loop.RELEASE_PREFIX):
+        print(
+            f"This is a release task for you: do its steps, then run: "
+            f"whyline relay done {saved.task_id} (or: whyline relay skip {saved.task_id})",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
     if not args.skip_checks:
         checks = _launch_checks(
@@ -558,7 +600,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     except plan.PlanError as error:
         print(f"invalid plan: {error}", file=sys.stderr)
         return EXIT_ERROR
-    task = _task_for(tasks, args.only)
+    task = _task_for(tasks, args.only, skip=loop._skipped_tasks(root))
     if task is None:
         if args.only:
             print(f"no task {args.only!r} in the plan", file=sys.stderr)
@@ -619,6 +661,153 @@ def cmd_start(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _continue_plan(
+    root: Path,
+    saved_plan: str | None,
+    saved_branch: str | None,
+    saved_only: str | None = None,
+    *,
+    allow_dirty: bool,
+    skip_checks: bool,
+) -> int:
+    if saved_branch:
+        try:
+            gitcheck.ensure_branch(root, saved_branch)
+        except gitcheck.GitError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_ERROR
+    settings = config.load(root)
+    plan_path = Path(saved_plan) if saved_plan else (root / settings.plan)
+    if not plan_path.is_absolute():
+        plan_path = root / plan_path
+    branch = saved_branch or f"{settings.branch_prefix}{plan_path.stem}"
+    if not saved_branch:
+        try:
+            gitcheck.ensure_branch(root, branch)
+        except gitcheck.GitError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_ERROR
+
+    gitcheck.ensure_relay_ignored(root)
+
+    try:
+        content = plan_path.read_text(encoding="utf-8")
+        tasks = plan.parse(content)
+    except (OSError, plan.PlanError) as error:
+        print(f"could not read the plan: {error}", file=sys.stderr)
+        return EXIT_ERROR
+
+    skipped_ids = loop._skipped_tasks(root)
+    if saved_only:
+        target_task = plan.find(tasks, saved_only)
+        if target_task is None:
+            print(f"no task {saved_only!r} in the plan", file=sys.stderr)
+            return EXIT_ERROR
+        if target_task.checked or target_task.task_id in skipped_ids:
+            state.clear(root)
+            print("\nPlan complete: 0 task(s) approved and committed.")
+            notify.send("whyline-relay", "0 task(s) done")
+            return EXIT_OK
+    else:
+        next_task = plan.next_unchecked(tasks, skip=skipped_ids)
+        if next_task is None:
+            state.clear(root)
+            print("\nPlan complete: 0 task(s) approved and committed.")
+            notify.send("whyline-relay", "0 task(s) done")
+            return EXIT_OK
+
+    if not skip_checks:
+        checks = _launch_checks(root, plan_path, allow_dirty=allow_dirty)
+        preflight.print_checks(
+            checks, stream=sys.stderr, include_ok=False, summary=False
+        )
+        if preflight.failures(checks):
+            return EXIT_ERROR
+    loop.stop_path(root).unlink(missing_ok=True)
+    try:
+        outcomes = loop.run_plan(
+            root,
+            settings,
+            plan_path,
+            branch=branch,
+            only=saved_only or None,
+            allow_dirty=allow_dirty,
+        )
+    except loop.Paused as paused:
+        return _report_pause(paused)
+    except (
+        gitcheck.GitError,
+        whylinecmd.WhylineUnavailable,
+        plan.PlanError,
+        running.AlreadyRunning,
+    ) as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    print(f"\nPlan complete: {len(outcomes)} task(s) approved and committed.")
+    notify.send("whyline-relay", f"{len(outcomes)} task(s) done")
+    return EXIT_OK
+
+
+def cmd_done(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to resume: another relay is running here (pid {active.pid}). "
+            f"Run `{invocation.command('stop')}` first.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    saved = state.load(root)
+    saved_plan = saved.plan if saved else None
+    saved_branch = saved.branch if saved else None
+    saved_only = saved.only if saved else None
+    try:
+        loop.mark_done(root, args.task_id)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Marked {args.task_id} done.")
+    return _continue_plan(
+        root,
+        saved_plan,
+        saved_branch,
+        saved_only,
+        allow_dirty=args.allow_dirty,
+        skip_checks=args.skip_checks,
+    )
+
+
+def cmd_skip(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to resume: another relay is running here (pid {active.pid}). "
+            f"Run `{invocation.command('stop')}` first.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    saved = state.load(root)
+    saved_plan = saved.plan if saved else None
+    saved_branch = saved.branch if saved else None
+    saved_only = saved.only if saved else None
+    try:
+        loop.mark_skipped(root, args.task_id)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Skipped {args.task_id}.")
+    return _continue_plan(
+        root,
+        saved_plan,
+        saved_branch,
+        saved_only,
+        allow_dirty=args.allow_dirty,
+        skip_checks=args.skip_checks,
+    )
+
+
 def _install_sigint_handler() -> None:
     """Ctrl+C stops the run; the agent's own process group dies with it.
 
@@ -646,6 +835,8 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
         commands = {
             "start": cmd_start,
             "resume": cmd_resume,
+            "done": cmd_done,
+            "skip": cmd_skip,
             "status": cmd_status,
             "stop": cmd_stop,
             "init": cmd_init,

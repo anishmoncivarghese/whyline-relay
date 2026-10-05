@@ -4580,3 +4580,174 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e9e5249fbdcc41bd8cb2e549b632b8f8 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-04T19:18:48.611Z"} -->
+
+## 2026-10-05 — Pause release tasks for human with checklist and resume hints
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** human release steps require manual execution and confirmation via done/skip before the relay continues
+
+**Rejected:**
+
+- aborting the relay run — loses paused run state and branch context
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: aa731ad46cc94dc2b23f845357ccc8c2 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T03:42:56.651Z"} -->
+
+## 2026-10-05 — Persist skipped tasks in skipped-tasks.json and filter in plan.next_unchecked
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** skipped tasks must remain unticked and be bypassed across subsequent runs without polluting git working tree
+
+**Rejected:**
+
+- ticking skipped tasks — misrepresents whether release steps actually occurred
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: e0b6cea451394cc88e26644b5b152c9f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T03:43:00.236Z"} -->
+
+## 2026-10-05 — Replace implementer role with release_role for agent release tasks
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** allows the designated release agent to execute release tasks without needing a dedicated release pipeline profile
+
+**Rejected:**
+
+- stripping pipeline tester stage — keeping default pipeline with tester provides extra verification
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 955a3529533a4750bbb8012b51462fb1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T03:43:04.124Z"} -->
+
+## 2026-10-05 — Request changes for FV2-5 release continuation safety
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** FV2-5
+
+**Because:** done can commit the plan checkbox on whichever branch the user currently has checked out; done and skip lose the saved --only scope; and a human-first release pause never installs the new skipped-tasks ignore before skip resumes into preflight
+
+**Rejected:**
+
+- approve because the full suite passes — current tests globally stub preflight and do not exercise branch changes or --only continuation
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py, tests/test_release_tasks.py
+
+<!-- whyline-event: e124723d52d54e6d89a62a3e0e52bc20 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:13:48.206Z"} -->
+
+## 2026-10-05 — Switch to saved branch before mark_done commits plan changes
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** users may switch branches while performing manual release steps, so mark_done must commit the ticked checkbox to the saved relay branch rather than whichever branch is currently checked out
+
+**Rejected:**
+
+- switching branch only in _continue_plan — leaves the plan commit on the wrong branch before _continue_plan runs
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: d3ae439cdba74b9886ceb01bec43a631 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:26:47.772Z"} -->
+
+## 2026-10-05 — Preserve saved RelayState.only in _continue_plan and stop plan when scoped task is skipped
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** running done or skip after a scoped --only run must not leak execution into subsequent un-scoped tasks
+
+**Rejected:**
+
+- clearing only unconditionally — causes done or skip to execute all remaining unchecked tasks in the plan
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 72ac3efcfc5a47f0870bdf71757f3327 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:26:51.633Z"} -->
+
+## 2026-10-05 — Install RELAY_IGNORE before human release pause and skip
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** relies on .git/info/exclude to prevent state.json and skipped-tasks.json from making git status dirty and failing preflight on resume/skip/done
+
+**Rejected:**
+
+- running preflight with allow_dirty — allows actual uncommitted user edits to leak into the run
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 1647a22af914465f97d3f0962cc484a7 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:26:57.394Z"} -->
+
+## 2026-10-05 — Request changes for FV2-5 final-task and pipeline continuation
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** FV2-5
+
+**Because:** done marks a final release task complete before preflight, so preflight reports no unchecked tasks and the command exits 1; pipeline preflight also rejects the reserved release marker as an unknown profile; and skip loads config and checks the plan before returning to the saved branch
+
+**Rejected:**
+
+- approve because 873 tests pass — the new tests cover a following task only, use a legacy two-role config for the release-agent path, and do not switch branches for skip
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/preflight.py, tests/test_release_tasks.py
+
+<!-- whyline-event: 4acae28905344a08b347d67267412c64 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:30:18.397Z"} -->
+
+## 2026-10-05 — Switch to saved branch before checks and complete cleanly when no unchecked tasks remain
+
+**Actor:** antigravity
+**Role:** implementer
+**Task:** FV2-5
+
+**Because:** skip and done must run preflight on the saved branch rather than whatever is checked out, final release tasks tick the last task so continuation has 0 unchecked tasks and should succeed immediately, and relay-profile: release is a reserved marker rather than an unknown pipeline profile
+
+**Rejected:**
+
+- running preflight before ensure_branch — continuation checks or runs against the wrong branch if the user checked out main
+- requiring unchecked tasks on continuation — causes done on the final release task to exit 1 despite successfully completing the plan
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/preflight.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 740ca74af8fa40168ce23d73757b9501 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:45:21.102Z"} -->
+
+## 2026-10-05 — Approve FV2-5 release pause and continuation behavior
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** FV2-5
+
+**Because:** human release tasks pause with actionable done/skip handling, agent releases use the configured release agent, continuation restores saved branch and scope, final-task completion succeeds, reserved release profiles pass preflight, and both the 19 focused tests and full suite pass
+
+**Rejected:**
+
+- request further changes — the prior final-task, pipeline-profile, and branch-restoration defects now have direct passing regressions
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_release_tasks.py
+
+<!-- whyline-event: 41e31ec900064553b023788abe304d0a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T04:51:31.929Z"} -->

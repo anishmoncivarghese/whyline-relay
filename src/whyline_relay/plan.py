@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 
 CHECKBOX = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\]\s+(?P<body>.*)$")
@@ -77,9 +78,9 @@ def parse(content: str) -> list[Task]:
     return tasks
 
 
-def next_unchecked(tasks: list[Task]) -> Task | None:
+def next_unchecked(tasks: list[Task], skip: Collection[str] = ()) -> Task | None:
     for task in tasks:
-        if not task.checked:
+        if not task.checked and task.task_id not in skip:
             return task
     return None
 
