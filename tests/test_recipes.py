@@ -43,3 +43,21 @@ def test_grok_can_take_a_relay_role_with_no_agent_table(tmp_path):
 
 def test_chat_resolves_grok_with_no_config(tmp_path):
     assert chat.resolve_command(config.load(tmp_path), "grok")[0] == "grok"
+
+
+def test_grok_recipe_tells_grok_to_stay_inside_its_allow_list():
+    # Headless grok cancels its whole turn on any command outside the allow
+    # list (measured on grok 1.0.41), so the recipe carries --rules saying so.
+    command = list(recipes.RECIPES["grok"])
+    rules = command[command.index("--rules") + 1]
+    assert "ends your whole turn" in rules
+    assert "if, for, while" in rules
+    assert command.index("--rules") < command.index("-p")
+
+
+def test_grok_recipe_allows_the_read_only_commands_agents_reach_for():
+    command = list(recipes.RECIPES["grok"])
+    allowed = {command[i + 1] for i, arg in enumerate(command) if arg == "--allow"}
+    for rule in ("Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+                 "Bash(git show:*)", "Bash(pytest:*)", "WebFetch"):
+        assert rule in allowed

@@ -25,6 +25,7 @@ from whyline_relay import (
 from whyline_relay.adapters import grok
 
 CHAT_AGENTS = ("claude", "codex", "antigravity", "grok")
+GROK_RESUMES = grok.RESUMES
 # Agent names are [agents.*] keys; this maps the ones whose executable is
 # named differently. Antigravity's documented key is `antigravity` (README
 # recipe, preflight), while its executable is `agy` -- using `agy` for both
@@ -180,22 +181,31 @@ def _execute_agent_call(
         handle.close()
         turn_command += ["-o", str(output_file)]
     log_path = config.relay_dir(root) / "logs" / "chat-last-turn.log"
-    result = run_fn(
-        turn_command,
-        full_prompt,
-        cwd=root,
-        log_path=log_path,
-        timeout_seconds=(
-            CHAT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
-        ),
-        capture=True,
-        echo=True,
-        agent_name=agent,
-    )
-    if adapter.uses_output_file:
-        raw = (output_file.read_text(encoding="utf-8") if output_file.exists() else "") or (result.output or "")
-    else:
-        raw = result.output or ""
+    call_command, call_prompt = turn_command, full_prompt
+    for resumes in range(GROK_RESUMES + 1):
+        result = run_fn(
+            call_command,
+            call_prompt,
+            cwd=root,
+            log_path=log_path,
+            timeout_seconds=(
+                CHAT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+            ),
+            capture=True,
+            echo=True,
+            agent_name=agent,
+        )
+        if adapter.uses_output_file:
+            raw = (output_file.read_text(encoding="utf-8") if output_file.exists() else "") or (result.output or "")
+        else:
+            raw = result.output or ""
+        # Headless grok cancels its whole turn on an unlisted command or
+        # fetch; continuing the same session keeps what it already did.
+        session = grok.resumable_session(adapter, raw, turn_command)
+        if session is None or resumes == GROK_RESUMES or result.exit_code != 0:
+            break
+        call_command = grok.resume_command(turn_command, session)
+        call_prompt = grok.resume_prompt(turn_command)
     response = adapter.extract_response(raw)
     ok = result.exit_code == 0 and not grok.cancelled(adapter, raw, turn_command)
     # commit_all stages everything and no-ops (returns False) when the tree

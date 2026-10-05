@@ -367,3 +367,75 @@ def test_resume_does_not_validate_actor_from_the_existing_handoff(
     )
 
     assert outcome.committed is True
+
+
+def _resuming_grok(repo: Path, handoff: list[str], cancel_always: bool = False) -> Path:
+    """A fake grok: a fresh turn is cancelled; a --resume turn hands off."""
+    calls = repo / "grok-calls.txt"
+    grok = repo / "grok"
+    grok.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, subprocess, sys\n"
+        f"open({str(calls)!r}, 'a').write(' '.join(sys.argv[1:-1]) + '\\n')\n"
+        f"resumed = '--resume' in sys.argv and not {cancel_always!r}\n"
+        "if resumed:\n"
+        # The session remembers the task; the resume prompt need not repeat it.
+        f"    subprocess.run([sys.executable, *{handoff!r}, '## Task T-1'], check=True)\n"
+        "print(json.dumps({'text': 'x', 'sessionId': 'sess-9',\n"
+        "    'stopReason': 'end_turn' if resumed else 'cancelled'}, indent=2))\n"
+    )
+    grok.chmod(0o755)
+    return calls
+
+
+def test_cancelled_grok_turn_resumes_its_session_and_hands_off(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    calls = _resuming_grok(
+        repo, command(repo, "grok", "codex", "ready-for-review", "no")[1:]
+    )
+    configured = settings(repo, config.Roles("grok", "codex"))
+    configured = replace(
+        configured,
+        agents={
+            "grok": [str(repo / "grok"), "--allow", "Edit", "-p"],
+            "codex": command(repo, "codex", "codex", "approved", "yes"),
+        },
+        adapters={"grok": "generic"},
+    )
+    outcome = loop.run_task(
+        repo,
+        configured,
+        TASK,
+        base_commit=loop.gitcheck.head_commit(repo),
+        echo=False,
+    )
+    assert outcome.committed
+    lines = calls.read_text().splitlines()
+    assert lines == ["--allow Edit -p", "--allow Edit --resume sess-9 -p"]
+    logs = sorted(p.name for p in (repo / ".whyline" / "relay" / "logs").iterdir())
+    assert "T-1-1-grok.log" in logs
+    assert "T-1-1-grok-cancelled-1.log" in logs
+
+
+def test_grok_that_keeps_cancelling_pauses_after_its_resumes(repo: Path, monkeypatch):
+    monkeypatch.setattr(loop.whylinecmd, "claim", lambda *args: None)
+    calls = _resuming_grok(
+        repo, command(repo, "grok", "codex", "ready-for-review", "no")[1:],
+        cancel_always=True,
+    )
+    configured = settings(repo, config.Roles("grok", "codex"))
+    configured = replace(
+        configured,
+        agents={**configured.agents, "grok": [str(repo / "grok"), "-p"]},
+        adapters={"grok": "generic"},
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo,
+            configured,
+            TASK,
+            base_commit=loop.gitcheck.head_commit(repo),
+            echo=False,
+        )
+    assert len(calls.read_text().splitlines()) == 1 + loop.GROK_RESUMES
+    assert 'Grok reported stopReason "cancelled"' in raised.value.reason

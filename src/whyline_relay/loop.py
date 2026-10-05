@@ -32,6 +32,7 @@ from whyline_relay import (
 from whyline_relay.adapters import bypass, grok
 
 RELEASE_PREFIX = "release task for you: "
+GROK_RESUMES = grok.RESUMES
 
 
 class Paused(RuntimeError):
@@ -153,17 +154,43 @@ def run_agent(
             f"(round {round_} of {settings.max_rounds})"
         )
     started = time.monotonic()
+    turn_command, turn_prompt = command, prompt
+    resumes = 0
     try:
         try:
-            agents.run(
-                command,
-                prompt,
-                cwd=root,
-                log_path=target,
-                timeout_seconds=settings.timeout_minutes * 60,
-                echo=echo,
-                agent_name=agent,
-            )
+            while True:
+                agents.run(
+                    turn_command,
+                    turn_prompt,
+                    cwd=root,
+                    log_path=target,
+                    timeout_seconds=settings.timeout_minutes * 60,
+                    echo=echo,
+                    agent_name=agent,
+                )
+                session = None
+                if resumes < GROK_RESUMES:
+                    try:
+                        text = target.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        text = ""
+                    session = grok.resumable_session(adapter, text, command)
+                if session is None:
+                    break
+                # The log of the last attempt stays at `target`, where the
+                # no-handoff diagnosis reads it; earlier ones are kept beside it.
+                resumes += 1
+                target.replace(
+                    target.with_name(f"{target.stem}-cancelled-{resumes}.log")
+                )
+                if echo:
+                    agents.print_status(
+                        f"==> relay: {agent}'s turn was cancelled by its "
+                        f"permission policy; resuming its session "
+                        f"({resumes} of {GROK_RESUMES})"
+                    )
+                turn_command = grok.resume_command(command, session)
+                turn_prompt = grok.resume_prompt(command)
         finally:
             if echo:
                 agents.print_status(

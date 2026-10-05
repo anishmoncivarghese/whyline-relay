@@ -478,3 +478,60 @@ def test_run_turn_exclude_skips_a_chain_candidate(tmp_path: Path):
     )
     assert calls == ["claude", "aider"]
     assert record["agent"] == "aider"
+
+
+def _grok_settings(root: Path) -> "config.Config":
+    _init_repo(root)
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        '[agents.grok]\nadapter = "generic"\n'
+        'command = ["grok", "--allow", "WebFetch", "-p"]\n'
+    )
+    return config.load(root)
+
+
+def test_run_turn_resumes_a_cancelled_grok_session(tmp_path: Path):
+    # Brainstorm research runs through run_turn; a cancelled grok turn (an
+    # unlisted command or fetch) must continue its session, not fail the pass.
+    settings = _grok_settings(tmp_path)
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+
+        calls.append(command)
+        resumed = "--resume" in command
+        return RunResult(0, json.dumps({
+            "text": "Wrote grok.md." if resumed else "I'll research first.",
+            "stopReason": "end_turn" if resumed else "cancelled",
+            "sessionId": "sess-3",
+        }, indent=2))
+
+    record = chat.run_turn(
+        tmp_path, agent="grok", prompt="research", settings=settings,
+        run_fn=fake_run_fn,
+    )
+    assert record["ok"] is True
+    assert record["response"] == "Wrote grok.md."
+    assert calls[1] == ["grok", "--allow", "WebFetch", "--resume", "sess-3", "-p"]
+
+
+def test_run_turn_gives_up_on_grok_after_its_resumes(tmp_path: Path):
+    settings = _grok_settings(tmp_path)
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        from whyline_relay.agents import RunResult
+
+        calls.append(command)
+        return RunResult(0, json.dumps(
+            {"text": "x", "stopReason": "cancelled", "sessionId": "sess-3"}, indent=2
+        ))
+
+    record = chat.run_turn(
+        tmp_path, agent="grok", prompt="research", settings=settings,
+        run_fn=fake_run_fn,
+    )
+    assert record["ok"] is False
+    assert len(calls) == 1 + chat.GROK_RESUMES
