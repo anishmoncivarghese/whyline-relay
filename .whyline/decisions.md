@@ -4768,3 +4768,39 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 47a7b9aa6f8b4b7280d158175c98deb9 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-05T05:00:30.892Z"} -->
+
+## 2026-10-05 — Resume a cancelled Grok turn in its own session (up to 2 times) and tell Grok its headless limits via --rules
+
+**Actor:** claude
+**Role:** implementer
+**Task:** GROK-FIX
+
+**Because:** measured on grok 1.0.41: under dontAsk any command outside the allow list (even plain cp, or an if-block) cancels the whole turn instead of refusing that command; this explains the long-unexplained 'cancelled with no files' and 'exited without handing off' stalls. A --rules note made the same task finish, and --resume <sessionId> finished a cancelled one with all prior work kept
+
+**Rejected:**
+
+- bypassPermissions/always-approve plus deny rules — the relay refuses bypass flags by design (bypass.py) and it gives an unattended agent arbitrary commands
+- only widening the allow list — any unlisted or compound command still cancels the turn
+- dropping Grok — the work it does is correct; the failure was the CLI's cancel-on-ask behaviour
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/adapters/grok.py, src/whyline_relay/recipes.py
+
+<!-- whyline-event: 4c4c2df4f2a54f1d8ae7eaca11a3ac88 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T20:36:02.913Z"} -->
+
+## 2026-10-05 — Brainstorm/chat turns also resume a cancelled Grok session, and the Grok recipe allows WebFetch
+
+**Actor:** claude
+**Role:** implementer
+**Task:** GROK-FIX
+
+**Because:** a real brainstorm in CodeGraph failed Grok's research pass in 10s: its WebFetch of the GitHub URL was outside the allow list, cancelling the turn; chat.run_turn had no resume. With WebFetch allowed the same research prompt finished and wrote the file
+
+**Rejected:**
+
+- leave WebFetch out — research and brainstorm prompts routinely name URLs, and every such turn would cancel
+
+**Files:** src/whyline_relay/chat.py, src/whyline_relay/recipes.py
+
+<!-- whyline-event: a53eef030d5342cfb7306d46de8c79ab -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-05T20:49:21.870Z"} -->
