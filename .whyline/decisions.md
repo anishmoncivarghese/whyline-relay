@@ -4822,3 +4822,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 171ce66389ac49b68d4d5328e06719ce -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-10T13:32:04.419Z"} -->
+
+## 2026-10-10 — Release planner cleanup as 0.2.32.1
+
+**Actor:** codex
+**Role:** release
+**Task:** PPF-REL
+
+**Because:** 0.2.33 and 0.2.34 are already assigned to timeout and backup-chain plans, while this backward-compatible maintenance release must be available before whyline 0.3.38
+
+**Rejected:**
+
+- Use 0.2.33 — it would consume the timeout plan's reserved version without its promised API
+
+**Files:** pyproject.toml, docs/releases/v0.2.32.1.md
+
+<!-- whyline-event: 995d45d0a61346858d9e20ddd5cb77cc -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-10T13:38:29.051Z"} -->
