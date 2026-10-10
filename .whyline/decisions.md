@@ -4804,3 +4804,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: a53eef030d5342cfb7306d46de8c79ab -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-05T20:49:21.870Z"} -->
+
+## 2026-10-10 — Make each planner pipeline own marker cleanup and approval history
+
+**Actor:** codex
+**Role:** implementer
+**Task:** PPF-1
+
+**Because:** Planner and spec pipelines call loop.run_agent directly, so their outer pipeline boundary must clear running.json on every exit; approved artifacts must also carry the decisions their agents recorded so the next preflight starts clean
+
+**Rejected:**
+
+- Clear only on success — pauses and exceptions would leave the same false live relay
+- Commit all dirty files during approval — unrelated user work must remain untouched
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/specs.py
+
+<!-- whyline-event: 171ce66389ac49b68d4d5328e06719ce -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-10T13:32:04.419Z"} -->

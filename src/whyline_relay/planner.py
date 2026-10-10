@@ -19,7 +19,7 @@ from pathlib import Path
 
 from whyline_relay import config, failover, gitcheck, handoff, init, invocation
 from whyline_relay import pipeline as pipeline_module
-from whyline_relay import plan, prompts, state, whylinecmd
+from whyline_relay import plan, prompts, running, state, whylinecmd
 from whyline_relay import loop
 
 
@@ -72,9 +72,12 @@ def approve(
     clear_checkpoint: bool = False,
     target: Path | None = None,
 ) -> Path:
-    """Writes the draft as the plan and commits only that file. Raises
-    plan.PlanError for a draft that isn't a usable plan, and PlanExists when
-    a plan is already there and `replace` is false."""
+    """Write and commit the plan plus any decision history produced drafting it.
+
+    Raises plan.PlanError for a draft that isn't usable, and PlanExists when a
+    plan is already there and ``replace`` is false. Other dirty paths remain
+    untouched.
+    """
     text = draft_path.read_text(encoding="utf-8")
     problems = validate(text)
     if problems:
@@ -90,7 +93,7 @@ def approve(
         message = f"docs: add plan {shown} drafted by {drafted_by}"
     else:
         message = f"docs: add plan drafted by {drafted_by}"
-    gitcheck.commit_paths(root, [target], message)
+    gitcheck.commit_paths(root, [target, root / ".whyline" / "decisions.md"], message)
     if clear_checkpoint:
         state.clear_plan(root)
     return target
@@ -176,7 +179,7 @@ def _checkpoint(
     )
 
 
-def _run_pipeline(
+def _drive_pipeline(
     root: Path,
     settings: config.Config,
     description: str,
@@ -339,6 +342,43 @@ def _run_pipeline(
         round_ += 1
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
         loop.check_visit_cap(pipe, current_stage_id, stage_visits, task)
+
+
+def _run_pipeline(
+    root: Path,
+    settings: config.Config,
+    description: str,
+    *,
+    current_stage_id: str = "draft",
+    round_: int = 1,
+    stage_visits: dict[str, int] | None = None,
+    feedback: str = "",
+    consult_handoff: bool = False,
+    attachments: Sequence[str] = (),
+    echo: bool = True,
+    runner: failover.Runner = subprocess.run,
+    on_stage=None,
+    kind: _Kind = PLAN_KIND,
+) -> None:
+    """Run one complete planning pipeline and always release its live marker."""
+    try:
+        _drive_pipeline(
+            root,
+            settings,
+            description,
+            current_stage_id=current_stage_id,
+            round_=round_,
+            stage_visits=stage_visits,
+            feedback=feedback,
+            consult_handoff=consult_handoff,
+            attachments=attachments,
+            echo=echo,
+            runner=runner,
+            on_stage=on_stage,
+            kind=kind,
+        )
+    finally:
+        running.clear(root)
 
 
 def start(

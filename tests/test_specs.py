@@ -9,10 +9,15 @@ from whyline_relay import gitcheck, loop, planner, specs, state
 from tests.test_planner import _scripted_run, repo, settings_with_planner  # noqa: F401
 
 
-def test_spec_draft_review_then_approve_commits_only_the_spec(repo, monkeypatch):
+def test_spec_draft_review_then_approve_commits_spec_and_decisions(repo, monkeypatch):
     import subprocess
 
     settings = settings_with_planner(repo)
+    decisions = repo / ".whyline" / "decisions.md"
+    decisions.write_text("# Decisions\n")
+    subprocess.run(["git", "add", ".whyline/decisions.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed decisions"], cwd=repo, check=True)
+    decisions.write_text("# Decisions\n\n## Chose the spec\n")
     monkeypatch.setattr(loop.agents, "run", _scripted_run(["claude:ready", "claude:approved"]))
     path = specs.draft(repo, settings, "Build the thing")
     assert path == repo / ".whyline/relay/draft-spec.md"
@@ -21,7 +26,7 @@ def test_spec_draft_review_then_approve_commits_only_the_spec(repo, monkeypatch)
     assert target == repo / "docs/specs/the-thing.md"
     shown = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=repo,
                            capture_output=True, text=True).stdout.split()
-    assert shown == ["docs/specs/the-thing.md"]
+    assert shown == [".whyline/decisions.md", "docs/specs/the-thing.md"]
     assert state.load_plan(repo, name="spec-state.json") is None
 
 

@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 import pytest
-from whyline_relay import config, plan, planner, state
+from whyline_relay import config, plan, planner, running, state
 
 
 def _git(root: Path, *args: str) -> str:
@@ -40,16 +40,25 @@ def test_validate_reports_duplicate_ids():
     assert problems and "duplicate task id" in problems[0]
 
 
-def test_approve_writes_and_commits_only_plan_md(repo: Path):
+def test_approve_commits_plan_and_planning_decisions_only(repo: Path):
+    decisions = repo / ".whyline" / "decisions.md"
+    decisions.parent.mkdir(parents=True)
+    decisions.write_text("# Decisions\n")
+    _git(repo, "add", str(decisions.relative_to(repo)))
+    _git(repo, "commit", "-qm", "seed decisions")
+    decisions.write_text("# Decisions\n\n## Chose the plan\n")
     (repo / "unrelated.txt").write_text("keep me uncommitted\n")
     draft = repo / ".whyline" / "relay" / "d.md"
-    draft.parent.mkdir(parents=True)
+    draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text("- [ ] T-1: x\n  y.\n")
     target = planner.approve(repo, config.load(repo), draft, drafted_by="codex")
     assert target == repo / "plan.md"
     assert target.read_text() == "- [ ] T-1: x\n  y.\n"
     assert _git(repo, "log", "-1", "--format=%s").strip() == "docs: add plan drafted by codex"
-    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == [
+        ".whyline/decisions.md",
+        "plan.md",
+    ]
     assert "unrelated.txt" in _git(repo, "status", "--porcelain")
 
 
@@ -155,6 +164,19 @@ def test_draft_returns_the_draft_and_reports_each_stage(
     assert path.read_text() == "- [ ] T-1: build it\n"
     assert lines == ["codex is drafting the plan", "claude is reviewing the draft"]
     assert planner.pending_description(repo) == "a health check"
+    assert running.read(repo) is None
+
+
+def test_draft_clears_the_live_marker_when_an_agent_fails(
+    repo, monkeypatch, quiet_whyline
+):
+    def fail(*args, **kwargs):
+        raise RuntimeError("agent crashed")
+
+    monkeypatch.setattr(loop.agents, "run", fail)
+    with pytest.raises(RuntimeError, match="agent crashed"):
+        planner.draft(repo, _settings(repo), "a health check")
+    assert running.read(repo) is None
 
 
 def test_draft_refuses_while_another_draft_is_checkpointed(

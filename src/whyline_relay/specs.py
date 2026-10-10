@@ -56,6 +56,10 @@ def approve(root: Path, draft: Path, *, name: str, replace: bool = False) -> Pat
         raise planner.PlanExists(f"{target} already exists")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    gitcheck.commit_paths(root, [target], f"docs: add spec {_slug(name)}")
+    gitcheck.commit_paths(
+        root,
+        [target, root / ".whyline" / "decisions.md"],
+        f"docs: add spec {_slug(name)}",
+    )
     state.clear_plan(root, name=KIND.state_name)
     return target
