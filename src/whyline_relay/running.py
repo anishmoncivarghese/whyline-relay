@@ -51,9 +51,37 @@ def read(root: Path) -> Running | None:
     return marker
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    """Ask Windows whether `pid` is a running process, without signalling it."""
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        # Access denied means the process exists but belongs to someone else.
+        return ctypes.get_last_error() == error_access_denied
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def pid_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        # os.kill(pid, 0) is CTRL_C_EVENT on Windows: it would interrupt every
+        # process on that console, including this one when pid is our own.
+        return _windows_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

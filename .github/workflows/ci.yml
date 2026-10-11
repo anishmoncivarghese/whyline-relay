@@ -14,3 +14,20 @@ jobs:
       - run: uv python install ${{ matrix.python }}
       - run: uv sync
       - run: uv run pytest -v
+
+  # The full suite is not Windows-clean yet, but process liveness must be:
+  # os.kill(pid, 0) there is CTRL_C_EVENT and interrupted whyline's own CI.
+  windows-liveness:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync
+      - run: uv run pytest -v tests/test_running_pid.py
+      - name: A live marker with our own pid reads as running, without Ctrl+C
+        run: uv run python -c "import os,sys; from whyline_relay import running; assert running.pid_is_alive(os.getpid()); assert not running.pid_is_alive(4194300); print('liveness ok')"
