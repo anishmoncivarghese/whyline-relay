@@ -85,3 +85,40 @@ def test_write_roles_can_skip_the_commit(tmp_path):
     # Not a git repo at all: the terminal wizard's own tests run like this.
     setup.write_roles(tmp_path, "codex", "claude", "claude", commit=False)
     assert _config(tmp_path).exists()
+
+
+def test_write_roles_writes_the_chain_it_is_given(repo):
+    setup.write_roles(repo, "codex", "claude", "claude", backup=["claude", "", "codex"])
+    text = _config(repo).read_text()
+    assert text.count("[backup]") == 1
+    assert config.load(repo).backup_chain == ["claude", "codex"]
+
+
+def test_write_roles_default_chain_removes_backup(repo):
+    setup.write_roles(repo, "codex", "claude", "claude", backup=["claude"])
+    assert "[backup]" in _config(repo).read_text()
+    # Omitting backup is the default (), which still clears the table.
+    # The config now has a pipeline, so the role text keeps [backup]
+    # unless write_backup removes it.
+    setup.write_roles(repo, "codex", "claude", "claude")
+    text = _config(repo).read_text()
+    assert "[backup]" not in text
+    assert config.load(repo).backup_chain == []
+
+
+def test_write_backup_then_write_roles_leaves_one_table_and_commits_both_files(repo):
+    setup.write_roles(repo, "codex", "claude", "claude", commit=False)
+    setup.write_backup(repo, ["claude"], commit=False)
+    setup.write_roles(repo, "codex", "claude", "claude", backup=["codex"])
+    text = _config(repo).read_text()
+    assert text.count("[backup]") == 1
+    assert 'chain = ["codex"]' in text
+    assert config.load(repo).backup_chain == ["codex"]
+    assert _git(repo, "log", "-1", "--format=%s") == (
+        "setup: assign implementer/tester/reviewer roles\n"
+    )
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(committed) == [
+        ".whyline/relay/config.toml",
+        ".whyline/relay/prompts/test.md",
+    ]

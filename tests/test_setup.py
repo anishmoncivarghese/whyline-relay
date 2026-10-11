@@ -1,5 +1,8 @@
 import subprocess
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from whyline_relay import config, preflight, setup
 
@@ -224,16 +227,16 @@ def test_run_execs_into_start_when_clean_and_confirmed(tmp_path: Path, monkeypat
 
 
 def test_run_role_wizard_backup_chain_writes_backup_table(tmp_path: Path):
-    answers = iter(["codex", "claude", "claude", "aider, backup2"])
+    answers = iter(["codex", "claude", "claude", "grok, antigravity"])
     result = setup.run_role_wizard(
         tmp_path,
         input_fn=lambda prompt="": next(answers),
         print_fn=lambda *a, **k: None,
     )
-    assert result["backup"] == "aider, backup2"
+    assert result["backup"] == "grok, antigravity"
     config_text = (tmp_path / ".whyline" / "relay" / "config.toml").read_text()
     assert "[backup]" in config_text
-    assert 'chain = ["aider", "backup2"]' in config_text
+    assert 'chain = ["grok", "antigravity"]' in config_text
 
 
 def test_run_role_wizard_blank_backup_writes_no_backup_table(tmp_path: Path):
@@ -329,16 +332,46 @@ def test_choose_plan_source_brainstorm_end_to_end_writes_a_real_plan(tmp_path: P
 
 
 def test_choose_plan_source_brainstorm_declined_at_availability_check(tmp_path: Path):
-    settings = config.load(tmp_path)
+    # Recipes install a Grok command in every repo. Drop that entry so model
+    # "4" is unconfigured, and refuse any turn so a real binary cannot start.
+    loaded = config.load(tmp_path)
+    settings = replace(
+        loaded,
+        agents={
+            name: command
+            for name, command in loaded.agents.items()
+            if name != "grok"
+        },
+    )
     answers = iter([
-            "brainstorm", "build a widget", "4", "0", "", "", "n",  # "4" = grok, unavailable here; "n" declines
+        "brainstorm",  # choose_plan_source
+        "build a widget",  # topic
+        "4",  # Grok
+        "0",  # passes
+        "",  # final model: the selected Grok
+        "",  # timeout default
+        "n",  # decline to proceed without it
     ])
+    prompts: list[str] = []
+
+    def answer(prompt: str = "") -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    def refuse_launch(*_args, **_kwargs):
+        raise AssertionError("availability decline must not launch an agent")
+
     result = setup.choose_plan_source(
         tmp_path, settings,
-        input_fn=lambda prompt="": next(answers),
+        input_fn=answer,
         print_fn=lambda *a, **k: None,
+        run_fn=refuse_launch,
     )
     assert result is False
+    assert any(
+        "Grok" in prompt and "not configured for chat" in prompt
+        for prompt in prompts
+    )
 
 
 def test_choose_plan_source_brainstorm_nothing_to_synthesize_is_reported(
@@ -370,3 +403,243 @@ def test_choose_plan_source_brainstorm_nothing_to_synthesize_is_reported(
     )
     assert result is False
     assert any("No selected agent succeeded" in line for line in printed)
+
+
+_RICH_CONFIG = """\
+timeout_minutes = 17
+plan = "docs/plan.md"
+max_rounds = 9
+branch_prefix = "work/"
+
+[roles]
+implementer = "codex"
+tester      = "claude"
+reviewer    = "claude"
+
+[planner]
+draft = "codex"
+review = "grok"
+max_visits = 4
+
+[pipeline]
+default_profile = "full"
+
+[pipeline.profiles]
+full = ["draft", "review"]
+
+[pipeline.stages.draft]
+role   = "implementer"
+prompt = "implement"
+[pipeline.stages.draft.on]
+ready = "@next"
+
+[pipeline.stages.review]
+role   = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+
+[agents.aider]
+adapter = "generic"
+command = ["aider", "--yes"]
+
+[backup]
+chain = ["claude"]
+"""
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _relay_config(root: Path) -> Path:
+    return root / ".whyline" / "relay" / "config.toml"
+
+
+def _without_backup(text: str) -> str:
+    lines = text.splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() == "[backup]":
+            index += 1
+            while index < len(lines) and not lines[index].lstrip().startswith("["):
+                index += 1
+            continue
+        kept.append(lines[index])
+        index += 1
+    return "\n".join(kept).rstrip("\n") + "\n"
+
+
+def _repo_with_config(tmp_path: Path, text: str = _RICH_CONFIG) -> Path:
+    _init_repo(tmp_path)
+    path = _relay_config(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(text)
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "config")
+    return tmp_path
+
+
+def test_read_backup_missing_file_is_empty(tmp_path: Path):
+    _init_repo(tmp_path)
+    assert not _relay_config(tmp_path).exists()
+    assert setup.read_backup(tmp_path) == []
+
+
+def test_read_backup_bad_chain_name_raises_config_error(tmp_path: Path):
+    repo = _repo_with_config(
+        tmp_path, _RICH_CONFIG.replace('["claude"]', '["not-an-agent"]')
+    )
+    with pytest.raises(config.ConfigError, match="not-an-agent"):
+        setup.read_backup(repo)
+
+
+def test_read_backup_broken_file_raises_config_error(tmp_path: Path):
+    repo = _repo_with_config(tmp_path, "timeout_minutes = [\n")
+    with pytest.raises(config.ConfigError, match="could not read"):
+        setup.read_backup(repo)
+
+
+def test_write_backup_changes_the_chain_and_leaves_other_tables(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    before = path.read_text()
+    written = setup.write_backup(repo, ["codex", "", "grok"])
+    after = path.read_text()
+    assert written == path
+    assert setup.read_backup(repo) == ["codex", "grok"]
+    assert _without_backup(after) == _without_backup(before)
+    assert 'tester      = "claude"' in after
+    assert "[planner]\n" in after
+    assert 'review = "grok"' in after
+    assert "[pipeline]\n" in after
+    assert "[agents.aider]\n" in after
+    assert "timeout_minutes = 17\n" in after
+    assert 'plan = "docs/plan.md"\n' in after
+    assert "max_rounds = 9\n" in after
+    assert 'branch_prefix = "work/"\n' in after
+    assert after.endswith('[backup]\nchain = ["codex", "grok"]\n')
+    assert _git(repo, "log", "-1", "--format=%s") == "setup: backup chain codex, grok\n"
+
+
+def test_write_backup_commit_lists_only_config_toml(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    (repo / "README.md").write_text("changed\n")
+    (repo / "other.txt").write_text("leave me\n")
+    setup.write_backup(repo, ["codex", "grok"])
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    assert committed == [".whyline/relay/config.toml"]
+    status = _git(repo, "status", "--porcelain")
+    assert "README.md" in status
+    assert "other.txt" in status
+    assert "config.toml" not in status
+
+
+def test_write_backup_empty_chain_removes_the_table(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    before = path.read_text()
+    setup.write_backup(repo, [])
+    after = path.read_text()
+    assert "[backup]" not in after
+    assert setup.read_backup(repo) == []
+    assert after == _without_backup(before)
+    assert _git(repo, "log", "-1", "--format=%s") == "setup: backup chain none\n"
+
+
+def test_write_backup_same_chain_does_not_commit_again(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    setup.write_backup(repo, ["codex", "grok"])
+    first = _git(repo, "rev-parse", "HEAD")
+    setup.write_backup(repo, ["codex", "grok"])
+    assert _git(repo, "rev-parse", "HEAD") == first
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_write_backup_rejected_name_leaves_the_file_unchanged(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    before = path.read_bytes()
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(config.ConfigError, match="not-an-agent"):
+        setup.write_backup(repo, ["not-an-agent"])
+    assert path.read_bytes() == before
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _git(repo, "status", "--porcelain") == ""
+    assert setup.read_backup(repo) == ["claude"]
+
+
+def test_write_backup_commit_false_writes_without_committing(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    setup.write_backup(repo, ["grok"], commit=False)
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert setup.read_backup(repo) == ["grok"]
+    assert "config.toml" in _git(repo, "status", "--porcelain")
+
+
+def test_write_backup_missing_file_and_empty_chain_creates_nothing(tmp_path: Path):
+    _init_repo(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    written = setup.write_backup(tmp_path, ["", ""])
+    assert written == _relay_config(tmp_path)
+    assert not written.exists()
+    assert not (tmp_path / ".whyline").exists()
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+
+def test_write_backup_then_write_roles_leaves_a_single_chain_table(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    setup.write_backup(repo, ["grok"], commit=False)
+    setup.write_roles(repo, "codex", "claude", "claude", ["codex"])
+    text = _relay_config(repo).read_text()
+    assert text.count("[backup]") == 1
+    assert text.endswith('[backup]\nchain = ["codex"]\n')
+    assert setup.read_backup(repo) == ["codex"]
+    assert "[planner]\n" in text
+    assert "[pipeline]\n" in text
+    assert "[agents.aider]\n" in text
+    assert 'tester      = "claude"' in text
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(committed) == [
+        ".whyline/relay/config.toml",
+        ".whyline/relay/prompts/test.md",
+    ]
+    assert _git(repo, "log", "-1", "--format=%s") == (
+        "setup: assign implementer/tester/reviewer roles\n"
+    )
+
+
+def test_write_roles_default_chain_removes_backup_from_a_pipeline_config(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    setup.write_backup(repo, ["grok"], commit=False)
+    setup.write_roles(repo, "codex", "claude", "claude")
+    text = _relay_config(repo).read_text()
+    assert "[backup]" not in text
+    assert setup.read_backup(repo) == []
+    assert "[pipeline]\n" in text
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(committed) == [
+        ".whyline/relay/config.toml",
+        ".whyline/relay/prompts/test.md",
+    ]
+
+
+def test_write_backup_unstaged_config_edits_ride_along(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    path.write_text(path.read_text().replace(
+        "timeout_minutes = 17", "timeout_minutes = 18"
+    ))
+    (repo / "other.txt").write_text("leave me\n")
+    setup.write_backup(repo, ["codex"])
+    committed = _git(repo, "show", "HEAD:.whyline/relay/config.toml")
+    assert "timeout_minutes = 18\n" in committed
+    assert 'chain = ["codex"]\n' in committed
+    assert 'tester      = "claude"' in committed
+    status = _git(repo, "status", "--porcelain")
+    assert "other.txt" in status
+    assert "config.toml" not in status

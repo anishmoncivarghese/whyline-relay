@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -197,6 +198,60 @@ def write_release(root: Path, value: str, *, commit: bool = True) -> Path:
     )
 
 
+def read_backup(root: Path) -> list[str]:
+    """The [backup] chain. A missing config file is an empty chain.
+
+    ConfigError and OSError propagate: a bad name or a broken file is not
+    reported as an empty chain.
+    """
+    return config.load(root).backup_chain
+
+
+def _load_backup_text(root: Path, text: str) -> None:
+    """config.load `text` on a temporary root outside `root`.
+
+    ConfigError propagates. Nothing under `root` is created or changed.
+    """
+    repo = root.resolve()
+    system_temp = Path(tempfile.gettempdir()).resolve()
+    # A repository that contains the system temp (or is that directory)
+    # would otherwise get the scratch root inside itself.
+    if repo == system_temp or repo in system_temp.parents:
+        scratch_parent = repo.parent
+    else:
+        scratch_parent = system_temp
+    with tempfile.TemporaryDirectory(dir=scratch_parent) as directory:
+        scratch = Path(directory)
+        path = config.config_path(scratch)
+        path.parent.mkdir(parents=True)
+        path.write_text(text, encoding="utf-8")
+        config.load(scratch)
+
+
+def write_backup(root: Path, chain, *, commit: bool = True) -> Path:
+    """Replace only the [backup] table. An empty chain removes it.
+
+    Copies `chain` and drops empty strings, then refuses a name config.load
+    would reject before the repository file is touched. A missing file and
+    an empty chain creates nothing. commit=True records this one path as
+    `setup: backup chain <names>` (or `setup: backup chain none`).
+    """
+    stored = [name for name in list(chain) if name]
+    config_file = role_paths(root)[0]
+    if not stored and not config_file.exists():
+        return config_file
+    existing = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
+    _load_backup_text(root, _set_backup(existing, stored).lstrip("\n"))
+    message = (
+        f"setup: backup chain {', '.join(stored)}"
+        if stored
+        else "setup: backup chain none"
+    )
+    return _write_config(
+        root, lambda text: _set_backup(text, stored), message, commit
+    )
+
+
 _TABLE_HEADER = re.compile(r"^\s*\[\[?([^\]]+)\]\]?\s*(#.*)?$")
 
 
@@ -225,8 +280,9 @@ def write_roles(
 ) -> list[Path]:
     """Writes the role assignments without asking anything. A config with its
     own [pipeline] keeps everything except the three role keys and the
-    backup chain; anything else gets the default pipeline template. Commits
-    only these files."""
+    backup chain; anything else gets the default pipeline template. The
+    chain, including the default empty one, is applied by write_backup so
+    [backup] is replaced rather than appended. Commits only these files."""
     config_file, test_prompt = role_paths(root)
     config_file.parent.mkdir(parents=True, exist_ok=True)
     existing = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
@@ -250,8 +306,10 @@ def write_roles(
         content = f"{kept}\n\n{template}" if kept else template
         if isinstance(existing_release, str) and existing_release:
             content = _set_keys(content, "roles", {"release": existing_release})
-    content = _set_backup(content, [name for name in backup if name])
+    # The role text has to be on disk first. write_backup edits that file,
+    # and a pipeline config still contains the previous [backup] table.
     config_file.write_text(content, encoding="utf-8")
+    write_backup(root, backup, commit=False)
     test_prompt.parent.mkdir(parents=True, exist_ok=True)
     test_prompt.write_text(TEST_PROMPT_TEMPLATE, encoding="utf-8")
     if commit:
