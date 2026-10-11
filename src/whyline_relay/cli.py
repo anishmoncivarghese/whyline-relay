@@ -353,6 +353,18 @@ def cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
+    # Commit a lone decision-log edit before the clean-tree check.
+    # --allow-dirty skips the call and leaves the file for the operator.
+    if not args.allow_dirty:
+        try:
+            if gitcheck.commit_decision_log(root, saved.task_id):
+                print(
+                    f"Committed {saved.task_id}'s decision log.",
+                    file=sys.stderr,
+                )
+        except gitcheck.GitError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_ERROR
     if not args.skip_checks:
         checks = _launch_checks(
             root, Path(saved.plan), allow_dirty=args.allow_dirty

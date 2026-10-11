@@ -119,6 +119,35 @@ def test_relay_files_are_ignored_and_ignoring_is_idempotent(repo: Path):
     assert exclude.count(".whyline/relay/running.json") == 1
 
 
+_AUTO_AND_CHAT_IGNORES = (
+    ".whyline/relay/auto-run.json",
+    ".whyline/relay/auto-run.lock",
+    ".whyline/relay/chat-active-agents.json",
+    ".whyline/relay/recovery.json",
+)
+
+
+def test_relay_ignore_contains_auto_runtime_and_chat_failover_files():
+    for pattern in _AUTO_AND_CHAT_IGNORES:
+        assert pattern in gitcheck.RELAY_IGNORE
+
+
+def test_ensure_relay_ignored_appends_new_runtime_files_without_duplicating(repo: Path):
+    """An exclude file written before these paths existed must gain them once."""
+    target = repo / ".git" / "info" / "exclude"
+    old = [line for line in gitcheck.RELAY_IGNORE if line not in _AUTO_AND_CHAT_IGNORES]
+    already = _AUTO_AND_CHAT_IGNORES[0]
+    target.write_text("# kept\n" + "\n".join([*old, already]) + "\n")
+
+    gitcheck.ensure_relay_ignored(repo)
+    gitcheck.ensure_relay_ignored(repo)
+
+    lines = target.read_text().splitlines()
+    assert lines[0] == "# kept"
+    for pattern in gitcheck.RELAY_IGNORE:
+        assert lines.count(pattern) == 1
+
+
 def test_existing_relay_excludes_pick_up_the_running_marker(repo: Path):
     target = repo / ".git" / "info" / "exclude"
     target.write_text("\n".join(gitcheck.RELAY_IGNORE[:-1]) + "\n")
@@ -153,6 +182,81 @@ def test_dirty_paths_lists_modified_and_untracked_files(repo: Path):
     (repo / "README.md").write_text("changed\n")
     (repo / "new.txt").write_text("x")
     assert sorted(gitcheck.dirty_paths(repo)) == ["README.md", "new.txt"]
+
+
+def _track_decision_log(repo: Path) -> Path:
+    log = repo / ".whyline" / "decisions.md"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("# Decisions\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "track the decision log"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return log
+
+
+def _staged_names(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_commit_decision_log_commits_only_the_decision_log(repo: Path):
+    log = _track_decision_log(repo)
+    log.write_text("# Decisions\n\n- note\n")
+
+    assert gitcheck.commit_decision_log(repo, "BAK-3") is True
+    assert gitcheck.dirty_paths(repo) == []
+    assert (
+        gitcheck.commit_message(repo, gitcheck.head_commit(repo))
+        == "chore: record BAK-3 decisions"
+    )
+    shown = subprocess.run(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert shown.strip() == ".whyline/decisions.md"
+
+
+@pytest.mark.parametrize("extra", ["tracked", "untracked"])
+def test_commit_decision_log_commits_nothing_when_another_path_is_dirty(
+    repo: Path, extra: str
+):
+    log = _track_decision_log(repo)
+    log.write_text("# Decisions\n\n- note\n")
+    if extra == "tracked":
+        (repo / "README.md").write_text("changed\n")
+    else:
+        (repo / "scratch.txt").write_text("x\n")
+    before = gitcheck.head_commit(repo)
+
+    assert gitcheck.commit_decision_log(repo, "BAK-3") is False
+
+    assert gitcheck.head_commit(repo) == before
+    assert _staged_names(repo) == ""
+    dirty = gitcheck.dirty_paths(repo)
+    assert ".whyline/decisions.md" in dirty
+    assert len(dirty) == 2
+
+
+def test_commit_decision_log_commits_nothing_on_a_clean_tree(repo: Path):
+    before = gitcheck.head_commit(repo)
+
+    assert gitcheck.commit_decision_log(repo, "BAK-3") is False
+
+    assert gitcheck.head_commit(repo) == before
+    assert gitcheck.dirty_paths(repo) == []
+    assert _staged_names(repo) == ""
 
 
 def test_commit_paths_commits_only_the_named_files(repo: Path):

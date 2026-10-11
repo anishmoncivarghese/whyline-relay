@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, gitcheck, state
+from whyline_relay import cli, gitcheck, preflight, state
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
 
@@ -258,6 +258,82 @@ def test_resume_reuses_the_saved_base_commit(repo: Path, monkeypatch, capsys):
         ),
     )
     assert cli.main(["resume", "--repo", str(repo)]) == cli.EXIT_OK, capsys.readouterr().err
+
+
+def _tree_check(root, plan_path, *, allow_dirty):
+    """Stand in for preflight's clean-tree check: a dirty tree fails the launch."""
+    if allow_dirty or not gitcheck.is_dirty(root):
+        return [preflight.Check("ok", "working tree is clean")]
+    return [
+        preflight.Check(
+            "FAIL",
+            "working tree has uncommitted changes",
+            "commit or stash your changes, or pass --allow-dirty",
+        )
+    ]
+
+
+def _paused_with_only_the_decision_log_dirty(repo: Path, task_id: str = "BAK-3") -> None:
+    log = repo / ".whyline" / "decisions.md"
+    log.write_text("# Decisions\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "track the decision log")
+    log.write_text("# Decisions\n\n- note\n")
+    state.save(
+        repo,
+        state.RelayState(
+            plan=str(repo / "plan.md"),
+            branch="relay/plan",
+            task_id=task_id,
+            round=3,
+            base_commit=_git(repo, "rev-parse", "HEAD"),
+            paused_reason="paused",
+            log_path="",
+        ),
+    )
+    gitcheck.ensure_relay_ignored(repo)
+
+
+def test_resume_commits_a_lone_decision_log_before_the_clean_tree_check(
+    repo: Path, monkeypatch, capsys
+):
+    _paused_with_only_the_decision_log_dirty(repo)
+    assert gitcheck.dirty_paths(repo) == [".whyline/decisions.md"]
+    monkeypatch.setattr(cli, "_launch_checks", _tree_check)
+    monkeypatch.setattr(cli.loop, "run_plan", lambda *args, **kwargs: [])
+
+    code = cli.main(["resume", "--repo", str(repo)])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Committed BAK-3's decision log." in captured.err
+    assert gitcheck.dirty_paths(repo) == []
+    assert (
+        gitcheck.commit_message(repo, gitcheck.head_commit(repo))
+        == "chore: record BAK-3 decisions"
+    )
+
+
+def test_resume_allow_dirty_leaves_the_decision_log_uncommitted(
+    repo: Path, monkeypatch, capsys
+):
+    _paused_with_only_the_decision_log_dirty(repo)
+    before = gitcheck.head_commit(repo)
+    monkeypatch.setattr(cli, "_launch_checks", _tree_check)
+    monkeypatch.setattr(cli.loop, "run_plan", lambda *args, **kwargs: [])
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("commit_decision_log should be skipped with --allow-dirty")
+
+    monkeypatch.setattr(cli.gitcheck, "commit_decision_log", fail_if_called)
+
+    code = cli.main(["resume", "--repo", str(repo), "--allow-dirty"])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Committed" not in captured.err
+    assert gitcheck.head_commit(repo) == before
+    assert gitcheck.dirty_paths(repo) == [".whyline/decisions.md"]
 
 
 def test_resume_returns_to_the_saved_branch(repo: Path, monkeypatch):

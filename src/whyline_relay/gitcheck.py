@@ -18,6 +18,10 @@ RELAY_IGNORE = (
     ".whyline/relay/active-roles.json",
     ".whyline/relay/antigravity-declined",
     ".whyline/relay/skipped-tasks.json",
+    ".whyline/relay/auto-run.json",
+    ".whyline/relay/auto-run.lock",
+    ".whyline/relay/chat-active-agents.json",
+    ".whyline/relay/recovery.json",
 )
 
 
@@ -154,6 +158,23 @@ def dirty_paths(root: Path) -> list[str]:
     """Paths `git status` reports as changed or untracked, ignored files excluded."""
     output = _git(root, "status", "--porcelain", "--untracked-files=all")
     return [line.split(maxsplit=1)[1] for line in output.splitlines() if line.strip()]
+
+
+def commit_decision_log(root: Path, task_id: str) -> bool:
+    """Commit `.whyline/decisions.md` when it is the only change in the tree.
+
+    A round can pause after an agent runs `whyline note` and before the relay
+    commits. Resume would then fail its clean-tree check on a file the relay's
+    own agents changed. Any other dirty path, including an untracked file, is
+    left untouched so that check still sees every path. A clean tree commits
+    nothing.
+    """
+    decision_log = ".whyline/decisions.md"
+    if dirty_paths(root) != [decision_log]:
+        return False
+    return commit_paths(
+        root, [root / decision_log], f"chore: record {task_id} decisions"
+    )
 
 
 def commit_paths(root: Path, paths: list[Path], message: str) -> bool:
