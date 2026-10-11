@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from whyline_relay import loop, plan, prompts, state
-from tests.test_loop_pipeline import FAKE, make_pipeline, settings_with_pipeline
+from test_loop_pipeline import FAKE, make_pipeline, settings_with_pipeline
 
 
 def git(root: Path, *args: str) -> str:
