@@ -264,3 +264,14 @@ def test_stage_footer_states_complete_and_blocked_correctly():
     )
     assert "whyline handoff T-1 --from claude --to claude --status approved" in footer
     assert "the task is finished" in footer
+
+
+def test_repository_footer_pins_bookkeeping_to_relay_root(tmp_path):
+    root = tmp_path / "relay owner's repo"
+    footer = prompts.repository_footer(root)
+    assert str(root.resolve() / ".whyline" / "active-handoff.json") in footer
+    assert "every `whyline handoff` and `whyline note`" in footer
+    assert "even when the task" in footer
+    assert "Use absolute paths" in footer
+    import shlex
+    assert f"`cd {shlex.quote(str(root.resolve()))}`" in footer

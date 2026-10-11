@@ -132,7 +132,7 @@ def run_agent(
         role=role,
         stage=stage,
         profile=profile,
-    ) + prompt_suffix
+    ) + prompt_suffix + prompts.repository_footer(root)
     block = attachment_delivery.prompt_block(attachments, root)
     if block:
         prompt = f"{prompt}\n\n{block}"

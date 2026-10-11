@@ -470,3 +470,28 @@ def test_a_silent_agent_pause_quotes_its_last_output_line(repo: Path):
         loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
     assert "its last output was" in raised.value.reason
     assert "fake-agent silent" in raised.value.reason
+
+
+def test_custom_prompt_cannot_omit_relay_repository_instruction(repo, monkeypatch):
+    prompt_dir = repo / ".whyline" / "relay" / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    (prompt_dir / "implement.md").write_text("Work and test in /other/repository")
+    settings = settings_using("silent", "approve", repo)
+    seen = []
+
+    def capture_prompt(command, prompt, **kwargs):
+        seen.append(prompt)
+        return 0
+
+    monkeypatch.setattr(loop.agents, "run", capture_prompt)
+    loop.run_agent(
+        repo, settings, "codex", "implementer", "implement", TASK, 1, "", False,
+        implementer="codex", reviewer="claude",
+        prompt_suffix="\nCustom routing instructions",
+    )
+    assert len(seen) == 1
+    prompt = seen[0]
+    assert prompt.index("Relay repository (generated") > prompt.index("Custom routing")
+    assert str(repo / ".whyline" / "active-handoff.json") in prompt
+    assert "every `whyline handoff` and `whyline note`" in prompt
+    assert "even when the task" in prompt

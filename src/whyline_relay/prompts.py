@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 
 from whyline_relay import pipeline as pipeline_module
 
@@ -489,3 +490,20 @@ def stage_footer(
         "if it is missing or uses a status not listed here."
     )
     return "\n".join(lines)
+
+
+def repository_footer(root: Path) -> str:
+    """Pin relay bookkeeping to its repository even for cross-repository tasks."""
+    root = root.resolve()
+    return (
+        "\n\n---\nRelay repository (generated for this turn):\n"
+        f"{root}\n"
+        f"The relay reads handoffs only from {root / '.whyline' / 'active-handoff.json'}.\n"
+        "Run every `whyline handoff` and `whyline note` command above with the "
+        "working directory set to this relay repository, even when the task "
+        "requires editing files or running tests in another repository.\n"
+        f"Before recording a decision or handing off, return with `cd {shlex.quote(str(root))}` "
+        "or set your shell tool's working directory to the relay repository. "
+        "Use absolute paths for files in another repository. A handoff written "
+        "there will not be seen by this relay and it will pause.\n"
+    )
