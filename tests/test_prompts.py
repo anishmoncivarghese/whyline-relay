@@ -273,5 +273,19 @@ def test_repository_footer_pins_bookkeeping_to_relay_root(tmp_path):
     assert "every `whyline handoff` and `whyline note`" in footer
     assert "even when the task" in footer
     assert "Use absolute paths" in footer
+    # Agents already start in the relay repository. Telling them to `cd`
+    # ends a headless Grok turn, whose allow list has no `cd`.
+    assert "`cd " not in footer
+    assert "do not `cd`" in footer
+
+
+def test_repository_footer_shows_task_repo_commands_without_cd(tmp_path):
     import shlex
-    assert f"`cd {shlex.quote(str(root.resolve()))}`" in footer
+
+    root = tmp_path / "relay"
+    other = tmp_path / "other repo"
+    footer = prompts.repository_footer(root, other)
+    quoted = shlex.quote(str(other.resolve()))
+    assert f"uv run --directory {quoted} pytest" in footer
+    assert f"git -C {quoted} diff" in footer
+    assert "`cd " not in footer
