@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 CHECKBOX = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\]\s+(?P<body>.*)$")
 RELAY_PROFILE = re.compile(r"(?m)^relay-profile:\s*(\S+)\s*$")
+# The repository a task's code lives in, when it is not the relay's own.
+RELAY_REPO = re.compile(r"(?m)^relay-repo:\s*(\S+)\s*$")
 
 
 class PlanError(ValueError):
@@ -21,6 +23,7 @@ class Task:
     checked: bool
     line_index: int
     profile: str | None = None
+    repo: str | None = None
 
 
 def _task_id(body: str) -> str:
@@ -65,6 +68,7 @@ def parse(content: str) -> list[Task]:
             cursor += 1
         text = "\n".join([body, *_dedent(detail)])
         profile_match = RELAY_PROFILE.search(text)
+        repo_match = RELAY_REPO.search(text)
         tasks.append(
             Task(
                 task_id=task_id,
@@ -72,6 +76,7 @@ def parse(content: str) -> list[Task]:
                 checked=match.group("mark") != " ",
                 line_index=index,
                 profile=profile_match.group(1) if profile_match else None,
+                repo=repo_match.group(1) if repo_match else None,
             )
         )
         index = cursor

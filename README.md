@@ -621,6 +621,15 @@ A stage's `on` table maps the outcome your prompt tells the agent to hand off wi
   relay-profile: quick
 ```
 
+**A task whose code lives in another checkout names it with a `relay-repo:` line** (absolute, or relative to the relay's repository), so one relay can run a plan that spans repositories without you switching between them:
+
+```markdown
+- [ ] T-3: add the helper the console needs
+  relay-repo: /Users/me/other-repo
+```
+
+Only that task's git work moves there: the relay puts that repository on its own branch (refusing to start a task on uncommitted changes there), takes the base commit and the HEAD checks from it, and makes and verifies the task's commit in it. The plan, its tick, `state.json`, handoffs, logs and the decision log stay in the relay's repository; the tick commit also carries that repository's `.whyline/decisions.md`. Each agent's prompt names both repositories.
+
 **Four prompts are built in**: `implement`, `review`, and, since 0.2.10, `test` and `security` — a real tester (judges whether tests are genuine coverage, not tautological, and may add real ones itself) and a real security reviewer (checks for injected input, leaked secrets, and over-broad permissions), each profile-gated like any other stage: include `"test"` or `"security"` in a profile's stage list, or don't. Anything else is yours to write under `.whyline/relay/prompts/<name>.md`; naming a stage prompt with no built-in and no override file is a `doctor` failure, not a runtime surprise.
 **Every configured-pipeline stage's prompt gets a relay-generated routing footer**, appended after its own text (built-in or yours): the exact permitted outcomes for *this* stage, the exact agent to address each one to, and the literal `whyline handoff` command to run. A built-in or custom prompt's own text never needs to hardcode a `--to` name or an outcome string, and a hand-edited, stale template can no longer send a handoff to the wrong place — the footer is generated fresh every turn from the pipeline actually configured right now, not typed once and left to rot. Custom prompts get four more placeholders beyond the usual ones: `{actor}` (the agent running), `{role}`, `{stage}`, and `{profile}`.
 

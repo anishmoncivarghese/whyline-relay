@@ -44,6 +44,29 @@ class Paused(RuntimeError):
         self.log_path = log_path
 
 
+def task_repo(root: Path, task: plan.Task) -> Path:
+    """The repository a task's code lives in: its `relay-repo:` line, else the
+    relay's own. Only the task's git work moves there; the plan, state,
+    handoffs and logs stay in `root`, so one relay can drive work in another
+    checkout without the user switching repositories mid-plan."""
+    if not task.repo:
+        return root.resolve()
+    repo = Path(task.repo).expanduser()
+    if not repo.is_absolute():
+        repo = root / repo
+    repo = repo.resolve()
+    try:
+        top = Path(gitcheck._git(repo, "rev-parse", "--show-toplevel")).resolve()
+    except (gitcheck.GitError, OSError):
+        top = None
+    if top != repo:
+        raise Paused(
+            f"{task.task_id}: relay-repo {task.repo} is not the top of a git "
+            "repository; fix that line in the plan, then resume"
+        )
+    return repo
+
+
 @dataclass(frozen=True)
 class Outcome:
     task_id: str
@@ -132,7 +155,7 @@ def run_agent(
         role=role,
         stage=stage,
         profile=profile,
-    ) + prompt_suffix + prompts.repository_footer(root)
+    ) + prompt_suffix + prompts.repository_footer(root, task_repo(root, task))
     block = attachment_delivery.prompt_block(attachments, root)
     if block:
         prompt = f"{prompt}\n\n{block}"
@@ -225,7 +248,7 @@ def _approved(
     root: Path, task: plan.Task, base_commit: str, round_: int, log: Path | None
 ) -> Outcome:
     """An approval counts only when a real commit naming the task exists."""
-    if not gitcheck.commit_verified(root, base_commit, task.task_id):
+    if not gitcheck.commit_verified(task_repo(root, task), base_commit, task.task_id):
         raise Paused(
             f"{task.task_id} was approved but no commit naming it exists; "
             "the checkbox was not ticked",
@@ -268,14 +291,15 @@ def _commit_and_approve(
     stage ignored its own rendered prompt's protocol footer (prompts.stage_footer)
     and a bug let it through anyway.
     """
-    if gitcheck.head_commit(root) != base_commit:
+    repo = task_repo(root, task)
+    if gitcheck.head_commit(repo) != base_commit:
         raise Paused(
             f"{task.task_id}: HEAD moved before the relay could make its own commit; "
             f"a stage committed when it must not have. Undo it with `git reset "
             f"{base_commit[:12]}` (your files stay), then resume",
             log,
         )
-    gitcheck.commit_all(root, commit_message(task, summary))
+    gitcheck.commit_all(repo, commit_message(task, summary))
     return _approved(root, task, base_commit, round_, log)
 
 
@@ -309,6 +333,7 @@ def _run_task(
     implementer = failover.effective_agent(root, settings, "implementer")
     reviewer = failover.effective_agent(root, settings, "reviewer")
     gitcheck.ensure_relay_ignored(root)
+    repo = task_repo(root, task)
     whylinecmd.claim(root, task.task_id, implementer, "implementer")
     if resume:
         current = handoff.read(root)
@@ -338,7 +363,7 @@ def _run_task(
         template = "implement" if role == "implementer" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
-        head_before = gitcheck.head_commit(root)
+        head_before = gitcheck.head_commit(repo)
         if on_turn is not None:
             on_turn(round_, previous_id, {})
 
@@ -356,7 +381,7 @@ def _run_task(
             reviewer=reviewer,
             runner=runner,
         )
-        if role == "implementer" and gitcheck.head_commit(root) != head_before:
+        if role == "implementer" and gitcheck.head_commit(repo) != head_before:
             # Codex's sandbox does not stop it committing (measured on
             # codex-cli 0.155.1); only the prompt says not to, so check.
             raise Paused(
@@ -445,7 +470,7 @@ def _run_task(
                 target,
             )
         if move == routing.APPROVED:
-            if gitcheck.commit_verified(root, base_commit, task.task_id):
+            if gitcheck.commit_verified(repo, base_commit, task.task_id):
                 return _approved(root, task, base_commit, round_, target)  # an older review.md committed
             return _commit_and_approve(root, task, base_commit, round_, target, record.summary)
         if move == routing.IMPLEMENT:
@@ -497,6 +522,7 @@ def _run_configured_task(
     round_ = start_round
     feedback = ""
     gitcheck.ensure_relay_ignored(root)
+    repo = task_repo(root, task)
     start_profile = task.profile or pipe.default_profile
     start_stage_id = pipe.profiles[start_profile].stages[0]
     whylinecmd.claim(
@@ -583,7 +609,7 @@ def _run_configured_task(
         agent = effective_agents[stage.role]
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
-        head_before = gitcheck.head_commit(root)
+        head_before = gitcheck.head_commit(repo)
         stage_state = {
             "profile": profile_name,
             "stage": current_stage_id,
@@ -614,7 +640,7 @@ def _run_configured_task(
             ),
             runner=runner,
         )
-        if gitcheck.head_commit(root) != head_before:
+        if gitcheck.head_commit(repo) != head_before:
             raise Paused(
                 f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
                 "forbids: for a configured pipeline, only the relay itself commits, "
@@ -806,16 +832,27 @@ def _save_pause(
     )
 
 
+DECISION_LOG = Path(".whyline") / "decisions.md"
+
+
 def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
     """After an approval nothing may be left uncommitted, or it rides into the next task.
 
     The plan file is exempt: it is ticked and committed straight afterwards.
+    For a task in another repository, so is the relay repository's decision
+    log, which agents append to there and the tick commit carries.
     """
     try:
         own = str(plan_path.resolve().relative_to(root.resolve()))
     except ValueError:
         own = None
-    leftovers = [path for path in gitcheck.dirty_paths(root) if path != own]
+    repo = task_repo(root, task)
+    exempt = {own}
+    if repo != root.resolve():
+        exempt.add(str(DECISION_LOG))
+    leftovers = [path for path in gitcheck.dirty_paths(root) if path not in exempt]
+    if repo != root.resolve():
+        leftovers += [str(repo / path) for path in gitcheck.dirty_paths(repo)]
     if leftovers:
         raise Paused(
             f"{task.task_id} was approved and committed, but files are still "
@@ -823,6 +860,24 @@ def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
             "commit them: the relay verifies the last commit's message), then resume, "
             "or resume with --allow-dirty."
         )
+
+
+def _enter_task_repo(repo: Path, branch: str, task: plan.Task, *, fresh: bool) -> None:
+    """Put another repository on the relay's branch before a task works in it.
+
+    A fresh task refuses to start on uncommitted changes there, the same rule
+    the relay applies to its own repository at start: they would ride into the
+    task's commit. A resumed task's own work in progress is expected.
+    """
+    if fresh:
+        dirty = gitcheck.dirty_paths(repo)
+        if dirty:
+            raise Paused(
+                f"{task.task_id}: {repo} has uncommitted changes "
+                f"({', '.join(dirty[:5])}). Commit or stash them there, then resume"
+            )
+    if gitcheck.current_branch(repo) != branch:
+        gitcheck.ensure_branch(repo, branch)
 
 
 def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
@@ -833,7 +888,10 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
     """
     current = plan_path.read_text(encoding="utf-8")
     plan_path.write_text(plan.tick(current, task.task_id), encoding="utf-8")
-    gitcheck.commit_paths(root, [plan_path], f"chore: tick {task.task_id} in the plan")
+    paths = [plan_path]
+    if task_repo(root, task) != root.resolve():
+        paths.append(root / DECISION_LOG)
+    gitcheck.commit_paths(root, paths, f"chore: tick {task.task_id} in the plan")
 
 
 def _paused_release(root: Path, task_id: str) -> state.RelayState:
@@ -940,7 +998,7 @@ def _run_plan(
                                   if l.strip() and not l.strip().startswith("relay-profile:"))
             reason = f"{RELEASE_PREFIX}{task.task_id}\n{checklist}" if checklist else f"{RELEASE_PREFIX}{task.task_id}"
             gitcheck.ensure_relay_ignored(root)
-            _save_pause(root, plan_path, branch, task, gitcheck.head_commit(root),
+            _save_pause(root, plan_path, branch, task, gitcheck.head_commit(task_repo(root, task)),
                         reason, None, only, {"round": 1, "last": None})
             raise Paused(reason)
         if task.profile == "release":  # an agent does releases
@@ -949,11 +1007,28 @@ def _run_plan(
         else:
             task_settings = settings
 
-        mid_task = resuming is not None and resuming.task_id == task.task_id
-        base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(root)
+        # A pause saved before the task took its base commit (its repository
+        # was dirty) has no base: resuming it starts the task fresh.
+        mid_task = (
+            resuming is not None
+            and resuming.task_id == task.task_id
+            and bool(resuming.base_commit)
+        )
         start_round = (resuming.round or 1) if mid_task else 1
-        resuming = None
         progress = {"round": start_round, "last": None}
+        try:
+            repo = task_repo(root, task)
+            if repo != root.resolve():
+                _enter_task_repo(repo, branch, task, fresh=not mid_task)
+        except Paused as paused:
+            _save_pause(
+                root, plan_path, branch, task,
+                resuming.base_commit if mid_task else "",
+                paused.reason, None, only, progress,
+            )
+            raise
+        base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(repo)
+        resuming = None
 
         def on_turn(round_: int, previous_id: str | None, stage_state: dict) -> None:
             progress["round"] = round_

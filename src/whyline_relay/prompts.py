@@ -492,9 +492,19 @@ def stage_footer(
     return "\n".join(lines)
 
 
-def repository_footer(root: Path) -> str:
+def repository_footer(root: Path, task_repo: Path | None = None) -> str:
     """Pin relay bookkeeping to its repository even for cross-repository tasks."""
     root = root.resolve()
+    task_lines = ""
+    if task_repo is not None and task_repo.resolve() != root:
+        task_repo = task_repo.resolve()
+        task_lines = (
+            "Task repository (generated for this turn):\n"
+            f"{task_repo}\n"
+            "This task's code and tests live in the task repository: edit and test "
+            "there using absolute paths. Any commit for this task belongs in the task "
+            "repository, never in the relay repository.\n"
+        )
     return (
         "\n\n---\nRelay repository (generated for this turn):\n"
         f"{root}\n"
@@ -506,4 +516,4 @@ def repository_footer(root: Path) -> str:
         "or set your shell tool's working directory to the relay repository. "
         "Use absolute paths for files in another repository. A handoff written "
         "there will not be seen by this relay and it will pause.\n"
-    )
+    ) + task_lines
