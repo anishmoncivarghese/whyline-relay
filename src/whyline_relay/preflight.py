@@ -236,17 +236,9 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
 
     for agent, (command, _) in agents.items():
         adapter = config.adapter_for(settings, agent)
-        found = bypass.find(adapter.name, command)
-        if found:
-            checks.append(
-                _result(
-                    "FAIL",
-                    f"refusing to run {agent}: its command contains a "
-                    f"permission-bypass flag ({', '.join(found)}). The relay never "
-                    "runs an agent that way",
-                    "remove it from .whyline/relay/config.toml",
-                )
-            )
+        refusal = _bypass_result(agent, adapter.name, command)
+        if refusal is not None:
+            checks.append(refusal)
         if adapter.name == "generic" and agent == "antigravity":
             checks.append(
                 _result(
@@ -387,14 +379,36 @@ def _plan_checks(
     return checks
 
 
+def _bypass_result(agent: str, adapter_name: str, command: list[str]) -> Check | None:
+    found = bypass.find(adapter_name, command)
+    if not found:
+        return None
+    return _result(
+        "FAIL",
+        f"refusing to run {agent}: its command contains a "
+        f"permission-bypass flag ({', '.join(found)}). The relay never "
+        "runs an agent that way",
+        "remove it from .whyline/relay/config.toml",
+    )
+
+
 def run(
     root: Path,
     plan_path: Path | None = None,
     *,
     allow_dirty: bool = False,
     runner: Runner = subprocess.run,
+    scope: str = "full",
 ) -> list[Check]:
-    """Run every preflight check, returning results in display order."""
+    """Run preflight checks, returning results in display order.
+
+    ``full`` is every check. ``repository`` is the git repo, whyline, relay
+    config, permission-bypass, clean-tree, and live-relay checks.
+    """
+    if scope not in ("full", "repository"):
+        raise ValueError(f"unknown preflight scope: {scope!r}")
+    if scope == "repository" and allow_dirty:
+        raise ValueError("allow_dirty is not valid for preflight scope 'repository'")
     root = root.resolve()
     results = [
         _result("ok", "directory is inside a git repository")
@@ -408,37 +422,61 @@ def run(
     results.append(_whyline(root, runner))
     setup, settings = _relay_setup(root)
     results.append(setup)
-    program_checks, _ = _programs(settings)
-    results.extend(program_checks)
-    if settings is not None:
-        results.extend(_logins(root, settings, runner))
-        results.extend(_role_checks(root, settings))
-        if settings.pipeline is not None:
-            for stage in settings.pipeline.stages.values():
-                try:
-                    prompts.load(root, stage.prompt)
-                except prompts.PromptError as error:
-                    results.append(
-                        _result(
-                            "FAIL",
-                            str(error),
-                            f"add .whyline/relay/prompts/{stage.prompt}.md, or name a "
-                            "built-in prompt (implement, review) instead",
+    if scope == "full":
+        program_checks, _ = _programs(settings)
+        results.extend(program_checks)
+        if settings is not None:
+            results.extend(_logins(root, settings, runner))
+            results.extend(_role_checks(root, settings))
+            if settings.pipeline is not None:
+                for stage in settings.pipeline.stages.values():
+                    try:
+                        prompts.load(root, stage.prompt)
+                    except prompts.PromptError as error:
+                        results.append(
+                            _result(
+                                "FAIL",
+                                str(error),
+                                f"add .whyline/relay/prompts/{stage.prompt}.md, or name a "
+                                "built-in prompt (implement, review) instead",
+                            )
                         )
-                    )
 
-    selected_plan = plan_path
-    if selected_plan is None:
-        selected_plan = root / (
-            settings.plan if settings is not None else config.DEFAULTS["plan"]
+        selected_plan = plan_path
+        if selected_plan is None:
+            selected_plan = root / (
+                settings.plan if settings is not None else config.DEFAULTS["plan"]
+            )
+        elif not selected_plan.is_absolute():
+            selected_plan = root / selected_plan
+        results.extend(
+            _plan_checks(
+                selected_plan, settings.pipeline if settings is not None else None
+            )
         )
-    elif not selected_plan.is_absolute():
-        selected_plan = root / selected_plan
-    results.extend(
-        _plan_checks(selected_plan, settings.pipeline if settings is not None else None)
-    )
+    elif settings is not None:
+        for agent, (command, _) in _agents_in_use(settings).items():
+            adapter = config.adapter_for(settings, agent)
+            refusal = _bypass_result(agent, adapter.name, command)
+            if refusal is not None:
+                results.append(refusal)
 
-    if allow_dirty:
+    if scope == "repository":
+        try:
+            paths = gitcheck.dirty_paths(root)
+        except gitcheck.GitError as error:
+            results.append(_result("FAIL", f"could not check working tree: {error}"))
+        else:
+            results.append(
+                _result(
+                    "FAIL",
+                    "working tree has uncommitted changes: " + ", ".join(paths),
+                    "commit or stash your changes",
+                )
+                if paths
+                else _result("ok", "working tree is clean")
+            )
+    elif allow_dirty:
         results.append(_result("ok", "working-tree check skipped (--allow-dirty)"))
     else:
         try:

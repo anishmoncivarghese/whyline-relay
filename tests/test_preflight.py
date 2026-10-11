@@ -658,6 +658,126 @@ def test_dirty_tree_fails_unless_allowed(ready_repo: Path):
     assert any(check.message == "working-tree check skipped (--allow-dirty)" for check in allowed)
 
 
+def _saved_role_config(ready_repo: Path) -> None:
+    (ready_repo / ".whyline" / "relay" / "config.toml").write_text(
+        '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+        '[agents.codex]\ncommand = ["codex", "exec"]\n'
+        '[agents.claude]\ncommand = ["claude", "-p"]\n'
+    )
+
+
+def test_repository_scope_returns_repository_lines_in_order(ready_repo: Path):
+    checks = preflight.run(ready_repo, scope="repository", runner=successful_runner())
+
+    assert [(check.status, check.message) for check in checks] == [
+        ("ok", "directory is inside a git repository"),
+        ("ok", "whyline is installed and initialised"),
+        ("ok", "relay setup is complete"),
+        ("ok", "working tree is clean"),
+        ("ok", "no other relay is running here"),
+    ]
+
+
+def test_repository_scope_omits_plan_and_login_lines(ready_repo: Path, monkeypatch):
+    _saved_role_config(ready_repo)
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: f"/bin/{name}")
+    calls: list[list[str]] = []
+
+    checks = preflight.run(
+        ready_repo,
+        Path("missing-plan.md"),
+        scope="repository",
+        runner=successful_runner(calls),
+    )
+
+    assert calls == [["whyline", "sync"]]
+    assert not any(
+        "plan file" in check.message or "plan parses" in check.message for check in checks
+    )
+    assert not any("logged in" in check.message for check in checks)
+
+
+def test_repository_scope_names_every_dirty_path(ready_repo: Path):
+    (ready_repo / "scratch.txt").write_text("dirty")
+    (ready_repo / "notes.txt").write_text("also")
+
+    checks = preflight.run(ready_repo, scope="repository", runner=successful_runner())
+
+    paths = preflight.gitcheck.dirty_paths(ready_repo)
+    dirty = next(check for check in checks if "working tree" in check.message)
+    assert paths
+    assert dirty == preflight.Check(
+        "FAIL",
+        "working tree has uncommitted changes: " + ", ".join(paths),
+        "commit or stash your changes",
+    )
+    assert "--allow-dirty" not in dirty.message
+    assert dirty.hint is not None and "--allow-dirty" not in dirty.hint
+
+
+def test_repository_scope_rejects_allow_dirty(ready_repo: Path):
+    def runner(*args, **kwargs):
+        raise AssertionError("checks ran")
+
+    with pytest.raises(ValueError):
+        preflight.run(
+            ready_repo, allow_dirty=True, scope="repository", runner=runner
+        )
+
+
+def test_repository_scope_reports_a_bypass_flag(tmp_path: Path):
+    root = _pipeline_repo(tmp_path)
+    config_path = root / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text().replace(
+            f'command = ["{sys.executable}", "claude-role"]',
+            f'command = ["{sys.executable}", "claude-role", "--dangerously-skip-permissions"]',
+        )
+    )
+
+    checks = preflight.run(root, scope="repository", runner=successful_runner())
+
+    assert any(
+        check.status == "FAIL" and "permission-bypass" in check.message for check in checks
+    )
+    assert not any("prompt" in check.message for check in checks)
+    assert not any("logged in" in check.message for check in checks)
+
+
+def test_full_scope_still_reports_a_missing_plan_and_a_logged_out_saved_role(
+    ready_repo: Path, monkeypatch
+):
+    _saved_role_config(ready_repo)
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: f"/bin/{name}")
+
+    def runner(argv, **kwargs):
+        if argv[0] == "whyline":
+            return _completed(argv)
+        return _completed(argv, 1)
+
+    checks = preflight.run(
+        ready_repo, Path("missing-plan.md"), scope="full", runner=runner
+    )
+
+    assert any(
+        check.status == "FAIL" and check.message.startswith("plan file does not exist:")
+        for check in checks
+    )
+    assert any(
+        check == preflight.Check("FAIL", "codex is not logged in", "codex login")
+        for check in checks
+    )
+    assert any(
+        check.hint == "commit or stash your changes, or pass --allow-dirty"
+        for check in checks
+    )
+
+
+def test_unknown_preflight_scope_raises(tmp_path: Path):
+    with pytest.raises(ValueError):
+        preflight.run(tmp_path, scope="workspace")
+
+
 def test_live_relay_fails_with_fix(ready_repo: Path, monkeypatch):
     marker = preflight.running.Running("codex", "APP-1", 1, "now", os.getpid())
     monkeypatch.setattr(preflight.running, "live", lambda root: marker)

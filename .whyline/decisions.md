@@ -4839,3 +4839,16 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 995d45d0a61346858d9e20ddd5cb77cc -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-10T13:38:29.051Z"} -->
+
+## 2026-10-10 — Approve repository-only preflight scope
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** BAK-3
+
+**Because:** The implementation returns only the required repository checks in order, preserves full-scope behavior, rejects invalid combinations before checks, and both the 50-test focused suite and 876-test full suite pass
+
+**Files:** src/whyline_relay/preflight.py
+
+<!-- whyline-event: 3979c55500e34daf991552f95d6c7714 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-10T19:15:15.178Z"} -->
