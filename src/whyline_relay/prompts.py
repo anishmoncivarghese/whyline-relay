@@ -501,9 +501,11 @@ def repository_footer(root: Path, task_repo: Path | None = None) -> str:
         task_lines = (
             "Task repository (generated for this turn):\n"
             f"{task_repo}\n"
-            "This task's code and tests live in the task repository: edit and test "
-            "there using absolute paths. Any commit for this task belongs in the task "
-            "repository, never in the relay repository.\n"
+            "This task's code and tests live in the task repository: edit it using "
+            "absolute paths, and run its commands without changing directory, for "
+            f"example `uv run --directory {shlex.quote(str(task_repo))} pytest -q` and "
+            f"`git -C {shlex.quote(str(task_repo))} diff`. Any commit for this task "
+            "belongs in the task repository, never in the relay repository.\n"
         )
     return (
         "\n\n---\nRelay repository (generated for this turn):\n"
@@ -512,8 +514,8 @@ def repository_footer(root: Path, task_repo: Path | None = None) -> str:
         "Run every `whyline handoff` and `whyline note` command above with the "
         "working directory set to this relay repository, even when the task "
         "requires editing files or running tests in another repository.\n"
-        f"Before recording a decision or handing off, return with `cd {shlex.quote(str(root))}` "
-        "or set your shell tool's working directory to the relay repository. "
-        "Use absolute paths for files in another repository. A handoff written "
-        "there will not be seen by this relay and it will pause.\n"
+        "Your shell already starts in this relay repository, so do not `cd` "
+        "anywhere: some agents' headless permission rules refuse `cd`, which ends "
+        "the whole turn. Use absolute paths for files in another repository. A "
+        "handoff written there will not be seen by this relay and it will pause.\n"
     ) + task_lines
