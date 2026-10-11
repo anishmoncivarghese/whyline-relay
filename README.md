@@ -625,7 +625,7 @@ A stage's `on` table maps the outcome your prompt tells the agent to hand off wi
 
 ```markdown
 - [ ] T-3: add the helper the console needs
-  relay-repo: /Users/me/other-repo
+  relay-repo: ../other-repo
 ```
 
 Only that task's git work moves there: the relay puts that repository on its own branch (refusing to start a task on uncommitted changes there), takes the base commit and the HEAD checks from it, and makes and verifies the task's commit in it. The plan, its tick, `state.json`, handoffs, logs and the decision log stay in the relay's repository; the tick commit also carries that repository's `.whyline/decisions.md`. Each agent's prompt names both repositories.
