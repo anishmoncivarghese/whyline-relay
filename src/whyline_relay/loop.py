@@ -76,6 +76,43 @@ class Outcome:
     committed: bool
 
 
+# A back-route whose summary contains one of these, case-insensitively, is a
+# refused command rather than a defect. Substring match is intentional.
+SANDBOX_MARKERS = (
+    "permission denied",
+    "operation not permitted",
+    "sandbox",
+    "was denied",
+    "not permitted",
+)
+
+
+def _summary_reports_sandbox_refusal(summary: str) -> bool:
+    folded = summary.casefold()
+    return any(marker in folded for marker in SANDBOX_MARKERS)
+
+
+def _sandbox_backroute(
+    pipe: pipeline.Pipeline,
+    profile_name: str,
+    current_stage_id: str,
+    target_stage_id: str | None,
+    summary: str,
+) -> bool:
+    """True when this advance would send a refused command back to an earlier stage."""
+    if not target_stage_id or not _summary_reports_sandbox_refusal(summary):
+        return False
+    order = pipe.profiles[profile_name].stages
+    try:
+        return order.index(target_stage_id) < order.index(current_stage_id)
+    except ValueError:
+        return False
+
+
+def _sandbox_pause_reason(agent: str, summary: str) -> str:
+    return f"{agent} could not run a required command: {summary}"
+
+
 def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     reason = f"{agent} reported blocked: {record.summary or 'no summary given'}"
     for question in record.questions:
@@ -643,6 +680,21 @@ def _run_configured_task(
                 profile_name=profile_name,
             )
             if resumed.kind == "advance":
+                # Pause before the visit is counted, or resume would burn one
+                # for the stage the refusal was about to be sent back to.
+                if _sandbox_backroute(
+                    pipe,
+                    profile_name,
+                    current_stage_id,
+                    resumed.target_stage,
+                    current.summary,
+                ):
+                    refused_by = effective_agents[
+                        pipe.stages[current_stage_id].role
+                    ]
+                    raise Paused(
+                        _sandbox_pause_reason(refused_by, current.summary), None
+                    )
                 current_stage_id = resumed.target_stage
                 stage_visits[current_stage_id] = (
                     stage_visits.get(current_stage_id, 0) + 1
@@ -820,6 +872,14 @@ def _run_configured_task(
             return _commit_and_approve(
                 root, task, base_commit, round_, target, record.summary
             )
+        if _sandbox_backroute(
+            pipe,
+            profile_name,
+            current_stage_id,
+            decision.target_stage,
+            record.summary,
+        ):
+            raise Paused(_sandbox_pause_reason(agent, record.summary), target)
         feedback = record.summary
         current_stage_id = decision.target_stage
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1

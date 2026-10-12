@@ -256,6 +256,61 @@ def test_stage_footer_resolves_next_relative_to_the_active_profile():
     assert "stage 'review'" in quick
 
 
+def test_stage_footer_lists_blocked_for_every_stage():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    actors = {"draft": "codex", "test": "claude", "review": "claude"}
+    for stage_id, actor in actors.items():
+        footer = prompts.stage_footer(
+            pipe.stages[stage_id], pipe, "full", agents, actor, "T-1"
+        )
+        assert (
+            f"whyline handoff T-1 --from {actor} --to {actor} "
+            '--status blocked --summary "<the exact command and the refusal>"'
+        ) in footer
+        assert prompts.BLOCKED_RULE in footer
+        assert "--status failed" not in footer or stage_id == "test"
+        assert "--status rejected" not in footer or stage_id == "review"
+
+
+def test_stage_footer_states_the_blocked_rule_when_the_stage_already_routes_it():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    # review has no "blocked" key in _three_stage_pipeline; give one stage its own.
+    stage = pipeline_module.Stage(
+        "review",
+        "reviewer",
+        "review",
+        {"approved": "@complete", "rejected": "draft", "blocked": "@blocked"},
+    )
+    footer = prompts.stage_footer(stage, pipe, "full", agents, "claude", "T-1")
+    assert prompts.BLOCKED_RULE in footer
+    blocked_lines = [line for line in footer.splitlines() if "--status blocked" in line]
+    assert blocked_lines == [
+        '    whyline handoff T-1 --from claude --to claude '
+        '--status blocked --summary "<the exact command and the refusal>"'
+    ]
+
+
+def test_stage_footer_keeps_an_explicit_blocked_route_and_the_literal_command():
+    pipe = _three_stage_pipeline()
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    stage = pipeline_module.Stage(
+        "review",
+        "reviewer",
+        "review",
+        {"approved": "@complete", "rejected": "draft", "blocked": "draft"},
+    )
+    footer = prompts.stage_footer(stage, pipe, "full", agents, "claude", "T-1")
+    assert prompts.BLOCKED_RULE in footer
+    assert "send to codex (stage 'draft')" in footer
+    blocked_lines = [line for line in footer.splitlines() if "--status blocked" in line]
+    assert blocked_lines == [
+        "    whyline handoff T-1 --from claude --to codex "
+        '--status blocked --summary "<the exact command and the refusal>"'
+    ]
+
+
 def test_stage_footer_states_complete_and_blocked_correctly():
     pipe = _three_stage_pipeline()
     agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}

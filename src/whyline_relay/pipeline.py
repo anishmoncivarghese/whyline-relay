@@ -111,7 +111,10 @@ def decide(
     that just ran, and resolves "@next" against the named profile's own stage
     sequence -- a stage's "@next" can mean a different next stage depending on
     which profile is running it, so this cannot be resolved once at compile
-    time the way compile_legacy's fixed two stages can.
+    time the way compile_legacy's fixed two stages can. Status "blocked" pauses
+    when that stage has no transition for it. The outcome is not written onto
+    the stage: a stage that routes "blocked" itself keeps that route, and the
+    config's fingerprint stays the hash of the table as written.
 
     Never guesses: no match anywhere is "unknown", not a default.
     """
@@ -126,6 +129,10 @@ def decide(
     for stage in candidates:
         target = stage.transitions.get(record.status)
         if target is None:
+            # Not stored on the stage, so an existing config's fingerprint does
+            # not change and an explicit "blocked" route is left alone.
+            if record.status == "blocked" and current_stage_id is not None:
+                return Decision("blocked", None)
             continue
         if target == "@next":
             if profile is None:

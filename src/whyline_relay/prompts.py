@@ -418,6 +418,15 @@ def render(
     return rendered
 
 
+# A refused command is its own outcome. Routing it backwards (failed,
+# rejected) sends correct work back to be redone.
+BLOCKED_RULE = (
+    "a required command refused by permissions or the sandbox is `blocked`, "
+    "never a back-route outcome such as `failed` or `rejected`, "
+    "because that sends correct work back to be redone."
+)
+
+
 def stage_footer(
     stage: "pipeline_module.Stage",
     pipe: "pipeline_module.Pipeline",
@@ -463,6 +472,27 @@ def stage_footer(
             )
         if resolved is None:
             continue  # config.py already refuses a profile where this can happen
+        if outcome == "blocked":
+            # One command for this outcome. The summary text is fixed so a
+            # stage that already routes blocked still shows the refusal line.
+            if resolved == "@complete":
+                recipient = actor
+                description = f"the task is finished. {BLOCKED_RULE}"
+            elif resolved == "@blocked":
+                recipient = actor
+                description = BLOCKED_RULE
+            else:
+                target_stage = pipe.stages[resolved]
+                recipient = effective_agents.get(target_stage.role, "")
+                description = (
+                    f"send to {recipient} (stage {resolved!r}). {BLOCKED_RULE}"
+                )
+            lines.append(
+                f'- "blocked": {description}\n'
+                f"    whyline handoff {task_id} --from {actor} --to {recipient} "
+                f'--status blocked --summary "<the exact command and the refusal>"'
+            )
+            continue
         if resolved == "@blocked":
             lines.append(
                 f'- "{outcome}": you cannot finish this task; a human is needed.\n'
@@ -484,6 +514,12 @@ def stage_footer(
                 f"    whyline handoff {task_id} --from {actor} --to {recipient} "
                 f'--status {outcome} --summary "<what happened>"'
             )
+    if "blocked" not in stage.transitions:
+        lines.append(
+            f'- "blocked": {BLOCKED_RULE}\n'
+            f"    whyline handoff {task_id} --from {actor} --to {actor} "
+            f'--status blocked --summary "<the exact command and the refusal>"'
+        )
     lines.append(
         "\nDo not exit without running whyline handoff with one of the exact commands "
         "above: the relay reads that record to decide what happens next, and stops "

@@ -1,3 +1,5 @@
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -360,6 +362,192 @@ def test_resume_reconstructs_stage_and_advances_past_the_unrouted_handoff(
         repo, settings, TASK, base_commit=head(repo), echo=False, resume=True
     )
     assert outcome.committed is True
+
+
+def _run_turns(turns: list[tuple[str, str, str]]):
+    """Stand in for agents.run. Each turn is (to_actor, status, summary)."""
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+        cancel_event=None,
+        env=None,
+    ):
+        to_actor, status, summary = turns.pop(0)
+        root = Path(cwd)
+        match = re.search(r"^## Task (\S+)", prompt, re.M)
+        task_id = match.group(1) if match else "T-1"
+        target = root / ".whyline" / "active-handoff.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        previous = json.loads(target.read_text()) if target.exists() else {}
+        counter = int(previous.get("counter") or 0) + 1
+        target.write_text(
+            json.dumps(
+                {
+                    "id": f"event{counter}",
+                    "counter": counter,
+                    "task": task_id,
+                    "to_actor": to_actor,
+                    "status": status,
+                    "summary": summary,
+                    "from_actor": "",
+                    "questions": [],
+                }
+            )
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(summary)
+        return 0
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "scripts, agent",
+    [
+        (["codex:blocked"], "codex"),
+        (["claude:ready", "codex:blocked"], "claude"),
+        (["claude:ready", "claude:passed", "codex:blocked"], "claude"),
+    ],
+)
+def test_blocked_from_draft_test_and_review_pauses(repo, monkeypatch, scripts, agent):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(loop.agents, "run", _scripted_run(scripts))
+    with pytest.raises(
+        loop.Paused, match=f"{agent} reported blocked: fake codex:blocked"
+    ):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+
+
+def test_a_rejected_verification_denial_pauses_without_counting_a_draft_visit(
+    repo, monkeypatch
+):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _run_turns(
+            [
+                ("claude", "ready", "implemented"),
+                ("claude", "passed", "tests passed"),
+                ("codex", "rejected", "verification was denied"),
+            ]
+        ),
+    )
+    seen: list[dict[str, int]] = []
+
+    def on_turn(round_, previous_id, stage_state):
+        seen.append(dict(stage_state["stage_visits"]))
+
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(
+            repo, settings, TASK, base_commit=head(repo), echo=False, on_turn=on_turn
+        )
+    assert (
+        raised.value.reason
+        == "claude could not run a required command: verification was denied"
+    )
+    assert seen[-1]["draft"] == 1
+    assert all(visits.get("draft", 0) == 1 for visits in seen)
+
+
+def test_a_rejected_defect_still_routes_to_draft(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    seen: list[tuple[str, dict[str, int]]] = []
+
+    def on_turn(round_, previous_id, stage_state):
+        seen.append((stage_state["stage"], dict(stage_state["stage_visits"])))
+
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(
+            [
+                "claude:ready",
+                "claude:passed",
+                "codex:rejected",
+                "claude:ready",
+                "claude:passed",
+                "claude:approved",
+            ]
+        ),
+    )
+    outcome = loop.run_task(
+        repo, settings, TASK, base_commit=head(repo), echo=False, on_turn=on_turn
+    )
+    assert outcome.committed is True
+    assert ("draft", {"draft": 2, "test": 1, "review": 1}) in seen
+
+
+def test_sandbox_markers_match_case_insensitively_and_only_on_an_earlier_stage():
+    pipe = make_pipeline()
+    for marker in loop.SANDBOX_MARKERS:
+        assert loop._summary_reports_sandbox_refusal(f"prefix {marker.upper()} suffix")
+        assert loop._sandbox_backroute(pipe, "full", "review", "draft", marker.upper())
+    assert not loop._summary_reports_sandbox_refusal("the assertion on line 4 is wrong")
+    assert not loop._sandbox_backroute(
+        pipe, "full", "review", "draft", "the assertion on line 4 is wrong"
+    )
+    # A forward route that merely mentions a marker is still a route.
+    assert not loop._sandbox_backroute(
+        pipe, "full", "draft", "test", "permission denied"
+    )
+    assert loop._sandbox_backroute(
+        pipe, "full", "test", "draft", "Operation Not Permitted"
+    )
+
+
+def test_resume_pauses_a_sandbox_rejection_without_starting_draft(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        json.dumps(
+            {
+                "id": "event3",
+                "task": "T-1",
+                "to_actor": "codex",
+                "status": "rejected",
+                "summary": "verification was denied",
+                "from_actor": "",
+            }
+        )
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=3,
+            base_commit=head(repo),
+            paused_reason="crash",
+            log_path="",
+            profile="full",
+            stage="review",
+            stage_visits={"draft": 1, "test": 1, "review": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    called: list[str] = []
+    monkeypatch.setattr(loop.agents, "run", lambda *a, **k: called.append("ran"))
+    with pytest.raises(
+        loop.Paused,
+        match="claude could not run a required command: verification was denied",
+    ):
+        loop.run_task(
+            repo, settings, TASK, base_commit=head(repo), echo=False, resume=True
+        )
+    assert called == []
 
 
 def test_resume_with_a_drifted_fingerprint_pauses_before_running_anything(

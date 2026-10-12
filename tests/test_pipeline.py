@@ -186,6 +186,102 @@ def test_decide_next_resolves_relative_to_the_active_profile():
     assert small == pipeline.Decision("advance", "review")
 
 
+def test_unlisted_blocked_from_any_configured_stage_decides_blocked():
+    p = pipeline.Pipeline(
+        roles={
+            "implementer": pipeline.Role("implementer", agent="codex"),
+            "tester": pipeline.Role("tester", agent="claude"),
+            "reviewer": pipeline.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline.Stage("draft", "implementer", "implement", {"ready": "@next"}),
+            "test": pipeline.Stage("test", "tester", "test", {"passed": "@next", "failed": "draft"}),
+            "review": pipeline.Stage(
+                "review", "reviewer", "review", {"approved": "@complete", "rejected": "draft"}
+            ),
+        },
+        profiles={"full": pipeline.Profile("full", ("draft", "test", "review"))},
+        default_profile="full",
+    )
+    agents = {"implementer": "codex", "tester": "claude", "reviewer": "claude"}
+    blocked = handoff.Handoff(
+        event_id="e1", task="T", to_actor="nobody", status="blocked", summary="pytest was denied"
+    )
+    for stage_id in ("draft", "test", "review"):
+        assert pipeline.decide(
+            blocked, None, p, agents, current_stage_id=stage_id, profile_name="full"
+        ) == pipeline.Decision("blocked", None)
+    # Stateless search must not invent the outcome. Only the stage that just ran does.
+    assert pipeline.decide(blocked, None, p, agents).kind == "unknown"
+
+
+def test_a_stage_that_routes_blocked_itself_keeps_that_route():
+    p = pipeline.Pipeline(
+        roles={
+            "implementer": pipeline.Role("implementer", agent="codex"),
+            "reviewer": pipeline.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline.Stage(
+                "draft", "implementer", "implement", {"ready": "review", "blocked": "review"}
+            ),
+            "review": pipeline.Stage("review", "reviewer", "review", {"approved": "@complete"}),
+        },
+        profiles={"full": pipeline.Profile("full", ("draft", "review"))},
+        default_profile="full",
+    )
+    agents = {"implementer": "codex", "reviewer": "claude"}
+    moved = handoff.Handoff(
+        event_id="e1", task="T", to_actor="claude", status="blocked", summary=""
+    )
+    assert pipeline.decide(
+        moved, None, p, agents, current_stage_id="draft", profile_name="full"
+    ) == pipeline.Decision("advance", "review")
+
+
+# The [pipeline] table in agentdock's config on 2026-10-12. Roles below are
+# fillers: the fingerprint hashes only this table.
+AGENTDOCK_PIPELINE_TOML = """
+[roles]
+implementer = "codex"
+tester = "claude"
+reviewer = "claude"
+[pipeline]
+default_profile = "full"
+[pipeline.profiles]
+full = ["draft", "test", "review"]
+[pipeline.stages.draft]
+role = "implementer"
+prompt = "implement"
+[pipeline.stages.draft.on]
+ready = "@next"
+[pipeline.stages.test]
+role = "tester"
+prompt = "test"
+max_visits = 5
+[pipeline.stages.test.on]
+passed = "@next"
+failed = "draft"
+[pipeline.stages.review]
+role = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+"""
+
+
+def test_agentdock_pipeline_fingerprint_is_unchanged(tmp_path):
+    target = tmp_path / ".whyline" / "relay"
+    target.mkdir(parents=True)
+    (target / "config.toml").write_text(AGENTDOCK_PIPELINE_TOML)
+    settings = config.load(tmp_path)
+    assert settings.pipeline_fingerprint == "76e3580797f7d116"
+    assert settings.pipeline is not None
+    for stage in settings.pipeline.stages.values():
+        assert "blocked" not in stage.transitions
+
+
 def test_decide_next_on_the_last_stage_of_its_profile_is_unknown():
     p = pipeline.Pipeline(
         roles={"reviewer": pipeline.Role("reviewer", agent="claude")},
