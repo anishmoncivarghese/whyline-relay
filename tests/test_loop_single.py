@@ -2,13 +2,14 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, loop, plan
+from whyline_relay import cli, config, loop, plan, state
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
 TASK = plan.Task(task_id="WL-1", text="WL-1: Add the cache", checked=False, line_index=0)
@@ -495,3 +496,101 @@ def test_custom_prompt_cannot_omit_relay_repository_instruction(repo, monkeypatc
     assert str(repo / ".whyline" / "active-handoff.json") in prompt
     assert "every `whyline handoff` and `whyline note`" in prompt
     assert "even when the task" in prompt
+
+
+def _write_pausing_config(repo: Path, timeout_minutes: int | None = None) -> None:
+    relay = repo / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    command = json.dumps([sys.executable, FAKE, "silent", str(repo)])
+    lines = []
+    if timeout_minutes is not None:
+        lines.append(f"timeout_minutes = {timeout_minutes}")
+    lines.append("[agents.codex]")
+    lines.append(f"command = {command}")
+    (relay / "config.toml").write_text("\n".join(lines) + "\n")
+    plan_path = repo / "plan.md"
+    if not plan_path.exists():
+        plan_path.write_text("- [ ] WL-1: One\n")
+
+
+def _record_runs(monkeypatch) -> list[dict]:
+    seen: list[dict] = []
+    real_run = loop.agents.run
+
+    def run(command, prompt, **kwargs):
+        seen.append(kwargs)
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    return seen
+
+
+def _resume(repo: Path) -> int:
+    return cli.main(
+        ["resume", "--repo", str(repo), "--allow-dirty", "--skip-checks"]
+    )
+
+
+def test_resume_after_timeout_zero_passes_none_to_agents_run(repo: Path, monkeypatch):
+    _write_pausing_config(repo)
+    seen = _record_runs(monkeypatch)
+    code = cli.main(
+        [
+            "start",
+            "--repo",
+            str(repo),
+            "--timeout",
+            "0",
+            "--allow-dirty",
+            "--skip-checks",
+        ]
+    )
+    assert code == cli.EXIT_PAUSED
+    assert state.load(repo).timeout_minutes == 0
+    seen.clear()
+    assert _resume(repo) == cli.EXIT_PAUSED
+    assert [call["timeout_seconds"] for call in seen] == [None]
+    assert isinstance(seen[0]["cancel_event"], threading.Event)
+    assert seen[0]["cancel_event"].is_set() is False
+
+
+def test_resume_after_an_unflagged_start_keeps_thirty_minutes(repo: Path, monkeypatch):
+    _write_pausing_config(repo)
+    seen = _record_runs(monkeypatch)
+    code = cli.main(
+        ["start", "--repo", str(repo), "--allow-dirty", "--skip-checks"]
+    )
+    assert code == cli.EXIT_PAUSED
+    assert state.load(repo).timeout_minutes == 30
+    # The file's cap moves after the pause. Resume must keep the 30 that
+    # was in effect when the run stopped, not whatever config.load says now.
+    _write_pausing_config(repo, timeout_minutes=45)
+    seen.clear()
+    assert _resume(repo) == cli.EXIT_PAUSED
+    assert [call["timeout_seconds"] for call in seen] == [30 * 60]
+
+
+def test_a_state_file_without_timeout_minutes_resumes_at_the_config_value(
+    repo: Path, monkeypatch
+):
+    _write_pausing_config(repo, timeout_minutes=45)
+    target = state.path(repo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "plan": str(repo / "plan.md"),
+                "branch": "relay/plan",
+                "task_id": "WL-1",
+                "round": 1,
+                "base_commit": loop.gitcheck.head_commit(repo),
+                "paused_reason": "paused",
+                "log_path": "",
+            }
+        )
+    )
+    assert "timeout_minutes" not in json.loads(target.read_text())
+    assert state.load(repo).timeout_minutes is None
+    seen = _record_runs(monkeypatch)
+    assert _resume(repo) == cli.EXIT_PAUSED
+    assert [call["timeout_seconds"] for call in seen] == [45 * 60]

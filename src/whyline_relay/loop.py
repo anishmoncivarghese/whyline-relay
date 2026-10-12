@@ -6,6 +6,7 @@ import dataclasses
 import json
 import re
 import subprocess
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -176,6 +177,12 @@ def run_agent(
             f"==> {agent}: {action} {task.task_id} "
             f"(round {round_} of {settings.max_rounds})"
         )
+    # agents.run rejects 0. A configured 0 is "no watchdog", so pass None.
+    timeout_seconds = (
+        None if settings.timeout_minutes == 0 else settings.timeout_minutes * 60
+    )
+    # RTO-6 is what sets this from the STOP file. Until then it stays clear.
+    cancel_event = threading.Event()
     started = time.monotonic()
     turn_command, turn_prompt = command, prompt
     resumes = 0
@@ -187,9 +194,10 @@ def run_agent(
                     turn_prompt,
                     cwd=root,
                     log_path=target,
-                    timeout_seconds=settings.timeout_minutes * 60,
+                    timeout_seconds=timeout_seconds,
                     echo=echo,
                     agent_name=agent,
+                    cancel_event=cancel_event,
                 )
                 session = None
                 if resumes < GROK_RESUMES:
@@ -212,6 +220,9 @@ def run_agent(
                         f"permission policy; resuming its session "
                         f"({resumes} of {GROK_RESUMES})"
                     )
+                if cancel_event.is_set():
+                    name = command[0] if command else "agent"
+                    raise agents.AgentCancelled(f"{name} cancelled by user")
                 turn_command = grok.resume_command(command, session)
                 turn_prompt = grok.resume_prompt(command)
         finally:
@@ -810,6 +821,8 @@ def _save_pause(
     log: Path | None,
     only: str | None,
     progress: dict,
+    *,
+    timeout_minutes: int,
 ) -> None:
     stage_state = progress.get("stage_state") or {}
     state.save(
@@ -828,6 +841,7 @@ def _save_pause(
             stage=stage_state.get("stage", ""),
             stage_visits=stage_state.get("stage_visits", {}),
             pipeline_fingerprint=stage_state.get("pipeline_fingerprint", ""),
+            timeout_minutes=timeout_minutes,
         ),
     )
 
@@ -999,7 +1013,8 @@ def _run_plan(
             reason = f"{RELEASE_PREFIX}{task.task_id}\n{checklist}" if checklist else f"{RELEASE_PREFIX}{task.task_id}"
             gitcheck.ensure_relay_ignored(root)
             _save_pause(root, plan_path, branch, task, gitcheck.head_commit(task_repo(root, task)),
-                        reason, None, only, {"round": 1, "last": None})
+                        reason, None, only, {"round": 1, "last": None},
+                        timeout_minutes=settings.timeout_minutes)
             raise Paused(reason)
         if task.profile == "release":  # an agent does releases
             task_settings = _with_release_implementer(settings, settings.release_role)
@@ -1025,6 +1040,7 @@ def _run_plan(
                 root, plan_path, branch, task,
                 resuming.base_commit if mid_task else "",
                 paused.reason, None, only, progress,
+                timeout_minutes=settings.timeout_minutes,
             )
             raise
         base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(repo)
@@ -1054,12 +1070,14 @@ def _run_plan(
             _save_pause(
                 root, plan_path, branch, task, base_commit,
                 paused.reason, paused.log_path, only, progress,
+                timeout_minutes=settings.timeout_minutes,
             )
             raise
         except KeyboardInterrupt:
             _save_pause(
                 root, plan_path, branch, task, base_commit,
                 "interrupted by the user (Ctrl+C)", None, only, progress,
+                timeout_minutes=settings.timeout_minutes,
             )
             raise
 

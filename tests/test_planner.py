@@ -1,11 +1,12 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, loop, planner, state
+from whyline_relay import cli, config, loop, planner, state
 
 
 FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
@@ -58,6 +59,7 @@ def _scripted_run(specs: list[str]):
         which=None,
         echo=True,
         agent_name=None,
+        cancel_event=None,
     ):
         spec = specs.pop(0)
         result = subprocess.run(
@@ -242,6 +244,7 @@ def test_approving_writes_and_commits_plan_md_without_starting(repo, monkeypatch
         which=None,
         echo=True,
         agent_name=None,
+        cancel_event=None,
     ):
         if agent_name == "codex":
             planner.draft_path(repo).write_text("- [ ] T-1: build it\n  Do the thing.\n")
@@ -284,6 +287,7 @@ def test_discarding_clears_the_checkpoint_and_keeps_the_draft_file(repo, monkeyp
         which=None,
         echo=True,
         agent_name=None,
+        cancel_event=None,
     ):
         if agent_name == "codex":
             planner.draft_path(repo).write_text("- [ ] T-1: x\n  y.\n")
@@ -320,6 +324,7 @@ def test_requesting_changes_redrafts_before_the_gate_reappears(repo, monkeypatch
         which=None,
         echo=True,
         agent_name=None,
+        cancel_event=None,
     ):
         calls["n"] += 1
         spec = [
@@ -390,6 +395,62 @@ def test_resuming_at_complete_reprints_the_draft_without_rerunning_any_agent(
     monkeypatch.setattr(loop.agents, "run", run)
     result = planner.resume(repo, settings, saved, confirm=_confirm(["d"]))
     assert "Discarded" in result
+
+
+def test_a_paused_plan_checkpoint_with_zero_resumes_with_timeout_minutes_zero(
+    repo, monkeypatch
+):
+    paused = replace(settings_with_planner(repo), timeout_minutes=0)
+    monkeypatch.setattr(loop.agents, "run", _scripted_run(["codex:blocked"]))
+    with pytest.raises(loop.Paused, match="blocked"):
+        planner._run_pipeline(repo, paused, DESCRIPTION, echo=False)
+    saved = state.load_plan(repo)
+    assert saved is not None and saved.timeout_minutes == 0
+    # The blocked handoff would re-raise before the next turn. Drop it so
+    # resume launches the saved stage and shows which cap it uses.
+    (repo / ".whyline" / "active-handoff.json").unlink()
+
+    seen = {}
+
+    def run_agent(root, settings, *args, **kwargs):
+        seen["timeout_minutes"] = settings.timeout_minutes
+        raise loop.Paused("seen")
+
+    monkeypatch.setattr(loop, "run_agent", run_agent)
+    fresh = settings_with_planner(repo)
+    assert fresh.timeout_minutes == 30
+    with pytest.raises(loop.Paused, match="seen"):
+        planner.resume(repo, fresh, saved, echo=False)
+    assert seen["timeout_minutes"] == 0
+
+
+def test_resume_command_gives_the_planner_a_checkpoint_timeout_of_zero(
+    repo, monkeypatch
+):
+    state.save_plan(
+        repo,
+        state.PlanState(
+            description=DESCRIPTION,
+            stage="draft",
+            round=1,
+            stage_visits={"draft": 1},
+            agent="",
+            feedback="",
+            draft_path=str(planner.draft_path(repo)),
+            paused_reason="paused",
+            log_path="",
+            timeout_minutes=0,
+        ),
+    )
+    seen = {}
+
+    def fake_resume(root, settings, plan_state, **kwargs):
+        seen["timeout_minutes"] = settings.timeout_minutes
+        return "resumed"
+
+    monkeypatch.setattr(cli.planner, "resume", fake_resume)
+    assert cli.main(["resume", "--repo", str(repo)]) == cli.EXIT_OK
+    assert seen["timeout_minutes"] == 0
 
 
 def test_review_gate_approve_writes_and_commits(tmp_path: Path):

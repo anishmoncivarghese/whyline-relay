@@ -13,7 +13,7 @@ Spec: docs/superpowers/specs/2026-09-25-relay-planner-workflow.md.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import subprocess
 from pathlib import Path
 
@@ -158,6 +158,7 @@ def _checkpoint(
     stage_visits: dict[str, int],
     feedback: str,
     *,
+    timeout_minutes: int,
     attachments: Sequence[str] = (),
     kind: _Kind = PLAN_KIND,
 ) -> None:
@@ -174,6 +175,7 @@ def _checkpoint(
             paused_reason="",
             log_path="",
             attachments=list(attachments),
+            timeout_minutes=timeout_minutes,
         ),
         name=kind.state_name,
     )
@@ -248,6 +250,7 @@ def _drive_pipeline(
                     round_,
                     stage_visits,
                     feedback,
+                    timeout_minutes=settings.timeout_minutes,
                     attachments=attachments,
                     kind=kind,
                 )
@@ -270,6 +273,7 @@ def _drive_pipeline(
             round_,
             stage_visits,
             feedback,
+            timeout_minutes=settings.timeout_minutes,
             attachments=attachments,
             kind=kind,
         )
@@ -333,6 +337,7 @@ def _drive_pipeline(
                 round_,
                 stage_visits,
                 feedback,
+                timeout_minutes=settings.timeout_minutes,
                 attachments=attachments,
                 kind=kind,
             )
@@ -412,6 +417,8 @@ def resume(
     runner: failover.Runner = subprocess.run,
 ) -> str:
     """Resume an in-flight plan session from its checkpoint."""
+    if saved.timeout_minutes is not None:
+        settings = replace(settings, timeout_minutes=saved.timeout_minutes)
     if saved.stage != "@complete":
         _run_pipeline(
             root,

@@ -26,6 +26,9 @@ class RelayState:
     stage: str = ""
     stage_visits: dict[str, int] = field(default_factory=dict)
     pipeline_fingerprint: str = ""
+    # None means this record predates the field. Resume then uses config.load.
+    # A stored 0 or any stored positive int is the cap for this run.
+    timeout_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,9 @@ class PlanState:
     paused_reason: str
     log_path: str
     attachments: list[str] = field(default_factory=list)
+    # None means this record predates the field. Resume then uses config.load.
+    # A stored 0 or any stored positive int is the cap for this run.
+    timeout_minutes: int | None = None
 
 
 def path(root: Path) -> Path:

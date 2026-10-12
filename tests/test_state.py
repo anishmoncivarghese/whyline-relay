@@ -92,6 +92,7 @@ def test_a_state_file_saved_before_this_field_existed_still_loads(tmp_path: Path
     loaded = state.load(tmp_path)
     assert loaded.profile == "" and loaded.stage == ""
     assert loaded.stage_visits == {} and loaded.pipeline_fingerprint == ""
+    assert loaded.timeout_minutes is None
 
 
 def test_load_plan_returns_none_when_absent(tmp_path: Path):
@@ -114,6 +115,82 @@ def test_corrupt_plan_state_reads_as_absent(tmp_path: Path):
     target.mkdir(parents=True)
     (target / "plan-state.json").write_text("{broken")
     assert state.load_plan(tmp_path) is None
+
+
+def test_a_plan_file_saved_before_timeout_minutes_existed_still_loads(tmp_path: Path):
+    target = state.plan_path(tmp_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "description": "add a health-check endpoint",
+                "stage": "review",
+                "round": 1,
+                "stage_visits": {"draft": 1},
+                "agent": "codex",
+                "feedback": "",
+                "draft_path": "plan.md",
+                "paused_reason": "",
+                "log_path": "",
+            }
+        )
+    )
+    loaded = state.load_plan(tmp_path)
+    assert loaded is not None
+    assert loaded.timeout_minutes is None
+    assert loaded.attachments == []
+
+
+def test_timeout_minutes_round_trips_zero_and_a_positive_cap(tmp_path: Path):
+    for minutes in (0, 30):
+        relay = state.RelayState(
+            plan="plan.md",
+            branch="relay/plan",
+            task_id="WL-1",
+            round=1,
+            base_commit="abc",
+            paused_reason="paused",
+            log_path="",
+            timeout_minutes=minutes,
+        )
+        state.save(tmp_path, relay)
+        assert state.load(tmp_path).timeout_minutes == minutes
+        plan = state.PlanState(
+            description="add a health-check endpoint",
+            stage="draft",
+            round=1,
+            stage_visits={"draft": 1},
+            agent="",
+            feedback="",
+            draft_path="plan.md",
+            paused_reason="",
+            log_path="",
+            timeout_minutes=minutes,
+        )
+        state.save_plan(tmp_path, plan)
+        assert state.load_plan(tmp_path).timeout_minutes == minutes
+
+
+def test_load_does_not_strip_an_unknown_key(tmp_path: Path):
+    # An older relay must fail RelayState(**record) on a key it does not know.
+    # load() already turns that TypeError into None; it must not drop the key.
+    target = state.path(tmp_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "plan": "plan.md",
+                "branch": "relay/plan",
+                "task_id": "WL-1",
+                "round": 1,
+                "base_commit": "abc",
+                "paused_reason": "paused",
+                "log_path": "",
+                "not_a_field": 1,
+            }
+        )
+    )
+    assert state.load(tmp_path) is None
 
 
 def test_plan_state_and_relay_state_live_at_different_paths(tmp_path: Path):

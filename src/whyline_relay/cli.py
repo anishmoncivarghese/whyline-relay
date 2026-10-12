@@ -363,6 +363,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
     plan_state = state.load_plan(root)
     if plan_state is not None:
         settings = config.load(root)
+        if plan_state.timeout_minutes is not None:
+            settings = replace(
+                settings, timeout_minutes=plan_state.timeout_minutes
+            )
         try:
             _warn_if_unlimited(settings)
             summary = planner.resume(root, settings, plan_state)
@@ -407,6 +411,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
             return EXIT_ERROR
     loop.stop_path(root).unlink(missing_ok=True)
     settings = config.load(root)
+    if saved.timeout_minutes is not None:
+        settings = replace(settings, timeout_minutes=saved.timeout_minutes)
     try:
         # Back onto the branch the run started on: the agents must not commit to
         # whatever happens to be checked out now, which could be main.

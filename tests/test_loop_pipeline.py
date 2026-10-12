@@ -119,6 +119,7 @@ def _scripted_run(specs: list[str]):
         which=None,
         echo=True,
         agent_name=None,
+        cancel_event=None,
     ):
         spec = specs.pop(0)
         result = subprocess.run(

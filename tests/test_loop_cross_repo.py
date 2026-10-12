@@ -54,7 +54,7 @@ def scripted(specs: list[str], work: Path, *, edit=True, commit_in_work=False):
     calls = {"n": 0}
 
     def run(command, prompt, *, cwd, log_path, timeout_seconds, which=None,
-            echo=True, agent_name=None):
+            echo=True, agent_name=None, cancel_event=None):
         calls["n"] += 1
         if calls["n"] == 1 and edit:
             (work / "feature.txt").write_text("done\n")
