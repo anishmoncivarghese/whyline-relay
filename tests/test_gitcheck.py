@@ -306,6 +306,34 @@ def test_commit_all_does_nothing_and_returns_false_when_the_tree_is_clean(
     assert gitcheck.head_commit(repo) == before
 
 
+def test_commit_empty_records_a_commit_without_changing_the_tree(repo: Path):
+    parent = gitcheck.head_commit(repo)
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    gitcheck.commit_empty(repo, "chore: T-1 needed no changes (T-1)")
+
+    head = gitcheck.head_commit(repo)
+    assert head != parent
+    assert (
+        gitcheck.commit_message(repo, head) == "chore: T-1 needed no changes (T-1)"
+    )
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert after == tree
+    assert gitcheck.dirty_paths(repo) == []
+
+
 def test_commit_stat_reports_a_new_file_in_the_latest_commit(repo: Path):
     (repo / "new.txt").write_text("made by an agent\n")
     gitcheck.commit_all(repo, "add new.txt")

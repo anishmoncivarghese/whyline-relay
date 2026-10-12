@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from whyline_relay import config, loop, plan, prompts, state
-from test_loop_pipeline import FAKE, make_pipeline, settings_with_pipeline
+from test_loop_pipeline import FAKE, _scripted_run, make_pipeline, settings_with_pipeline
 
 
 def git(root: Path, *args: str) -> str:
@@ -129,6 +129,82 @@ def test_a_cross_repo_task_commits_in_its_repo_and_ticks_in_the_relay_repo(
     assert "- [x] T-1" in (root / "plan.md").read_text()
     assert git(root, "status", "--porcelain") == ""
     assert git(work, "status", "--porcelain") == ""
+
+
+def _subjects(root: Path, base: str) -> list[str]:
+    return git(root, "log", f"{base}..HEAD", "--format=%s").splitlines()
+
+
+def test_a_cross_repo_approval_with_no_changes_makes_one_empty_commit_and_ticks(
+    repos, monkeypatch
+):
+    root, work = repos
+    base = git(work, "rev-parse", "HEAD")
+    settings = settings_with_pipeline(root, make_pipeline())
+    monkeypatch.setattr(
+        loop.agents, "run",
+        scripted(
+            ["claude:ready", "claude:passed", "claude:approved"], work, edit=False
+        ),
+    )
+
+    outcomes = loop.run_plan(
+        root, settings, root / "plan.md", branch="relay/plan", echo=False
+    )
+
+    assert [o.task_id for o in outcomes] == ["T-1"]
+    assert "- [x] T-1" in (root / "plan.md").read_text()
+    assert _subjects(work, base) == ["chore: T-1 needed no changes (T-1)"]
+    assert git(work, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD") == ""
+    assert git(root, "log", "-1", "--format=%s") == "chore: tick T-1 in the plan"
+
+
+def test_a_same_repo_approval_with_no_changes_makes_one_empty_commit_and_ticks(
+    repos, monkeypatch
+):
+    root, _work = repos
+    (root / "plan.md").write_text("- [ ] T-1: already done\n  Nothing to change.\n")
+    git(root, "add", "plan.md")
+    git(root, "commit", "-m", "plan stays here")
+    base = git(root, "rev-parse", "HEAD")
+    settings = settings_with_pipeline(root, make_pipeline())
+    monkeypatch.setattr(
+        loop.agents, "run",
+        _scripted_run(["claude:ready", "claude:passed", "claude:approved"]),
+    )
+
+    outcomes = loop.run_plan(
+        root, settings, root / "plan.md", branch="relay/plan", echo=False
+    )
+
+    assert [o.task_id for o in outcomes] == ["T-1"]
+    assert "- [x] T-1" in (root / "plan.md").read_text()
+    assert _subjects(root, base) == [
+        "chore: tick T-1 in the plan",
+        "chore: T-1 needed no changes (T-1)",
+    ]
+    assert git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD~1") == ""
+    assert git(root, "show", "--name-only", "--format=", "HEAD") == "plan.md"
+
+
+def test_an_approval_with_changes_still_makes_one_normal_commit(repos, monkeypatch):
+    root, work = repos
+    base = git(work, "rev-parse", "HEAD")
+    settings = settings_with_pipeline(root, make_pipeline())
+    monkeypatch.setattr(
+        loop.agents, "run",
+        scripted(["claude:ready", "claude:passed", "claude:approved"], work),
+    )
+
+    outcomes = loop.run_plan(
+        root, settings, root / "plan.md", branch="relay/plan", echo=False
+    )
+
+    assert [o.task_id for o in outcomes] == ["T-1"]
+    assert "- [x] T-1" in (root / "plan.md").read_text()
+    assert _subjects(work, base) == ["feat: fake claude:approved (T-1)"]
+    assert git(work, "show", "--name-only", "--format=", "HEAD") == "feature.txt"
+    assert git(root, "log", "-1", "--format=%s") == "chore: tick T-1 in the plan"
 
 
 def test_a_dirty_task_repo_pauses_before_any_agent_runs(repos, monkeypatch):

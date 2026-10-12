@@ -255,6 +255,29 @@ def test_approved_without_a_reviewer_commit_is_committed_by_the_relay(
     assert outcome.committed is True
 
 
+def test_a_legacy_approval_with_nothing_staged_still_waits_for_the_reviewer(
+    repo: Path,
+):
+    (repo / ".whyline" / ".gitignore").write_text("active-handoff.json\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "ignore the handoff"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused, match="no commit naming it"):
+        loop.run_task(
+            repo,
+            settings_using("review", "approve", repo),
+            TASK,
+            base_commit=base,
+            echo=False,
+        )
+    assert loop.gitcheck.head_commit(repo) == base
+
+
 def test_resume_of_approved_task_without_a_commit_pauses(repo: Path):
     write_handoff(repo, "WL-1", "claude", "approved")
     base = loop.gitcheck.head_commit(repo)

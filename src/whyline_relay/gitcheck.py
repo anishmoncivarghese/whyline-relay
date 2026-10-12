@@ -211,13 +211,26 @@ def commit_all(root: Path, message: str) -> bool:
     that finishes a task, instead of trusting an agent to. Returns False,
     committing nothing, when there is nothing staged -- a task that touched no
     files (for example, one that only recorded a decision) is not an error, and
-    repeating this call is always safe.
+    repeating this call is always safe. Callers that still need a commit in
+    that case use `commit_empty`; this function must not grow an allow-empty
+    flag, because a clean tree staying uncommitted is the contract.
     """
     _git(root, "add", "-A")
     if not _git(root, "diff", "--cached", "--name-only"):
         return False
     _git(root, "commit", "-m", message)
     return True
+
+
+def commit_empty(root: Path, message: str) -> None:
+    """Record a commit with no tree change.
+
+    An approved task whose work is already in history still needs a commit
+    that names it, or the checkbox cannot be ticked. `commit_all` refuses
+    that case on purpose. The index must already match HEAD; this does not
+    stage anything.
+    """
+    _git(root, "commit", "--allow-empty", "-m", message)
 
 
 def commit_stat(root: Path) -> str:

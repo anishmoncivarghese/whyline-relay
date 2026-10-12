@@ -392,6 +392,8 @@ def _commit_and_approve(
     round_: int,
     log: Path | None,
     summary: str,
+    *,
+    empty_if_clean: bool = False,
 ) -> Outcome:
     """The relay itself makes a configured pipeline's one finishing commit (spec 5.6).
 
@@ -400,6 +402,12 @@ def _commit_and_approve(
     re-check is defense in depth, not the primary guard: if it ever fires, a
     stage ignored its own rendered prompt's protocol footer (prompts.stage_footer)
     and a bug let it through anyway.
+
+    When that check passes and the task repository has nothing staged, a
+    configured pipeline (`empty_if_clean`) still records one empty commit
+    naming the task, so a task whose work was already in history can be
+    ticked. A legacy two-role run leaves the flag false: the reviewer commits,
+    and an approval with no such commit still pauses.
     """
     repo = task_repo(root, task)
     if gitcheck.head_commit(repo) != base_commit:
@@ -409,7 +417,8 @@ def _commit_and_approve(
             f"{base_commit[:12]}` (your files stay), then resume",
             log,
         )
-    gitcheck.commit_all(repo, commit_message(task, summary))
+    if not gitcheck.commit_all(repo, commit_message(task, summary)) and empty_if_clean:
+        gitcheck.commit_empty(repo, commit_message(task, ""))
     return _approved(root, task, base_commit, round_, log)
 
 
@@ -664,7 +673,8 @@ def _run_configured_task(
                     None,
                 )
             return _commit_and_approve(
-                root, task, base_commit, round_, None, current.summary
+                root, task, base_commit, round_, None, current.summary,
+                empty_if_clean=True,
             )
         profile_name = saved.profile
         current_stage_id = saved.stage
@@ -703,7 +713,8 @@ def _run_configured_task(
                 feedback = current.summary
             elif resumed.kind == "complete":
                 return _commit_and_approve(
-                    root, task, base_commit, round_, None, current.summary
+                    root, task, base_commit, round_, None, current.summary,
+                    empty_if_clean=True,
                 )
             elif resumed.kind == "blocked":
                 raise Paused(
@@ -870,7 +881,8 @@ def _run_configured_task(
                     },
                 )
             return _commit_and_approve(
-                root, task, base_commit, round_, target, record.summary
+                root, task, base_commit, round_, target, record.summary,
+                empty_if_clean=True,
             )
         if _sandbox_backroute(
             pipe,

@@ -211,6 +211,51 @@ def test_a_terminal_stage_committing_is_also_refused(repo, monkeypatch):
         loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
 
 
+def test_a_stage_that_committed_on_its_own_pauses_with_head_moved(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    base = head(repo)
+    (repo / "feature.txt").write_text("x\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "feat: sneaky (T-1)"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    moved = head(repo)
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        '{"id": "event3", "task": "T-1", "to_actor": "claude", "status": "approved", '
+        '"summary": "feat: the whole feature", "from_actor": ""}'
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=3,
+            base_commit=base,
+            paused_reason="crash",
+            log_path="",
+            profile="full",
+            stage="@complete",
+            stage_visits={"draft": 1, "test": 1, "review": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    called = []
+    monkeypatch.setattr(loop.agents, "run", lambda *a, **k: called.append("ran"))
+
+    with pytest.raises(loop.Paused, match="HEAD moved"):
+        loop.run_task(
+            repo, settings, TASK, base_commit=base, echo=False, resume=True
+        )
+
+    assert called == []
+    assert head(repo) == moved
+
+
 def test_the_relay_makes_the_commit_not_the_agent(repo, monkeypatch):
     pipe = make_pipeline()
     settings = settings_with_pipeline(repo, pipe)
