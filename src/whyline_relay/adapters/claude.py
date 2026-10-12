@@ -98,6 +98,7 @@ ADAPTER = Adapter(
     diagnose=diagnose,
     manages=Manages(True, True, True),
     model_flag=("--model",),
+    dir_flag=("--add-dir",),
     extract_response=extract_response,
     uses_output_file=False,
 )

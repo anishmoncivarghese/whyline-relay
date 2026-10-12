@@ -108,6 +108,31 @@ def log_path(
     )
 
 
+def _command_with_task_dir(
+    command: list[str],
+    flag: tuple[str, ...] | None,
+    root: Path,
+    repo: Path,
+) -> list[str]:
+    """Append `flag` and the task repository when that repository is not `root`.
+
+    `agents.build_argv` puts the prompt last, so the flag stays in the command.
+    An exact flag-plus-path already present is left alone. The same flag aimed
+    at a different directory does not count: that directory is not this task.
+    """
+    if not flag or repo == root.resolve():
+        return command
+    path = str(repo)
+    needle = (*flag, path)
+    width = len(needle)
+    if any(
+        tuple(command[index : index + width]) == needle
+        for index in range(len(command) - width + 1)
+    ):
+        return command
+    return [*command, *needle]
+
+
 def run_agent(
     root: Path,
     settings: config.Config,
@@ -131,8 +156,16 @@ def run_agent(
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
-    command = settings.agents[agent]
     adapter = config.adapter_for(settings, agent)
+    repo = task_repo(root, task)
+    command = _command_with_task_dir(
+        list(settings.agents[agent]), adapter.dir_flag, root, repo
+    )
+    command = attachment_delivery.command_with_images(
+        command, adapter.name, attachments
+    )
+    # The directory flag is on the command that will actually run. It is not a
+    # permission-bypass flag; a bypass flag already in the command still is.
     found = bypass.find(adapter.name, command)
     if found:
         raise Paused(
@@ -156,13 +189,10 @@ def run_agent(
         role=role,
         stage=stage,
         profile=profile,
-    ) + prompt_suffix + prompts.repository_footer(root, task_repo(root, task))
+    ) + prompt_suffix + prompts.repository_footer(root, repo)
     block = attachment_delivery.prompt_block(attachments, root)
     if block:
         prompt = f"{prompt}\n\n{block}"
-    command = attachment_delivery.command_with_images(
-        command, adapter.name, attachments
-    )
     log_role = (
         log_suffix
         if log_suffix is not None

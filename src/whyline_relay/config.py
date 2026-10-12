@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from whyline_relay import adapters, pipeline as pipeline_module, recipes
@@ -219,10 +219,17 @@ class Config:
     pipeline_fingerprint: str = ""
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     release_role: str = "human"
+    dir_flags: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
-    return adapters.get(settings.adapters.get(agent, agent))
+    adapter = adapters.get(settings.adapters.get(agent, agent))
+    flag = settings.dir_flags.get(agent)
+    if flag is None:
+        return adapter
+    # GENERIC is one shared adapter. A per-agent opt-in has to be a copy,
+    # or every generic agent would inherit the last one that opted in.
+    return replace(adapter, dir_flag=flag)
 
 
 def relay_dir(root: Path) -> Path:
@@ -257,6 +264,7 @@ def load(root: Path) -> Config:
             raise ConfigError(f"could not read {path.name} ({path}): {error}") from error
     agents = dict(DEFAULTS["agents"])
     configured_adapters: dict[str, str] = {}
+    dir_flags: dict[str, tuple[str, ...]] = {}
     for name, table in (raw.get("agents") or {}).items():
         if name in adapters.BUILTIN:
             if "adapter" in table:
@@ -302,6 +310,18 @@ def load(root: Path) -> Config:
                     "adapter has no way to apply it"
                 )
             agents[name] = [*agents[name], *resolved_adapter.model_flag, model]
+        if "dir_flag" in table:
+            value = table["dir_flag"]
+            if not isinstance(value, str) or not value:
+                raise ConfigError(
+                    f"[agents.{name}] dir_flag must be a non-empty string"
+                )
+            if resolved_adapter.dir_flag is not None:
+                raise ConfigError(
+                    f"[agents.{name}] cannot set dir_flag: the "
+                    f"{resolved_adapter.name} adapter already declares one"
+                )
+            dir_flags[name] = (value,)
 
     for name, command in recipes.RECIPES.items():
         spellings = (name, *recipes.ALIASES.get(name, ()))
@@ -446,4 +466,5 @@ def load(root: Path) -> Config:
         pipeline_fingerprint=pipeline_fp,
         planner=planner_cfg,
         release_role=release_role,
+        dir_flags=dir_flags,
     )

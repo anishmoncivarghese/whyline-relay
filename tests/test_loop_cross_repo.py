@@ -2,13 +2,14 @@
 relay -- its plan, state, handoffs and logs -- can drive work in another
 checkout without the user switching repositories mid-plan."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from whyline_relay import loop, plan, prompts, state
+from whyline_relay import config, loop, plan, prompts, state
 from test_loop_pipeline import FAKE, make_pipeline, settings_with_pipeline
 
 
@@ -180,6 +181,136 @@ def test_the_footer_names_the_task_repo_only_when_it_differs(tmp_path):
     footer = prompts.repository_footer(relay, other)
     assert f"Task repository (generated for this turn):\n{other.resolve()}" in footer
     assert str(relay.resolve() / ".whyline" / "active-handoff.json") in footer
+
+
+def _capture_commands(monkeypatch) -> list[tuple[list[str], str]]:
+    seen: list[tuple[list[str], str]] = []
+
+    def run(command, prompt, **kwargs):
+        seen.append((list(command), prompt))
+        return 0
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    return seen
+
+
+def _turn(root, settings, agent, task):
+    loop.run_agent(
+        root,
+        settings,
+        agent,
+        "implementer",
+        "implement",
+        task,
+        1,
+        "",
+        False,
+        implementer="codex",
+        reviewer="claude",
+    )
+
+
+def test_codex_and_claude_turns_carry_the_task_repo_once(repos, monkeypatch):
+    root, work = repos
+    seen = _capture_commands(monkeypatch)
+    checked: list[tuple[str, list[str]]] = []
+    real_find = loop.bypass.find
+
+    def find(adapter_name, command):
+        checked.append((adapter_name, list(command)))
+        return real_find(adapter_name, command)
+
+    monkeypatch.setattr(loop.bypass, "find", find)
+    settings = config.load(root)
+    task = plan.Task("T-1", "T-1: elsewhere", False, 0, repo=str(work))
+    path = str(work.resolve())
+
+    for agent in ("codex", "claude"):
+        _turn(root, settings, agent, task)
+
+    assert [agent for agent, _ in checked] == ["codex", "claude"]
+    for (agent, command), (ran, prompt) in zip(checked, seen, strict=True):
+        assert ran == command
+        assert command == [*settings.agents[agent], "--add-dir", path]
+        assert command.count("--add-dir") == 1
+        assert real_find(agent, command) == []
+        argv = loop.agents.build_argv(command, prompt)
+        assert argv[-3:-1] == ["--add-dir", path]
+        assert argv[-1] == prompt
+
+
+def test_a_configured_directory_flag_is_not_repeated(repos, monkeypatch):
+    root, work = repos
+    path = str(work.resolve())
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    command = ["codex", "exec", "--add-dir", path, "-s", "workspace-write"]
+    (relay / "config.toml").write_text(
+        f"[agents.codex]\ncommand = {json.dumps(command)}\n",
+        encoding="utf-8",
+    )
+    seen = _capture_commands(monkeypatch)
+    task = plan.Task("T-1", "T-1: elsewhere", False, 0, repo=str(work))
+
+    _turn(root, config.load(root), "codex", task)
+
+    assert seen[0][0] == command
+    assert seen[0][0].count("--add-dir") == 1
+    assert seen[0][0].count(path) == 1
+
+
+def test_a_different_directory_does_not_count_as_the_task_repo(repos, monkeypatch):
+    root, work = repos
+    path = str(work.resolve())
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    command = ["codex", "exec", "--add-dir", ".", "-s", "workspace-write"]
+    (relay / "config.toml").write_text(
+        f"[agents.codex]\ncommand = {json.dumps(command)}\n",
+        encoding="utf-8",
+    )
+    seen = _capture_commands(monkeypatch)
+    task = plan.Task("T-1", "T-1: elsewhere", False, 0, repo=str(work))
+
+    _turn(root, config.load(root), "codex", task)
+
+    assert seen[0][0] == [*command, "--add-dir", path]
+
+
+def test_a_same_repo_task_and_a_planner_task_add_nothing(repos, monkeypatch):
+    root, work = repos
+    seen = _capture_commands(monkeypatch)
+    settings = config.load(root)
+    here = plan.Task("T-1", "T-1: here", False, 0)
+    named_here = plan.Task("T-2", "T-2: here", False, 0, repo=str(root))
+    # The planner builds a task with no relay-repo, so its turns take this path.
+    planning = plan.Task("__plan__", "describe the work", False, 0)
+
+    for task in (here, named_here, planning):
+        _turn(root, settings, "codex", task)
+
+    assert all("--add-dir" not in command for command, _ in seen)
+    assert len(seen) == 3
+    assert work.resolve() != root.resolve()
+
+
+def test_a_generic_agent_adds_a_directory_only_when_it_opts_in(repos, monkeypatch):
+    root, work = repos
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    bare = '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n'
+    opted = bare + 'dir_flag = "--add-dir"\n'
+    task = plan.Task("T-1", "T-1: elsewhere", False, 0, repo=str(work))
+    path = str(work.resolve())
+
+    (relay / "config.toml").write_text(bare, encoding="utf-8")
+    seen = _capture_commands(monkeypatch)
+    _turn(root, config.load(root), "aider", task)
+    assert seen[0][0] == ["aider", "--yes"]
+
+    (relay / "config.toml").write_text(opted, encoding="utf-8")
+    _turn(root, config.load(root), "aider", task)
+    assert seen[1][0] == ["aider", "--yes", "--add-dir", path]
 
 
 def test_resume_after_a_dirty_repo_pause_starts_the_task_fresh(repos, monkeypatch):

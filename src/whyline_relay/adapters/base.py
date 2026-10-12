@@ -25,6 +25,7 @@ class Adapter:
     diagnose: Callable[[str], str]
     manages: Manages
     model_flag: tuple[str, ...] | None
+    dir_flag: tuple[str, ...] | None
     extract_response: Callable[[str], str]
     uses_output_file: bool
 

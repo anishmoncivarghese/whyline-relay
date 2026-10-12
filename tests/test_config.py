@@ -366,6 +366,46 @@ def test_an_empty_model_is_refused(tmp_path: Path):
         config.load(tmp_path)
 
 
+def test_a_generic_agent_may_opt_in_to_a_directory_flag(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.aider]\nadapter = "generic"\n'
+        'command = ["aider", "--yes"]\ndir_flag = "--add-dir"\n',
+    )
+    loaded = config.load(tmp_path)
+    assert loaded.dir_flags["aider"] == ("--add-dir",)
+    assert config.adapter_for(loaded, "aider").dir_flag == ("--add-dir",)
+    assert config.adapter_for(loaded, "aider").name == "generic"
+    assert loaded.agents["aider"] == ["aider", "--yes"]
+
+
+def test_a_generic_agent_without_dir_flag_keeps_the_adapter_default(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n',
+    )
+    loaded = config.load(tmp_path)
+    assert "aider" not in loaded.dir_flags
+    assert config.adapter_for(loaded, "aider").dir_flag is None
+
+
+@pytest.mark.parametrize("value", ["1", '["--add-dir"]', "true"])
+def test_a_bad_dir_flag_type_fails_config_load(tmp_path: Path, value: str):
+    write(
+        tmp_path,
+        '[agents.aider]\nadapter = "generic"\n'
+        f'command = ["aider"]\ndir_flag = {value}\n',
+    )
+    with pytest.raises(config.ConfigError, match="dir_flag must be a non-empty string"):
+        config.load(tmp_path)
+
+
+def test_a_built_in_adapter_rejects_a_configured_dir_flag(tmp_path: Path):
+    write(tmp_path, '[agents.codex]\ndir_flag = "--add-dir"\n')
+    with pytest.raises(config.ConfigError, match="cannot set dir_flag"):
+        config.load(tmp_path)
+
+
 def test_an_unrecognised_adapter_value_still_names_both_valid_options(
     tmp_path: Path,
 ):

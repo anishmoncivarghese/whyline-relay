@@ -40,3 +40,14 @@ def test_generic_has_no_model_flag():
     from whyline_relay.adapters import generic
 
     assert generic.ADAPTER.model_flag is None
+
+
+def test_codex_and_claude_declare_add_dir():
+    assert codex.ADAPTER.dir_flag == ("--add-dir",)
+    assert claude.ADAPTER.dir_flag == ("--add-dir",)
+
+
+def test_generic_has_no_dir_flag():
+    from whyline_relay.adapters import generic
+
+    assert generic.ADAPTER.dir_flag is None

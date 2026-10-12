@@ -21,6 +21,7 @@ ADAPTER = Adapter(
     diagnose=last_line_detail,
     manages=Manages(False, False, False),
     model_flag=None,
+    dir_flag=None,
     extract_response=extract_response,
     uses_output_file=False,
 )
