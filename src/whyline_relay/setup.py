@@ -163,6 +163,32 @@ def _set_top_level(text: str, key: str, value: str) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def _set_unquoted_top_level(text: str, key: str, value: int) -> str:
+    """Sets `key = <integer>` above the first table, keeping every other line.
+
+    `_set_top_level` quotes its value. timeout_minutes is stored as a bare
+    TOML integer, including 0.
+    """
+    rendered = str(int(value))
+    lines = text.splitlines()
+    first_table = next(
+        (i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines)
+    )
+    for index in range(first_table):
+        match = re.match(rf"^(\s*{key}\s*=\s*).*$", lines[index])
+        if match:
+            lines[index] = f"{match.group(1)}{rendered}"
+            return "\n".join(lines).rstrip("\n") + "\n"
+    insert_at = first_table
+    while insert_at > 0 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    new = [f"{key} = {rendered}"]
+    if first_table < len(lines):
+        new.append("")
+    lines[insert_at:first_table] = new
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 def _write_config(root: Path, change, message: str, commit: bool) -> Path:
     config_file = role_paths(root)[0]
     config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +203,22 @@ def write_plan(root: Path, plan: str, *, commit: bool = True) -> Path:
     """Points the relay at `plan` (a path relative to the repository)."""
     return _write_config(
         root, lambda text: _set_top_level(text, "plan", plan), f"setup: run {plan}", commit
+    )
+
+
+def write_timeout_minutes(root: Path, minutes: int, *, commit: bool = True) -> Path:
+    """Sets top-level `timeout_minutes` to an unquoted integer, including 0.
+
+    Replaces an existing top-level line, or inserts `timeout_minutes = N`
+    before the first table when that line is absent. Commits through
+    `_write_config`. Does not call `_set_top_level`, which quotes strings.
+    """
+    rendered = int(minutes)
+    return _write_config(
+        root,
+        lambda text: _set_unquoted_top_level(text, "timeout_minutes", rendered),
+        f"setup: timeout {rendered} minutes",
+        commit,
     )
 
 

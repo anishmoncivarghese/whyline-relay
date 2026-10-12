@@ -643,3 +643,41 @@ def test_write_backup_unstaged_config_edits_ride_along(tmp_path: Path):
     status = _git(repo, "status", "--porcelain")
     assert "other.txt" in status
     assert "config.toml" not in status
+
+
+def _without_timeout_line(text: str) -> str:
+    return "".join(
+        line for line in text.splitlines(keepends=True)
+        if not line.lstrip().startswith("timeout_minutes")
+    )
+
+
+def test_write_timeout_minutes_replaces_existing_line_with_unquoted_zero(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    before = path.read_text()
+    written = setup.write_timeout_minutes(repo, 0)
+    after = path.read_text()
+    assert written == path
+    assert after == before.replace("timeout_minutes = 17\n", "timeout_minutes = 0\n")
+    assert 'timeout_minutes = "0"' not in after
+    assert _without_timeout_line(after) == _without_timeout_line(before)
+    assert config.load(repo).timeout_minutes == 0
+    assert _git(repo, "log", "-1", "--format=%s") == "setup: timeout 0 minutes\n"
+
+
+def test_write_timeout_minutes_inserts_unquoted_zero_before_the_first_table(tmp_path: Path):
+    repo = _repo_with_config(
+        tmp_path, _RICH_CONFIG.replace("timeout_minutes = 17\n", "")
+    )
+    path = _relay_config(repo)
+    before = path.read_text()
+    assert "timeout_minutes" not in before
+    written = setup.write_timeout_minutes(repo, 0)
+    after = path.read_text()
+    assert written == path
+    assert "timeout_minutes = 0\n" in after
+    assert 'timeout_minutes = "' not in after
+    assert after.index("timeout_minutes = 0\n") < after.index("[roles]")
+    assert _without_timeout_line(after) == before
+    assert config.load(repo).timeout_minutes == 0

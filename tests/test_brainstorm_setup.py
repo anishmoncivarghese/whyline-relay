@@ -231,3 +231,59 @@ def test_ask_brainstorm_setup_persists_timeout_for_resumed_run(tmp_path: Path):
     assert result2["timeout_minutes"] == 45
     assert result2["timeout_seconds"] == 2700
     assert any("[45]: " in p for p in prompts_seen)
+
+
+_UNATTENDED_SYNTHESIS_PARAGRAPH = (
+    "Decide questions whose answer follows from the request, "
+    "record each decision in the document, and leave "
+    '"## Open questions" only for a choice that would change what '
+    "gets built and cannot be derived from the request."
+)
+
+
+def _expected_synthesis_prompt(root: Path) -> str:
+    shared = brainstorm.shared_path(root, "topic")
+    return (
+        'All review passes are complete for this brainstorm on "topic". '
+        f'Read {shared} in full and write a new "## Final Synthesis" '
+        "section (at the top, right after the title) combining the "
+        "strongest ideas from every model's section into one clear, "
+        "actionable recommendation."
+    )
+
+
+def _capture_synthesis_prompt(tmp_path: Path, monkeypatch, **kwargs) -> str:
+    settings = config.load(tmp_path)
+    shared = brainstorm.shared_path(tmp_path, "topic")
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_text(
+        "# Brainstorm: topic\n\n## Codex\n\nresearch\n", encoding="utf-8"
+    )
+    captured: dict[str, str] = {}
+
+    def fake_run_turn(root, *, agent, prompt, settings, exclude=frozenset(), **kw):
+        captured["prompt"] = prompt
+        return {"agent": agent, "response": "ok", "rate_limited": False, "ok": True}
+
+    monkeypatch.setattr(brainstorm.chat, "run_turn", fake_run_turn)
+    brainstorm.run_final_synthesis(
+        tmp_path, "codex", [("codex", "Codex")], "topic",
+        settings=settings, **kwargs,
+    )
+    return captured["prompt"]
+
+
+def test_run_final_synthesis_unattended_false_keeps_the_prompt(tmp_path: Path, monkeypatch):
+    expected = _expected_synthesis_prompt(tmp_path)
+    assert _capture_synthesis_prompt(tmp_path, monkeypatch) == expected
+    assert _capture_synthesis_prompt(tmp_path, monkeypatch, unattended=False) == expected
+    assert _UNATTENDED_SYNTHESIS_PARAGRAPH not in expected
+
+
+def test_run_final_synthesis_unattended_true_appends_only_that_paragraph(
+    tmp_path: Path, monkeypatch
+):
+    expected = _expected_synthesis_prompt(tmp_path)
+    prompt = _capture_synthesis_prompt(tmp_path, monkeypatch, unattended=True)
+    assert prompt == expected + "\n\n" + _UNATTENDED_SYNTHESIS_PARAGRAPH
+    assert _UNATTENDED_SYNTHESIS_PARAGRAPH not in brainstorm.PLAN_GENERATION_PROMPT

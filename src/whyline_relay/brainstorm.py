@@ -1167,6 +1167,7 @@ def run_final_synthesis(
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
+    unattended: bool = False,
 ) -> dict:
     """One model writes the final synthesis. If the requested final agent fails
     at runtime, choose the first successful selected agent with usable research
@@ -1176,6 +1177,11 @@ def run_final_synthesis(
     `timeout_seconds` is the limit for the synthesis turn and for any
     substitute that runs after a failure. Omitted, the turn keeps chat's
     current limit.
+
+    `unattended` defaults to false and leaves the synthesis prompt unchanged.
+    True appends one paragraph: decide questions the request already answers,
+    record each decision, and leave "## Open questions" only for a choice
+    that would change what gets built.
     """
     print_fn = print_fn if print_fn is not None else print
     if timeout_seconds is None:
@@ -1247,6 +1253,13 @@ def run_final_synthesis(
         "strongest ideas from every model's section into one clear, "
         "actionable recommendation."
     )
+    if unattended:
+        prompt += (
+            "\n\nDecide questions whose answer follows from the request, "
+            "record each decision in the document, and leave "
+            '"## Open questions" only for a choice that would change what '
+            "gets built and cannot be derived from the request."
+        )
 
     last_error: BaseException | None = None
     last_record: dict | None = None
