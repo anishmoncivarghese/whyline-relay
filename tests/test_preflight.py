@@ -5,11 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, preflight, prompts, state
+from whyline_relay import cli, loop, plan, preflight, prompts, state
 
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _separate_git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    _git(path, "init", "-b", "main")
+    _git(path, "config", "user.email", "t@example.com")
+    _git(path, "config", "user.name", "T")
+    (path / "README").write_text("task repo\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "init")
+    return path
 
 
 def _completed(argv, returncode=0, stdout="", stderr=""):
@@ -771,6 +782,176 @@ def test_full_scope_still_reports_a_missing_plan_and_a_logged_out_saved_role(
         check.hint == "commit or stash your changes, or pass --allow-dirty"
         for check in checks
     )
+
+
+def _reachability(checks: list[preflight.Check]) -> list[preflight.Check]:
+    return [
+        check
+        for check in checks
+        if "relay-repo" in check.message
+        or "no way to be given" in check.message
+        or " gets " in check.message
+    ]
+
+
+def test_a_plan_with_no_relay_repo_adds_no_reachability_lines(ready_repo: Path):
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    assert _reachability(checks) == []
+
+
+def test_a_bad_relay_repo_fails_with_the_task_repo_text(ready_repo: Path):
+    text = "- [ ] T-1: elsewhere\n  relay-repo: missing-repo\n"
+    (ready_repo / "plan.md").write_text(text)
+    task = plan.parse(text)[0]
+    with pytest.raises(loop.Paused) as caught:
+        loop.task_repo(ready_repo, task)
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    assert preflight.Check("FAIL", caught.value.reason) in checks
+    assert _reachability(checks) == [preflight.Check("FAIL", caught.value.reason)]
+
+
+def test_codex_gets_its_directory_flag_for_a_task_repository(ready_repo: Path):
+    work = _separate_git_repo(ready_repo / "task-repo")
+    shown = str(work.resolve())
+    (ready_repo / "plan.md").write_text("- [ ] T-1: elsewhere\n  relay-repo: task-repo\n")
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    assert preflight.Check("ok", f"codex gets --add-dir {shown}") in checks
+    assert preflight.Check("ok", f"claude gets --add-dir {shown}") in checks
+
+
+def test_a_generic_agent_without_a_dir_flag_warns_with_the_fix(
+    ready_repo: Path, monkeypatch
+):
+    work = _separate_git_repo(ready_repo / "task-repo")
+    shown = str(work.resolve())
+    config_path = ready_repo / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text()
+        + '[roles]\nreviewer = "aider"\n'
+        + '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "aider" else name,
+    )
+    (ready_repo / "plan.md").write_text("- [ ] T-1: elsewhere\n  relay-repo: task-repo\n")
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    assert preflight.Check("ok", f"codex gets --add-dir {shown}") in checks
+    assert (
+        preflight.Check(
+            "warn",
+            f"aider has no way to be given {shown}; its sandbox may refuse writes there",
+            "set dir_flag in [agents.aider] or allow that path in its command",
+        )
+        in checks
+    )
+    assert not any(check.message.startswith("claude gets") for check in checks)
+
+
+def test_a_generic_agent_with_a_dir_flag_is_ok(ready_repo: Path, monkeypatch):
+    work = _separate_git_repo(ready_repo / "task-repo")
+    shown = str(work.resolve())
+    config_path = ready_repo / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text()
+        + '[roles]\nreviewer = "aider"\n'
+        + '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n'
+        + 'dir_flag = "--add-dir"\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "aider" else name,
+    )
+    (ready_repo / "plan.md").write_text("- [ ] T-1: elsewhere\n  relay-repo: task-repo\n")
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    assert preflight.Check("ok", f"aider gets --add-dir {shown}") in checks
+    assert not any("no way to be given" in check.message for check in checks)
+
+
+def test_repository_scope_adds_no_task_repository_lines(
+    ready_repo: Path, monkeypatch
+):
+    _separate_git_repo(ready_repo / "task-repo")
+    config_path = ready_repo / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text()
+        + '[roles]\nreviewer = "aider"\n'
+        + '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n'
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: f"/bin/{name}" if name == "aider" else name,
+    )
+    (ready_repo / "plan.md").write_text(
+        "- [ ] T-1: elsewhere\n  relay-repo: task-repo\n"
+        "- [ ] T-2: missing\n  relay-repo: missing-repo\n"
+    )
+
+    checks = preflight.run(ready_repo, scope="repository", runner=successful_runner())
+
+    assert _reachability(checks) == []
+
+
+def test_a_checked_relay_repo_and_this_checkout_add_no_reachability_lines(
+    ready_repo: Path,
+):
+    (ready_repo / "plan.md").write_text(
+        "- [x] T-1: done\n  relay-repo: missing-repo\n"
+        f"- [ ] T-2: here\n  relay-repo: {ready_repo}\n"
+    )
+
+    checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
+
+    assert _reachability(checks) == []
+
+
+def test_one_report_per_repository_and_pipeline_roles_not_the_backup(
+    tmp_path: Path, monkeypatch
+):
+    root = _pipeline_repo(tmp_path)
+    config_path = root / ".whyline" / "relay" / "config.toml"
+    config_path.write_text(
+        config_path.read_text().replace('tester = "claude"', 'tester = "aider"')
+        + '[backup]\nchain = ["grok"]\n'
+        + '[agents.aider]\nadapter = "generic"\ncommand = ["aider", "--yes"]\n'
+        + '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n'
+    )
+    work = _separate_git_repo(root / "task-repo")
+    shown = str(work.resolve())
+    (root / "plan.md").write_text(
+        "- [ ] T-1: elsewhere\n  relay-repo: task-repo\n"
+        "- [ ] T-2: same place\n  relay-repo: task-repo\n"
+    )
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda name: name,
+    )
+
+    checks = preflight.run(root, allow_dirty=True, runner=successful_runner())
+    reach = _reachability(checks)
+
+    assert reach == [
+        preflight.Check("ok", f"codex gets --add-dir {shown}"),
+        preflight.Check(
+            "warn",
+            f"aider has no way to be given {shown}; its sandbox may refuse writes there",
+            "set dir_flag in [agents.aider] or allow that path in its command",
+        ),
+        preflight.Check("ok", f"claude gets --add-dir {shown}"),
+    ]
+    assert not any("grok" in check.message for check in reach)
 
 
 def test_unknown_preflight_scope_raises(tmp_path: Path):

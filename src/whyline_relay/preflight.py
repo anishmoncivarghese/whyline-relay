@@ -13,10 +13,12 @@ from whyline_relay import (
     config,
     gitcheck,
     invocation,
+    loop,
     pipeline as pipeline_module,
     plan,
     planner,
     prompts,
+    roles,
     running,
 )
 from whyline_relay.adapters import bypass
@@ -321,8 +323,72 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
     return checks
 
 
+def _role_agents(settings: config.Config) -> list[str]:
+    """Agents that fill a role, once each, in role order. Not the backup chain."""
+    agents: list[str] = []
+    for agent in roles.current_roles(settings).values():
+        if agent not in agents:
+            agents.append(agent)
+    return agents
+
+
+def _task_repo_reachability(
+    root: Path, tasks: list[plan.Task], settings: config.Config | None
+) -> list[Check]:
+    """Whether each role agent can be given an unchecked task's repository.
+
+    The failure text and the path rule both come from ``loop.task_repo``.
+    A repository that resolves to this checkout needs no directory flag:
+    the run adds none, because the agent is already there. Any other
+    repository is reported once; the line names the path, not the task.
+    """
+    checks: list[Check] = []
+    if settings is None:
+        loaded: config.Config | None = None
+        agents: list[str] = []
+    else:
+        loaded = settings
+        agents = _role_agents(loaded)
+    seen: set[Path] = set()
+    root = root.resolve()
+    for task in tasks:
+        if task.checked or not task.repo:
+            continue
+        try:
+            repo = loop.task_repo(root, task)
+        except loop.Paused as paused:
+            checks.append(_result("FAIL", paused.reason))
+            continue
+        if repo == root or repo in seen:
+            continue
+        seen.add(repo)
+        if loaded is None:
+            continue
+        shown = str(repo)
+        for agent in agents:
+            flag = config.adapter_for(loaded, agent).dir_flag
+            if flag:
+                checks.append(
+                    _result("ok", f"{agent} gets {' '.join(flag)} {shown}")
+                )
+            else:
+                checks.append(
+                    _result(
+                        "warn",
+                        f"{agent} has no way to be given {shown}; its sandbox "
+                        "may refuse writes there",
+                        f"set dir_flag in [agents.{agent}] or allow that path in its command",
+                    )
+                )
+    return checks
+
+
 def _plan_checks(
-    plan_path: Path, pipeline: "pipeline_module.Pipeline | None" = None
+    plan_path: Path,
+    pipeline: "pipeline_module.Pipeline | None" = None,
+    *,
+    root: Path,
+    settings: config.Config | None,
 ) -> list[Check]:
     if not plan_path.is_file():
         return [_result("FAIL", f"plan file does not exist: {plan_path}")]
@@ -376,6 +442,7 @@ def _plan_checks(
                         "which is not in [pipeline.profiles]",
                     )
                 )
+    checks.extend(_task_repo_reachability(root, tasks, settings))
     return checks
 
 
@@ -402,8 +469,10 @@ def run(
 ) -> list[Check]:
     """Run preflight checks, returning results in display order.
 
-    ``full`` is every check. ``repository`` is the git repo, whyline, relay
-    config, permission-bypass, clean-tree, and live-relay checks.
+    ``full`` is every check, including whether each role agent can be given
+    an unchecked task's ``relay-repo``. ``repository`` is the git repo,
+    whyline, relay config, permission-bypass, clean-tree, and live-relay
+    checks.
     """
     if scope not in ("full", "repository"):
         raise ValueError(f"unknown preflight scope: {scope!r}")
@@ -451,7 +520,10 @@ def run(
             selected_plan = root / selected_plan
         results.extend(
             _plan_checks(
-                selected_plan, settings.pipeline if settings is not None else None
+                selected_plan,
+                settings.pipeline if settings is not None else None,
+                root=root,
+                settings=settings,
             )
         )
     elif settings is not None:
