@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, gitcheck, preflight, state
+from whyline_relay import cli, gitcheck, preflight, state, whylinecmd
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
 
@@ -564,3 +564,202 @@ def test_chat_does_not_print_the_watchdog_line(repo: Path, monkeypatch, capsys):
 
     assert cli.main(["chat", "--repo", str(repo)]) == cli.EXIT_OK
     assert "Watchdog disabled" not in capsys.readouterr().err
+
+
+_VISIT_CAP = (
+    "WL-1 hit stage 'draft''s 3-visit cap without reaching \"@complete\""
+)
+
+_PIPELINE_WITH_CAPS = """\
+[roles]
+implementer = "codex"
+reviewer = "claude"
+[pipeline]
+default_profile = "full"
+[pipeline.profiles]
+full = ["draft", "review"]
+[pipeline.stages.draft]
+role = "implementer"
+prompt = "implement"
+max_visits = 3
+[pipeline.stages.draft.on]
+ready = "review"
+[pipeline.stages.review]
+role = "reviewer"
+prompt = "review"
+max_visits = 2
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+"""
+
+
+def _visit_cap_pause(repo: Path, visits: dict[str, int]) -> None:
+    state.save(
+        repo,
+        state.RelayState(
+            plan=str(repo / "plan.md"),
+            branch="main",
+            task_id="WL-1",
+            round=4,
+            base_commit=_git(repo, "rev-parse", "HEAD"),
+            paused_reason=_VISIT_CAP,
+            log_path="",
+            profile="full",
+            stage="review",
+            stage_visits=visits,
+            pipeline_fingerprint="fp-unchanged",
+        ),
+    )
+
+
+def test_retry_stage_lowers_the_capped_stage_and_records_the_note(
+    repo: Path, monkeypatch, capsys
+):
+    config_path = _write_relay_config(repo, _PIPELINE_WITH_CAPS)
+    config_before = config_path.read_bytes()
+    visits = {"draft": 4, "review": 2, "test": 1}
+    _visit_cap_pause(repo, visits)
+    notes: list[dict] = []
+    plans: list[dict] = []
+
+    def fake_note(root, text, *, because, task, actor, role, runner=None):
+        notes.append(
+            {
+                "root": root,
+                "text": text,
+                "because": because,
+                "task": task,
+                "actor": actor,
+                "role": role,
+            }
+        )
+
+    def fake_run(*args, **kwargs):
+        plans.append(kwargs)
+        return []
+
+    monkeypatch.setattr(cli.whylinecmd, "note", fake_note)
+    monkeypatch.setattr(cli.loop, "run_plan", fake_run)
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--retry-stage", "--allow-dirty", "--skip-checks"]
+    )
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Retrying stage 'draft' once more." in captured.out
+    saved = state.load(repo)
+    assert saved is not None
+    assert saved.stage_visits["draft"] == 3
+    assert saved.stage_visits["review"] == 2
+    assert saved.stage_visits["test"] == 1
+    assert saved.pipeline_fingerprint == "fp-unchanged"
+    assert saved.paused_reason == _VISIT_CAP
+    assert config_path.read_bytes() == config_before
+    assert "max_visits = 3" in config_path.read_text()
+    assert notes == [
+        {
+            "root": repo.resolve(),
+            "text": "Retrying stage 'draft' once more.",
+            "because": (
+                "Stage 'draft' had hit its visit cap. Its saved visit count "
+                "was lowered by one so this resume can enter it once more. "
+                "max_visits is unchanged, so the pipeline fingerprint stays "
+                "the same."
+            ),
+            "task": "WL-1",
+            "actor": "relay",
+            "role": "resume",
+        }
+    ]
+    assert plans and plans[0]["resume"] is True
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--retry-stage", "--allow-dirty", "--skip-checks"]
+    )
+    assert code == cli.EXIT_OK, capsys.readouterr().err
+    saved = state.load(repo)
+    assert saved is not None
+    assert saved.stage_visits == {"draft": 2, "review": 2, "test": 1}
+    assert len(notes) == 2
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "codex exited without handing off",
+        'WL-1 hit the 10-round cap without reaching "@complete"',
+    ],
+)
+def test_retry_stage_refuses_a_non_cap_pause_without_touching_state(
+    repo: Path, monkeypatch, capsys, reason: str
+):
+    _visit_cap_pause(repo, {"draft": 4, "review": 2})
+    saved_path = state.path(repo)
+    saved_path.write_bytes(saved_path.read_bytes() + b"\n")
+    before = saved_path.read_bytes()
+    called: list[str] = []
+    monkeypatch.setattr(
+        cli.whylinecmd, "note", lambda *args, **kwargs: called.append("note")
+    )
+    monkeypatch.setattr(
+        cli.loop, "run_plan", lambda *args, **kwargs: called.append("run")
+    )
+
+    # Rewrite the reason without going through state.save, so a reload-and-save
+    # would drop the trailing newline this test is watching.
+    record = json.loads(before)
+    record["paused_reason"] = reason
+    saved_path.write_bytes(json.dumps(record, indent=2).encode() + b"\n")
+    before = saved_path.read_bytes()
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--retry-stage", "--allow-dirty", "--skip-checks"]
+    )
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_ERROR
+    assert captured.err == "Nothing to retry: the relay is not paused on a stage visit cap.\n"
+    assert "Retrying stage" not in captured.out
+    assert saved_path.read_bytes() == before
+    assert called == []
+
+
+def test_retry_stage_with_nothing_saved_refuses_and_creates_no_state(
+    repo: Path, capsys
+):
+    code = cli.main(["resume", "--repo", str(repo), "--retry-stage"])
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_ERROR
+    assert "Nothing to retry: the relay is not paused on a stage visit cap." in captured.err
+    assert not state.path(repo).exists()
+
+
+def test_retry_stage_resumes_when_the_note_fails(repo: Path, monkeypatch, capsys):
+    _visit_cap_pause(repo, {"draft": 4, "review": 2, "test": 1})
+    plans: list[bool] = []
+
+    def fail_note(*args, **kwargs):
+        raise whylinecmd.WhylineUnavailable("whyline note failed (1): denied")
+
+    def fake_run(*args, **kwargs):
+        plans.append(kwargs["resume"])
+        return []
+
+    monkeypatch.setattr(cli.whylinecmd, "note", fail_note)
+    monkeypatch.setattr(cli.loop, "run_plan", fake_run)
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--retry-stage", "--allow-dirty", "--skip-checks"]
+    )
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Retrying stage 'draft' once more." in captured.out
+    assert "warning: could not record the retry:" in captured.err
+    assert "whyline note failed (1): denied" in captured.err
+    saved = state.load(repo)
+    assert saved is not None
+    assert saved.stage_visits == {"draft": 3, "review": 2, "test": 1}
+    assert plans == [True]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Collection
+import re
 import shlex
 import signal
 import sys
@@ -41,6 +42,13 @@ EXIT_ERROR = 1
 EXIT_PAUSED = 2
 
 _WATCHDOG_DISABLED = "Watchdog disabled: a hung agent runs until you stop it."
+
+# check_visit_cap saves the reason with repr(stage), which for a normal stage
+# id is single quotes: hit stage 'draft''s 3-visit cap.
+_STAGE_VISIT_CAP = re.compile(r"hit stage '([^']+)''s (\d+)-visit cap")
+_NOTHING_TO_RETRY = (
+    "Nothing to retry: the relay is not paused on a stage visit cap."
+)
 
 
 def _warn_if_unlimited(settings: config.Config) -> None:
@@ -148,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-checks",
         action="store_true",
         help="Skip the preflight checks.",
+    )
+    resume.add_argument(
+        "--retry-stage",
+        action="store_true",
+        help="When paused on a stage visit cap, give that stage one more visit.",
     )
 
     done_parser = subparsers.add_parser("done", help="Confirm a release task is done and continue")
@@ -352,6 +365,42 @@ def guard(root: Path, args: argparse.Namespace, branch: str) -> str | None:
     return None
 
 
+def _retry_capped_stage(root: Path) -> str | None:
+    """Give the capped stage one saved visit back.
+
+    Returns the refusal message when the run is not paused on a stage visit
+    cap. On success, saves the lowered count, prints the retry line, records
+    it, and returns None so resume continues. A failing `whyline note` is a
+    warning: the visit was already given back.
+    """
+    saved = state.load(root)
+    match = _STAGE_VISIT_CAP.search(saved.paused_reason) if saved is not None else None
+    if match is None:
+        return _NOTHING_TO_RETRY
+    stage = match.group(1)
+    visits = dict(saved.stage_visits)
+    visits[stage] = visits.get(stage, 0) - 1
+    state.save(root, replace(saved, stage_visits=visits))
+    print(f"Retrying stage {stage!r} once more.")
+    try:
+        whylinecmd.note(
+            root,
+            f"Retrying stage {stage!r} once more.",
+            because=(
+                f"Stage {stage!r} had hit its visit cap. Its saved visit count "
+                "was lowered by one so this resume can enter it once more. "
+                "max_visits is unchanged, so the pipeline fingerprint stays "
+                "the same."
+            ),
+            task=saved.task_id,
+            actor="relay",
+            role="resume",
+        )
+    except whylinecmd.WhylineUnavailable as error:
+        print(f"warning: could not record the retry: {error}", file=sys.stderr)
+    return None
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
     active = running.live(root)
@@ -362,6 +411,11 @@ def cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
+    if args.retry_stage:
+        refusal = _retry_capped_stage(root)
+        if refusal is not None:
+            print(refusal, file=sys.stderr)
+            return EXIT_ERROR
     plan_state = state.load_plan(root)
     if plan_state is not None:
         settings = config.load(root)

@@ -37,3 +37,44 @@ def test_claim_sends_actor_and_role(tmp_path: Path):
     assert argv[:2] == ["whyline", "claim"]
     assert "--actor" in argv and "codex" in argv
     assert "--role" in argv and "implementer" in argv
+
+
+def test_note_records_the_decision(tmp_path: Path):
+    fake = FakeRun()
+    whylinecmd.note(
+        tmp_path,
+        "Retrying stage 'draft' once more.",
+        because="one more visit",
+        task="WL-1",
+        actor="relay",
+        role="resume",
+        runner=fake,
+    )
+    argv, kwargs = fake.calls[0]
+    assert argv == [
+        "whyline",
+        "note",
+        "Retrying stage 'draft' once more.",
+        "--because",
+        "one more visit",
+        "--actor",
+        "relay",
+        "--role",
+        "resume",
+        "--task",
+        "WL-1",
+    ]
+    assert kwargs["cwd"] == str(tmp_path)
+
+
+def test_note_raises_when_whyline_fails(tmp_path: Path):
+    with pytest.raises(whylinecmd.WhylineUnavailable):
+        whylinecmd.note(
+            tmp_path,
+            "Retrying stage 'draft' once more.",
+            because="one more visit",
+            task="WL-1",
+            actor="relay",
+            role="resume",
+            runner=FakeRun(returncode=2),
+        )

@@ -39,3 +39,41 @@ def claim(root: Path, task: str, actor: str, role: str, runner=None) -> None:
         raise WhylineUnavailable(
             f"whyline claim failed ({result.returncode}): {(result.stderr or '').strip()}"
         )
+
+
+def note(
+    root: Path,
+    text: str,
+    *,
+    because: str,
+    task: str,
+    actor: str,
+    role: str,
+    runner=None,
+) -> None:
+    """Record a decision with `whyline note`.
+
+    Raises WhylineUnavailable when whyline is missing or refuses. Callers that
+    must keep going, such as `resume --retry-stage`, catch that and warn.
+    """
+    result = _run(
+        runner,
+        [
+            "whyline",
+            "note",
+            text,
+            "--because",
+            because,
+            "--actor",
+            actor,
+            "--role",
+            role,
+            "--task",
+            task,
+        ],
+        root,
+    )
+    if result.returncode != 0:
+        raise WhylineUnavailable(
+            f"whyline note failed ({result.returncode}): {(result.stderr or '').strip()}"
+        )
