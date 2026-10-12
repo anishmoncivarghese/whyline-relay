@@ -120,6 +120,7 @@ def _scripted_run(specs: list[str]):
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         spec = specs.pop(0)
         result = subprocess.run(

@@ -473,6 +473,75 @@ def test_a_silent_agent_pause_quotes_its_last_output_line(repo: Path):
     assert "fake-agent silent" in raised.value.reason
 
 
+def _uv_printing_settings(repo: Path) -> config.Config:
+    settings = settings_using("review", "approve", repo)
+    return replace(
+        settings,
+        agents={
+            **settings.agents,
+            "codex": [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ['UV_CACHE_DIR'])",
+            ],
+        },
+    )
+
+
+def _run_codex_turn(repo: Path, settings: config.Config) -> Path:
+    return loop.run_agent(
+        repo,
+        settings,
+        "codex",
+        "implementer",
+        "implement",
+        TASK,
+        1,
+        "",
+        False,
+        implementer="codex",
+        reviewer="claude",
+    )
+
+
+def test_run_agent_shows_the_child_the_relay_uv_cache(repo: Path, monkeypatch):
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+    before = dict(os.environ)
+    log = _run_codex_turn(repo, _uv_printing_settings(repo))
+    cache = str(repo / ".whyline" / "relay" / "cache" / "uv")
+    assert log.read_text() == cache + "\n"
+    assert dict(os.environ) == before
+    assert "UV_CACHE_DIR" not in os.environ
+
+
+def test_an_existing_uv_cache_dir_wins(repo: Path, monkeypatch):
+    monkeypatch.setenv("UV_CACHE_DIR", "/custom/uv-cache")
+    before = dict(os.environ)
+    log = _run_codex_turn(repo, _uv_printing_settings(repo))
+    assert log.read_text() == "/custom/uv-cache\n"
+    assert dict(os.environ) == before
+    assert os.environ["UV_CACHE_DIR"] == "/custom/uv-cache"
+
+
+def test_run_agent_sets_no_variable_besides_uv_cache_dir(repo: Path, monkeypatch):
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+    seen: dict[str, object] = {}
+
+    def run(command, prompt, **kwargs):
+        seen["env"] = kwargs.get("env")
+        return 0
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    _run_codex_turn(repo, settings_using("review", "approve", repo))
+    assert seen["env"] == {
+        "UV_CACHE_DIR": str(repo / ".whyline" / "relay" / "cache" / "uv")
+    }
+
+    monkeypatch.setenv("UV_CACHE_DIR", "/custom/uv-cache")
+    _run_codex_turn(repo, settings_using("review", "approve", repo))
+    assert seen["env"] is None
+
+
 def test_custom_prompt_cannot_omit_relay_repository_instruction(repo, monkeypatch):
     prompt_dir = repo / ".whyline" / "relay" / "prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)

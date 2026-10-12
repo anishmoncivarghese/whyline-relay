@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -111,6 +112,18 @@ def _stop_timer(timer: threading.Timer | None) -> None:
     timer.join()
 
 
+def _child_env(env: Mapping[str, str] | None) -> dict[str, str] | None:
+    """Environment for one child. None inherits; a mapping overrides its keys.
+
+    The returned dict is a copy. The relay's own `os.environ` is not changed.
+    """
+    if env is None:
+        return None
+    merged = dict(os.environ)
+    merged.update(env)
+    return merged
+
+
 def run(
     command: list[str],
     prompt: str,
@@ -123,12 +136,15 @@ def run(
     agent_name: str | None = None,
     capture: bool = False,
     cancel_event: threading.Event | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> RunResult:
     """Run one agent to completion. Returns a RunResult.
 
     Raises AgentMissing if the binary is absent, AgentTimeout if it overruns,
     and AgentCancelled if the user cancels it. `timeout_seconds` is required:
-    a positive int arms the watchdog, and None waits without one.
+    a positive int arms the watchdog, and None waits without one. `env` is
+    merged over the relay's environment for this child only; None leaves the
+    child with today's inherited environment.
     """
     lookup = which if which is not None else _which
     argv = build_argv(command, prompt)
@@ -169,6 +185,7 @@ def run(
         errors="replace",
         bufsize=1,
         start_new_session=True,
+        env=_child_env(env),
     )
 
     def signal_group(signum: int) -> None:

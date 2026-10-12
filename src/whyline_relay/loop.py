@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import subprocess
 import threading
@@ -133,6 +134,18 @@ def _command_with_task_dir(
     return [*command, *needle]
 
 
+def _uv_cache_env(root: Path) -> dict[str, str] | None:
+    """Point the child's uv at the relay cache, unless one is already configured.
+
+    The path sits under `root`, so `uv run` in the relay checkout and in a task
+    repository both write inside this workspace. No other variable is set. An
+    existing `UV_CACHE_DIR` wins by leaving the child on the inherited environment.
+    """
+    if "UV_CACHE_DIR" in os.environ:
+        return None
+    return {"UV_CACHE_DIR": str(root / ".whyline" / "relay" / "cache" / "uv")}
+
+
 def run_agent(
     root: Path,
     settings: config.Config,
@@ -243,6 +256,7 @@ def run_agent(
                     echo=echo,
                     agent_name=agent,
                     cancel_event=cancel_event,
+                    env=_uv_cache_env(root),
                 )
                 session = None
                 if resumes < GROK_RESUMES:

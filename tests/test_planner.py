@@ -60,6 +60,7 @@ def _scripted_run(specs: list[str]):
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         spec = specs.pop(0)
         result = subprocess.run(
@@ -245,6 +246,7 @@ def test_approving_writes_and_commits_plan_md_without_starting(repo, monkeypatch
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         if agent_name == "codex":
             planner.draft_path(repo).write_text("- [ ] T-1: build it\n  Do the thing.\n")
@@ -288,6 +290,7 @@ def test_discarding_clears_the_checkpoint_and_keeps_the_draft_file(repo, monkeyp
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         if agent_name == "codex":
             planner.draft_path(repo).write_text("- [ ] T-1: x\n  y.\n")
@@ -325,6 +328,7 @@ def test_requesting_changes_redrafts_before_the_gate_reappears(repo, monkeypatch
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         calls["n"] += 1
         spec = [

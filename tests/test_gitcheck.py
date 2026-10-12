@@ -127,6 +127,21 @@ _AUTO_AND_CHAT_IGNORES = (
 )
 
 
+def test_cache_directory_is_listed_and_ignored_once(repo: Path):
+    assert ".whyline/relay/cache/" in gitcheck.RELAY_IGNORE
+    cache = repo / ".whyline" / "relay" / "cache" / "uv"
+    cache.mkdir(parents=True)
+    (cache / "wheel.http").write_text("x")
+    assert "wheel.http" in _status(repo)
+
+    gitcheck.ensure_relay_ignored(repo)
+    gitcheck.ensure_relay_ignored(repo)
+
+    assert "wheel.http" not in _status(repo)
+    exclude = (repo / ".git" / "info" / "exclude").read_text().splitlines()
+    assert exclude.count(".whyline/relay/cache/") == 1
+
+
 def test_relay_ignore_contains_auto_runtime_and_chat_failover_files():
     for pattern in _AUTO_AND_CHAT_IGNORES:
         assert pattern in gitcheck.RELAY_IGNORE

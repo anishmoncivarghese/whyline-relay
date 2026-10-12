@@ -127,6 +127,7 @@ def _scripted(repo: Path, specs: list[str], prompts: list[str]):
         echo=True,
         agent_name=None,
         cancel_event=None,
+        env=None,
     ):
         prompts.append(prompt)
         if agent_name == "codex":

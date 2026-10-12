@@ -22,6 +22,7 @@ RELAY_IGNORE = (
     ".whyline/relay/auto-run.lock",
     ".whyline/relay/chat-active-agents.json",
     ".whyline/relay/recovery.json",
+    ".whyline/relay/cache/",
 )
 
 

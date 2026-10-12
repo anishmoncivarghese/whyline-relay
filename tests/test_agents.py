@@ -30,11 +30,14 @@ def test_timeout_stays_required_and_cancel_defaults_to_none():
     signature = inspect.signature(agents.run)
     timeout = signature.parameters["timeout_seconds"]
     cancel = signature.parameters["cancel_event"]
+    env = signature.parameters["env"]
     assert timeout.kind is inspect.Parameter.KEYWORD_ONLY
     assert timeout.default is inspect.Parameter.empty
     assert timeout.annotation in {"int | None", int | None}
     assert cancel.kind is inspect.Parameter.KEYWORD_ONLY
     assert cancel.default is None
+    assert env.kind is inspect.Parameter.KEYWORD_ONLY
+    assert env.default is None
     assert issubclass(agents.AgentCancelled, RuntimeError)
 
 
@@ -79,6 +82,49 @@ def test_run_returns_a_runresult_with_no_output_by_default(tmp_path: Path):
     assert isinstance(result, agents.RunResult)
     assert result.exit_code == 0
     assert result.output is None
+
+
+def test_run_merges_env_for_the_child_and_leaves_os_environ(tmp_path: Path, monkeypatch):
+    """A passed mapping overrides keys in the child only."""
+    monkeypatch.setenv("UV_CACHE_DIR", "/parent/cache")
+    monkeypatch.setenv("WHYLINE_RELAY_KEEP", "parent")
+    before = dict(os.environ)
+    cache = tmp_path / "cache" / "uv"
+    result = agents.run(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['UV_CACHE_DIR']); print(os.environ['WHYLINE_RELAY_KEEP'])",
+        ],
+        "the prompt",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        echo=False,
+        env={"UV_CACHE_DIR": str(cache)},
+    )
+    assert result.exit_code == 0
+    assert (tmp_path / "run.log").read_text().splitlines() == [str(cache), "parent"]
+    assert dict(os.environ) == before
+    assert os.environ["UV_CACHE_DIR"] == "/parent/cache"
+
+
+def test_run_without_env_inherits_the_parent_environment(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("UV_CACHE_DIR", "/already/set")
+    before = dict(os.environ)
+    result = agents.run(
+        [sys.executable, "-c", "import os; print(os.environ['UV_CACHE_DIR'])"],
+        "the prompt",
+        cwd=tmp_path,
+        log_path=tmp_path / "run.log",
+        timeout_seconds=30,
+        which=lambda name: name,
+        echo=False,
+    )
+    assert result.exit_code == 0
+    assert (tmp_path / "run.log").read_text() == "/already/set\n"
+    assert dict(os.environ) == before
 
 
 def test_run_captures_stdout_when_capture_is_true(tmp_path: Path):
