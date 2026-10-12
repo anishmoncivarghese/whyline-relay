@@ -484,3 +484,43 @@ def test_a_legacy_config_has_no_pipeline_and_an_empty_fingerprint(tmp_path):
 def test_pipeline_validation_errors(tmp_path, bad_toml, expect_substr):
     with pytest.raises(config.ConfigError, match=re.escape(expect_substr)):
         config.load(write_config(tmp_path, bad_toml))
+
+
+_TIMEOUT_ERROR = (
+    "timeout_minutes must be 0 (no limit) or a positive number of minutes"
+)
+
+
+def test_timeout_minutes_zero_loads_as_an_int(tmp_path: Path):
+    write(tmp_path, "timeout_minutes = 0\n")
+    loaded = config.load(tmp_path)
+    assert loaded.timeout_minutes == 0
+    assert type(loaded.timeout_minutes) is int
+
+
+def test_a_positive_timeout_minutes_still_loads(tmp_path: Path):
+    write(tmp_path, "timeout_minutes = 45\n")
+    assert config.load(tmp_path).timeout_minutes == 45
+
+
+def test_a_missing_timeout_minutes_key_stays_30(tmp_path: Path):
+    write(tmp_path, "max_rounds = 4\n")
+    loaded = config.load(tmp_path)
+    assert loaded.timeout_minutes == 30
+    assert type(loaded.timeout_minutes) is int
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "timeout_minutes = -1\n",
+        "timeout_minutes = true\n",
+        "timeout_minutes = false\n",
+        'timeout_minutes = "30"\n',
+        "timeout_minutes = 1.5\n",
+    ],
+)
+def test_timeout_minutes_rejects_anything_but_a_non_negative_int(tmp_path: Path, text: str):
+    write(tmp_path, text)
+    with pytest.raises(config.ConfigError, match=re.escape(_TIMEOUT_ERROR)):
+        config.load(tmp_path)

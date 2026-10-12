@@ -40,12 +40,39 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PAUSED = 2
 
+_WATCHDOG_DISABLED = "Watchdog disabled: a hung agent runs until you stop it."
+
+
+def _warn_if_unlimited(settings: config.Config) -> None:
+    """One stderr line when this run will not kill a hung agent."""
+    if settings.timeout_minutes == 0:
+        print(_WATCHDOG_DISABLED, file=sys.stderr)
+
 
 def _package_version() -> str:
     try:
         return metadata.version("whyline-relay")
     except metadata.PackageNotFoundError:
         return "unknown"
+
+
+def _parse_timeout(value: str) -> int:
+    """Minutes for this run. `none` and `unlimited` (any case) mean no watchdog."""
+    if value.lower() in {"none", "unlimited"}:
+        return 0
+    try:
+        minutes = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "timeout must be 0 (no limit), a positive number of minutes, "
+            "none, or unlimited"
+        ) from None
+    if minutes < 0:
+        raise argparse.ArgumentTypeError(
+            "timeout must be 0 (no limit), a positive number of minutes, "
+            "none, or unlimited"
+        )
+    return minutes
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,10 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.add_argument(
         "--timeout",
-        type=int,
+        type=_parse_timeout,
         default=None,
         metavar="MIN",
-        help="Override the per-agent timeout from config, in minutes.",
+        help=(
+            "Override the per-agent timeout from config, in minutes. "
+            "0, none, or unlimited disables the watchdog for this run."
+        ),
     )
 
     resume = subparsers.add_parser("resume", help="Continue after a pause")
@@ -334,6 +364,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if plan_state is not None:
         settings = config.load(root)
         try:
+            _warn_if_unlimited(settings)
             summary = planner.resume(root, settings, plan_state)
         except loop.Paused as paused:
             return _report_pause(paused)
@@ -380,6 +411,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         # Back onto the branch the run started on: the agents must not commit to
         # whatever happens to be checked out now, which could be main.
         gitcheck.ensure_branch(root, saved.branch)
+        _warn_if_unlimited(settings)
         loop.run_plan(
             root,
             settings,
@@ -650,6 +682,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     try:
         gitcheck.ensure_branch(root, branch)
+        _warn_if_unlimited(settings)
         outcomes = loop.run_plan(
             root,
             settings,

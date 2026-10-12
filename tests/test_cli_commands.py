@@ -354,3 +354,213 @@ def test_resume_returns_to_the_saved_branch(repo: Path, monkeypatch):
     monkeypatch.setattr(cli.loop, "run_plan", lambda *a, **k: [])
     assert cli.main(["resume", "--repo", str(repo)]) == cli.EXIT_OK
     assert gitcheck.current_branch(repo) == "relay/plan"
+
+
+_WATCHDOG = "Watchdog disabled: a hung agent runs until you stop it."
+
+
+def _write_relay_config(repo: Path, text: str) -> Path:
+    path = repo / ".whyline" / "relay" / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def _stub_run_plan(monkeypatch, capsys) -> dict:
+    seen: dict = {}
+
+    def fake_run(root, settings, *args, **kwargs):
+        seen["timeout"] = settings.timeout_minutes
+        seen["err_before"] = capsys.readouterr().err
+        return []
+
+    monkeypatch.setattr(cli.loop, "run_plan", fake_run)
+    return seen
+
+
+def _paused(repo: Path) -> None:
+    state.save(
+        repo,
+        state.RelayState(
+            plan=str(repo / "plan.md"),
+            branch="relay/plan",
+            task_id="WL-1",
+            round=1,
+            base_commit=_git(repo, "rev-parse", "HEAD"),
+            paused_reason="paused",
+            log_path="",
+        ),
+    )
+
+
+@pytest.mark.parametrize("flag", ["none", "NONE", "unlimited", "Unlimited"])
+def test_timeout_word_sets_zero_without_changing_the_toml(
+    repo: Path, monkeypatch, capsys, flag: str
+):
+    path = _write_relay_config(repo, "timeout_minutes = 45\n")
+    seen = _stub_run_plan(monkeypatch, capsys)
+
+    code = cli.main(
+        [
+            "start",
+            "--repo",
+            str(repo),
+            "--timeout",
+            flag,
+            "--allow-dirty",
+            "--skip-checks",
+        ]
+    )
+
+    assert code == cli.EXIT_OK
+    assert seen["timeout"] == 0
+    assert seen["err_before"] == f"{_WATCHDOG}\n"
+    assert path.read_text() == "timeout_minutes = 45\n"
+    assert capsys.readouterr().err == ""
+
+
+def test_timeout_zero_is_kept_and_not_written(repo: Path, monkeypatch, capsys):
+    path = _write_relay_config(repo, "timeout_minutes = 45\n")
+    seen = _stub_run_plan(monkeypatch, capsys)
+
+    code = cli.main(
+        [
+            "start",
+            "--repo",
+            str(repo),
+            "--timeout",
+            "0",
+            "--allow-dirty",
+            "--skip-checks",
+        ]
+    )
+
+    assert code == cli.EXIT_OK
+    assert seen["timeout"] == 0
+    assert seen["err_before"] == f"{_WATCHDOG}\n"
+    assert path.read_text() == "timeout_minutes = 45\n"
+
+
+def test_a_positive_timeout_override_is_kept_and_does_not_warn(
+    repo: Path, monkeypatch, capsys
+):
+    path = _write_relay_config(repo, "timeout_minutes = 45\n")
+    seen = _stub_run_plan(monkeypatch, capsys)
+
+    code = cli.main(
+        [
+            "start",
+            "--repo",
+            str(repo),
+            "--timeout",
+            "12",
+            "--allow-dirty",
+            "--skip-checks",
+        ]
+    )
+
+    assert code == cli.EXIT_OK
+    assert seen["timeout"] == 12
+    assert seen["err_before"] == ""
+    assert path.read_text() == "timeout_minutes = 45\n"
+
+
+def test_start_warns_when_the_configured_timeout_is_zero(
+    repo: Path, monkeypatch, capsys
+):
+    path = _write_relay_config(repo, "timeout_minutes = 0\n")
+    seen = _stub_run_plan(monkeypatch, capsys)
+
+    code = cli.main(
+        ["start", "--repo", str(repo), "--allow-dirty", "--skip-checks"]
+    )
+
+    assert code == cli.EXIT_OK
+    assert seen["timeout"] == 0
+    assert seen["err_before"] == f"{_WATCHDOG}\n"
+    assert path.read_text() == "timeout_minutes = 0\n"
+
+
+def test_timeout_negative_is_an_argparse_error_and_leaves_the_file(
+    repo: Path, monkeypatch, capsys
+):
+    path = _write_relay_config(repo, "timeout_minutes = 45\n")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("the process must not start")
+
+    monkeypatch.setattr(cli.loop, "run_plan", fail)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(
+            [
+                "start",
+                "--repo",
+                str(repo),
+                "--timeout",
+                "-1",
+                "--allow-dirty",
+                "--skip-checks",
+            ]
+        )
+
+    assert caught.value.code == 2
+    assert path.read_text() == "timeout_minutes = 45\n"
+    assert "Watchdog disabled" not in capsys.readouterr().err
+
+
+def test_resume_warns_before_the_first_task_when_timeout_is_zero(
+    repo: Path, monkeypatch, capsys
+):
+    _write_relay_config(repo, "timeout_minutes = 0\n")
+    _paused(repo)
+    seen = _stub_run_plan(monkeypatch, capsys)
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--allow-dirty", "--skip-checks"]
+    )
+
+    assert code == cli.EXIT_OK, capsys.readouterr().err
+    assert seen["timeout"] == 0
+    assert seen["err_before"] == f"{_WATCHDOG}\n"
+
+
+def test_resume_of_a_plan_warns_before_the_planner_when_timeout_is_zero(
+    repo: Path, monkeypatch, capsys
+):
+    _write_relay_config(repo, "timeout_minutes = 0\n")
+    state.save_plan(
+        repo,
+        state.PlanState(
+            description="make a thing",
+            stage="draft",
+            round=1,
+            stage_visits={},
+            agent="codex",
+            feedback="",
+            draft_path="plan.md",
+            paused_reason="paused",
+            log_path="",
+        ),
+    )
+    seen: dict = {}
+
+    def fake_resume(root, settings, saved, **kwargs):
+        seen["timeout"] = settings.timeout_minutes
+        seen["err_before"] = capsys.readouterr().err
+        return "resumed"
+
+    monkeypatch.setattr(cli.planner, "resume", fake_resume)
+
+    code = cli.main(["resume", "--repo", str(repo), "--allow-dirty", "--skip-checks"])
+
+    assert code == cli.EXIT_OK
+    assert seen["timeout"] == 0
+    assert seen["err_before"] == f"{_WATCHDOG}\n"
+
+
+def test_chat_does_not_print_the_watchdog_line(repo: Path, monkeypatch, capsys):
+    _write_relay_config(repo, "timeout_minutes = 0\n")
+    monkeypatch.setattr(cli.chat, "repl", lambda root: None)
+
+    assert cli.main(["chat", "--repo", str(repo)]) == cli.EXIT_OK
+    assert "Watchdog disabled" not in capsys.readouterr().err

@@ -233,6 +233,19 @@ def config_path(root: Path) -> Path:
     return relay_dir(root) / "config.toml"
 
 
+def _timeout_minutes(value: object) -> int:
+    """Minutes per agent turn. Zero means no watchdog.
+
+    bool is a subclass of int, and int(True) is 1, so a boolean has to be
+    rejected before any int() conversion.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(
+            "timeout_minutes must be 0 (no limit) or a positive number of minutes"
+        )
+    return value
+
+
 def load(root: Path) -> Config:
     """Read config.toml if present, layering it over DEFAULTS."""
     path = config_path(root)
@@ -414,10 +427,15 @@ def load(root: Path) -> Config:
         max_visits=planner_max_visits,
     )
 
+    if "timeout_minutes" in raw:
+        timeout_minutes = _timeout_minutes(raw["timeout_minutes"])
+    else:
+        timeout_minutes = _timeout_minutes(DEFAULTS["timeout_minutes"])
+
     return Config(
         plan=raw.get("plan", DEFAULTS["plan"]),
         max_rounds=int(raw.get("max_rounds", DEFAULTS["max_rounds"])),
-        timeout_minutes=int(raw.get("timeout_minutes", DEFAULTS["timeout_minutes"])),
+        timeout_minutes=timeout_minutes,
         branch_prefix=raw.get("branch_prefix", DEFAULTS["branch_prefix"]),
         agents=agents,
         status_map=status_map,
