@@ -200,7 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
 
-    stop = subparsers.add_parser("stop", help="Stop after the current agent finishes")
+    stop = subparsers.add_parser(
+        "stop", help="Stop the current agent and do not start another."
+    )
     stop.add_argument(
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
@@ -494,7 +496,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     target = loop.stop_path(root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("")
-    print("STOP written. The current agent finishes; nothing new starts.")
+    print("Stopped the current agent. Nothing new will start.")
     return EXIT_OK
 
 

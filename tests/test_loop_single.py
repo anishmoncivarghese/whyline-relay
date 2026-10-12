@@ -594,3 +594,64 @@ def test_a_state_file_without_timeout_minutes_resumes_at_the_config_value(
     seen = _record_runs(monkeypatch)
     assert _resume(repo) == cli.EXIT_PAUSED
     assert [call["timeout_seconds"] for call in seen] == [45 * 60]
+
+
+def _task_heading(prompt: str) -> str:
+    for line in prompt.splitlines():
+        if line.startswith("## Task "):
+            return line.removeprefix("## Task ").strip()
+    return ""
+
+
+def test_stop_file_after_a_finished_task_does_not_start_the_next(
+    repo: Path, monkeypatch, capsys
+):
+    plan_path = repo / "plan.md"
+    plan_path.write_text("- [ ] WL-1: One\n- [ ] WL-2: Two\n")
+    (repo / ".whyline" / ".gitignore").write_text(
+        "active-handoff.json\nledger.jsonl\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "plan"], cwd=repo, check=True, capture_output=True
+    )
+    settings = settings_using("review", "approve", repo)
+    real_run = loop.agents.run
+    seen: list[str] = []
+    approved = {"n": 0}
+
+    def run(command, prompt, **kwargs):
+        seen.append(_task_heading(prompt))
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            approved["n"] += 1
+            task_id = "WL-1" if approved["n"] == 1 else "WL-2"
+            (repo / f"f{approved['n']}.py").write_text("x = 1\n")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=repo, check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"feat: work ({task_id})"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+            if approved["n"] == 1:
+                loop.stop_path(repo).write_text("")
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    outcomes = loop.run_plan(
+        repo, settings, plan_path, branch="relay/plan", echo=False
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["WL-1"]
+    assert seen == ["WL-1", "WL-1"]
+    tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+    assert [(task.task_id, task.checked) for task in tasks] == [
+        ("WL-1", True),
+        ("WL-2", False),
+    ]
+    assert (
+        "STOP file present; not starting another task."
+        in capsys.readouterr().out
+    )

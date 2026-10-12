@@ -181,14 +181,29 @@ def run_agent(
     timeout_seconds = (
         None if settings.timeout_minutes == 0 else settings.timeout_minutes * 60
     )
-    # RTO-6 is what sets this from the STOP file. Until then it stays clear.
+    # The main thread blocks inside the child. A side thread sets this when
+    # STOP appears; agents.run kills the child and raises AgentCancelled.
     cancel_event = threading.Event()
+    stop_watching = threading.Event()
+    watcher = threading.Thread(
+        target=_watch_for_stop,
+        args=(root, cancel_event, stop_watching),
+        name="whyline-stop",
+        daemon=True,
+    )
     started = time.monotonic()
     turn_command, turn_prompt = command, prompt
     resumes = 0
+    watcher.start()
     try:
         try:
             while True:
+                # A STOP file that landed after the previous turn returned must
+                # not start another child. agents.run raises before spawning
+                # when the event is already set. The watcher covers the file
+                # appearing while this call is in flight.
+                if stop_requested(root):
+                    cancel_event.set()
                 agents.run(
                     turn_command,
                     turn_prompt,
@@ -231,10 +246,13 @@ def run_agent(
                     f"<== {agent} finished in "
                     f"{agents.format_duration(time.monotonic() - started)}"
                 )
-    except agents.AgentTimeout as error:
+    except (agents.AgentTimeout, agents.AgentCancelled) as error:
         raise Paused(str(error), target) from error
     except agents.AgentMissing as error:
         raise Paused(str(error), target) from error
+    finally:
+        stop_watching.set()
+        watcher.join()
     return target
 
 
@@ -809,6 +827,23 @@ def stop_path(root: Path) -> Path:
 
 def stop_requested(root: Path) -> bool:
     return stop_path(root).exists()
+
+
+# Same slice as agents._CANCEL_POLL_SECONDS: the file is noticed, then the
+# child is killed, within about two polls.
+_STOP_POLL_SECONDS = 0.05
+
+
+def _watch_for_stop(
+    root: Path, cancel_event: threading.Event, done: threading.Event
+) -> None:
+    """Set `cancel_event` when the STOP file appears. `done` ends the watch."""
+    path = stop_path(root)
+    while not done.is_set():
+        if path.exists():
+            cancel_event.set()
+            return
+        done.wait(_STOP_POLL_SECONDS)
 
 
 def _save_pause(

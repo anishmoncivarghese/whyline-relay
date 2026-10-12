@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -80,3 +81,60 @@ def test_ctrl_c_stops_the_agent_process_and_saves_state(repo: Path):
     saved = state.load(repo)
     assert saved is not None and saved.task_id == "WL-1"
     assert not (repo / ".whyline" / "relay" / "running.json").exists()
+
+
+def test_stop_file_during_the_run_cancels_the_agent_and_saves_timeout(repo: Path):
+    pid_file = repo / "agent.pid"
+
+    def write_stop_once_running() -> None:
+        deadline = time.monotonic() + 15
+        while not pid_file.exists():
+            if time.monotonic() > deadline:
+                return
+            time.sleep(0.05)
+        loop.stop_path(repo).write_text("")
+
+    # The hang is 600s and timeout 0 disables the watchdog. A missed STOP must
+    # not stall the suite; this only fires if cancellation fails.
+    guard = threading.Timer(20, os.kill, (os.getpid(), signal.SIGINT))
+    guard.daemon = True
+    writer = threading.Thread(target=write_stop_once_running)
+    previous = signal.getsignal(signal.SIGINT)
+    writer.start()
+    guard.start()
+    try:
+        code = cli.main(["start", "--repo", str(repo), "--timeout", "0"])
+    finally:
+        guard.cancel()
+        signal.signal(signal.SIGINT, previous)
+        writer.join(timeout=2)
+    assert pid_file.exists(), "the agent never started, so this test proved nothing"
+    pid = int(pid_file.read_text())
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        outlived = False
+    else:
+        outlived = True
+        os.kill(pid, signal.SIGKILL)
+    assert not outlived, "the agent outlived the STOP file"
+    assert code == cli.EXIT_PAUSED
+    saved = state.load(repo)
+    assert saved is not None and saved.task_id == "WL-1"
+    assert "cancelled by user" in saved.paused_reason
+    assert saved.timeout_minutes == 0
+    raw = json.loads(state.path(repo).read_text(encoding="utf-8"))
+    assert raw["timeout_minutes"] == 0
+    assert not (repo / ".whyline" / "relay" / "running.json").exists()
+
+
+def test_stop_command_reports_that_the_current_agent_stops(repo: Path, capsys):
+    assert cli.main(["stop", "--repo", str(repo)]) == cli.EXIT_OK
+    assert (
+        capsys.readouterr().out.strip()
+        == "Stopped the current agent. Nothing new will start."
+    )
+    assert (
+        "Stop the current agent and do not start another."
+        in cli.build_parser().format_help()
+    )
