@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -500,14 +501,20 @@ DEFAULT_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_MINUTES * 60
 
 
 def parse_timeout_selection(raw: str, default: int = DEFAULT_TIMEOUT_MINUTES) -> int | None:
-    """Parses user input for timeout menu into minutes (15, 30, 45, or 60).
+    """Parse the timeout menu.
 
-    Returns None if input names nothing valid.
+    Returns 15, 30, 45, or 60 minutes, or chat.NO_LIMIT for an unlimited
+    choice. None means the answer was not a choice and the prompt should
+    ask again. Empty input returns `default`, which may itself be NO_LIMIT.
     """
     raw = raw.strip().lower()
     if not raw:
         return default
+    if raw in {"none", "no limit", "unlimited", "0"}:
+        return chat.NO_LIMIT
     cleaned = re.sub(r"\s*(minutes|minute|mins|min|m)$", "", raw).strip()
+    if cleaned in {"none", "no limit", "unlimited", "0"}:
+        return chat.NO_LIMIT
     if cleaned in {"15", "30", "45", "60"}:
         return int(cleaned)
     menu_numbers = {"1": 15, "2": 30, "3": 45, "4": 60}
@@ -561,26 +568,66 @@ def _timeout_path(root: Path, topic: str) -> Path:
 
 
 def _load_timeout(root: Path, topic: str) -> int | None:
+    """A positive number of seconds, chat.NO_LIMIT, or None when missing.
+
+    Missing covers no file, an unreadable file, invalid JSON, a non-object
+    payload, a missing timeout_seconds key, and a timeout_seconds that is
+    not a positive int and not JSON null. JSON null is unlimited. A missing
+    key does not fall back to timeout_minutes. JSON null must be recognized
+    before any int() call: int(None) throws and would look like "missing".
+    """
     path = _timeout_path(root, topic)
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return int(data.get("timeout_seconds", data.get("timeout_minutes", 0) * 60))
-            return int(data)
-        except Exception:
-            pass
-    return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or "timeout_seconds" not in data:
+        return None
+    value = data["timeout_seconds"]
+    if value is None:
+        return chat.NO_LIMIT
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def _save_timeout(root: Path, timeout_seconds: int, topic: str) -> None:
     path = _timeout_path(root, topic)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "timeout_seconds": timeout_seconds,
-        "timeout_minutes": timeout_seconds // 60,
-    }
+    if timeout_seconds is chat.NO_LIMIT:
+        payload = {"timeout_seconds": None}
+    else:
+        payload = {
+            "timeout_seconds": timeout_seconds,
+            "timeout_minutes": timeout_seconds // 60,
+        }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _resolve_timeout(root: Path, topic: str, timeout_seconds: int | None):
+    """The limit one brainstorm stage passes to chat.
+
+    Omitted loads the topic file. A missing load becomes the 15 minute
+    default here, so chat never sees a bare None (its own 300 second
+    fallback). An explicit value, including chat.NO_LIMIT, is saved and
+    passed through. Identity checks only: NO_LIMIT must not be treated as
+    missing.
+    """
+    if timeout_seconds is None:
+        loaded = _load_timeout(root, topic)
+        if loaded is None:
+            return DEFAULT_TIMEOUT_SECONDS
+        return loaded
+    _save_timeout(root, timeout_seconds, topic)
+    return timeout_seconds
+
+
+def _cancelled(cancel_event: threading.Event | None) -> bool:
+    return cancel_event is not None and cancel_event.is_set()
 
 
 load_timeout = _load_timeout
@@ -646,23 +693,40 @@ def ask_brainstorm_setup(
             )
 
     persisted_timeout = _load_timeout(root, topic)
-    if persisted_timeout is not None and (persisted_timeout // 60) in TIMEOUT_OPTIONS:
+    if persisted_timeout is chat.NO_LIMIT:
+        default_timeout = chat.NO_LIMIT
+        prompt_default = "none"
+    elif (
+        isinstance(persisted_timeout, int)
+        and not isinstance(persisted_timeout, bool)
+        and (persisted_timeout // 60) in TIMEOUT_OPTIONS
+    ):
         default_timeout = persisted_timeout // 60
+        prompt_default = str(default_timeout)
     else:
+        # Missing, or a positive value outside 15/30/45/60 minutes (such as
+        # 300 seconds). Pre-select 15. Do not add a one-off menu row.
         default_timeout = DEFAULT_TIMEOUT_MINUTES
+        prompt_default = str(default_timeout)
 
     timeout_seconds = None
     timeout_minutes = None
     while timeout_seconds is None:
         raw_timeout = input_fn(
-            f"Per-agent timeout: 15 (default), 30, 45, 60 minutes [{default_timeout}]: "
+            "Per-agent timeout: 15 (default), 30, 45, 60 minutes, or none "
+            f"[{prompt_default}]: "
         ).strip()
-        parsed_min = parse_timeout_selection(raw_timeout, default=default_timeout)
-        if parsed_min is not None:
-            timeout_minutes = parsed_min
-            timeout_seconds = parsed_min * 60
+        parsed = parse_timeout_selection(raw_timeout, default=default_timeout)
+        if parsed is chat.NO_LIMIT:
+            timeout_seconds = chat.NO_LIMIT
+            timeout_minutes = None
+        elif parsed is not None:
+            timeout_minutes = parsed
+            timeout_seconds = parsed * 60
         else:
-            print_fn("Enter a valid timeout: 15 (default), 30, 45, or 60 minutes.")
+            print_fn(
+                "Enter a valid timeout: 15 (default), 30, 45, 60 minutes, or none."
+            )
 
     unavailable = check_availability(settings, models)
     if unavailable:
@@ -787,6 +851,7 @@ def run_pass_zero(
     status_map: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, str]:
     """Each model researches independently into its own temp file. A model
     that can't run or fails at runtime is recorded in pass-zero's status map
@@ -795,18 +860,21 @@ def run_pass_zero(
     `progress_fn`, when passed, receives a ProgressEvent for starting,
     running, and the terminal status of each selected model.
     `timeout_seconds` is the limit for every model in this pass. Omitted,
-    each turn keeps chat's current limit.
+    the topic file is loaded; a missing load is DEFAULT_TIMEOUT_SECONDS.
+    chat.NO_LIMIT waits with no timer. A set `cancel_event`, or
+    AgentCancelled raised by a turn, returns the agents that already
+    finished and does not start the next model. Models that already
+    committed stay committed.
     """
     print_fn = print_fn if print_fn is not None else print
-    if timeout_seconds is None:
-        timeout_seconds = _load_timeout(root, topic)
-    elif timeout_seconds is not None:
-        _save_timeout(root, timeout_seconds, topic)
+    timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
     actual_agents: dict[str, str] = {}
     if status_map is None:
         status_map = {}
     total = len(models)
     for ordinal, (agent_key, label) in enumerate(models, start=1):
+        if _cancelled(cancel_event):
+            break
         exclude = frozenset(key for key, _ in models if key != agent_key)
         prompt = (
             f'Research "{topic}" independently. Write your findings to '
@@ -839,8 +907,13 @@ def run_pass_zero(
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
                 attachments=attachments,
+                cancel_event=cancel_event,
                 **kwargs,
             )
+        except agents.AgentCancelled:
+            # This turn did not commit. Return the agents that already
+            # finished instead of starting the next model.
+            break
         except Exception as error:
             category = classify_failure(error=error)
             status = (
@@ -1015,6 +1088,7 @@ def run_review_pass(
     progress_fn: Callable[[ProgressEvent], None] | None = None,
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, str]:
     """Every selected model, once, revises only its own section. A model
     that can't run this pass is skipped (spec B7) -- its section simply
@@ -1023,13 +1097,14 @@ def run_review_pass(
     `progress_fn`, when passed, receives one lifecycle per selected model.
     A model that cannot run is still skipped; its section is left alone.
     `timeout_seconds` is the limit for every model in this pass. Omitted,
-    each turn keeps chat's current limit.
+    the topic file is loaded; a missing load is DEFAULT_TIMEOUT_SECONDS.
+    chat.NO_LIMIT waits with no timer. A set `cancel_event`, or
+    AgentCancelled raised by a turn, returns the agents accumulated so far
+    and does not start the next model. Models that already committed stay
+    committed.
     """
     print_fn = print_fn if print_fn is not None else print
-    if timeout_seconds is None:
-        timeout_seconds = _load_timeout(root, topic)
-    elif timeout_seconds is not None:
-        _save_timeout(root, timeout_seconds, topic)
+    timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
     shared = shared_path(root, topic)
     model_labels = dict(MODEL_OPTIONS_BY_KEY)
     if actual_agents is None:
@@ -1050,6 +1125,8 @@ def run_review_pass(
 
     total = len(active_models)
     for ordinal, (agent_key, label) in enumerate(active_models, start=1):
+        if _cancelled(cancel_event):
+            break
         exclude = frozenset(key for key, _ in models if key != agent_key)
         current_actual = actual_map.get(agent_key, agent_key)
         current_label = model_labels.get(current_actual, label)
@@ -1090,8 +1167,13 @@ def run_review_pass(
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
                 attachments=attachments,
+                cancel_event=cancel_event,
                 **kwargs,
             )
+        except agents.AgentCancelled:
+            # This turn did not commit. Return the map accumulated so far
+            # instead of starting the next model.
+            break
         except (agents.AgentMissing, agents.AgentTimeout, chat.AgentUnavailable) as error:
             watch.emit("skipped", reason=str(error))
             print_fn(f"{label} could not review this pass: {error}")
@@ -1168,6 +1250,7 @@ def run_final_synthesis(
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
     unattended: bool = False,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     """One model writes the final synthesis. If the requested final agent fails
     at runtime, choose the first successful selected agent with usable research
@@ -1175,8 +1258,10 @@ def run_final_synthesis(
     actionable message and do not create an empty synthesis.
 
     `timeout_seconds` is the limit for the synthesis turn and for any
-    substitute that runs after a failure. Omitted, the turn keeps chat's
-    current limit.
+    substitute that runs after a failure. Omitted, the topic file is loaded;
+    a missing load is DEFAULT_TIMEOUT_SECONDS. chat.NO_LIMIT waits with no
+    timer. A set `cancel_event` returns before the next model. Models that
+    already committed stay committed.
 
     `unattended` defaults to false and leaves the synthesis prompt unchanged.
     True appends one paragraph: decide questions the request already answers,
@@ -1184,10 +1269,7 @@ def run_final_synthesis(
     that would change what gets built.
     """
     print_fn = print_fn if print_fn is not None else print
-    if timeout_seconds is None:
-        timeout_seconds = _load_timeout(root, topic)
-    elif timeout_seconds is not None:
-        _save_timeout(root, timeout_seconds, topic)
+    timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
     shared = shared_path(root, topic)
     kwargs = {"run_fn": run_fn} if run_fn is not None else {}
     if runner is not None:
@@ -1265,6 +1347,8 @@ def run_final_synthesis(
     last_record: dict | None = None
 
     for idx, current_agent in enumerate(target_agents):
+        if _cancelled(cancel_event):
+            raise agents.AgentCancelled("brainstorm cancelled by user")
         current_label = _model_label(models, current_agent)
         if idx > 0:
             prev_agent = target_agents[idx - 1]
@@ -1295,8 +1379,11 @@ def run_final_synthesis(
                 exclude=exclude,
                 timeout_seconds=timeout_seconds,
                 attachments=attachments,
+                cancel_event=cancel_event,
                 **kwargs,
             )
+        except agents.AgentCancelled:
+            raise
         except (agents.AgentMissing, chat.AgentUnavailable) as error:
             watch.emit("skipped", reason=str(error))
             _strip_final_synthesis(shared)
@@ -1408,7 +1495,14 @@ def revise_synthesis(
     attachments=(),
     run_fn=None,
     runner=None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
+    """Rewrite the final synthesis. Omitted `timeout_seconds` loads the topic
+    file; a missing load is DEFAULT_TIMEOUT_SECONDS. chat.NO_LIMIT waits with
+    no timer. A set `cancel_event` returns before the model runs."""
+    timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
+    if _cancelled(cancel_event):
+        raise agents.AgentCancelled("brainstorm cancelled by user")
     kwargs = {k: v for k, v in (("run_fn", run_fn), ("runner", runner)) if v is not None}
     return chat.run_turn(
         root,
@@ -1419,6 +1513,7 @@ def revise_synthesis(
         commit_paths=owned_paths(root, topic, models),
         timeout_seconds=timeout_seconds,
         attachments=attachments,
+        cancel_event=cancel_event,
         **kwargs,
     )
 
@@ -1436,6 +1531,7 @@ def generate_plan_from_synthesis(
     max_attempts: int = 2,
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
+    cancel_event: threading.Event | None = None,
 ) -> Path:
     """Prompts final_agent to turn its own synthesis into a real plan.md,
     validating with plan.parse() and retrying once on a parse error. A draft
@@ -1447,12 +1543,11 @@ def generate_plan_from_synthesis(
     immediately -- an availability failure is not a retry-worthy parse
     failure, and there is no "keep the previous content" fallback here
     since nothing has been generated yet.
-    `timeout_seconds` applies to every draft attempt. Omitted, each attempt
-    keeps chat's current limit."""
-    if timeout_seconds is None:
-        timeout_seconds = _load_timeout(root, topic)
-    elif timeout_seconds is not None:
-        _save_timeout(root, timeout_seconds, topic)
+    `timeout_seconds` applies to every draft attempt. Omitted, the topic
+    file is loaded; a missing load is DEFAULT_TIMEOUT_SECONDS.
+    chat.NO_LIMIT waits with no timer. A set `cancel_event` returns before
+    the next attempt. An attempt that already committed stays committed."""
+    timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
     shared = shared_path(root, topic)
     if not shared.exists() or not shared.read_text(encoding="utf-8").strip():
         raise NothingToSynthesize(
@@ -1472,6 +1567,8 @@ def generate_plan_from_synthesis(
         )
     last_error: plan.PlanError | None = None
     for attempt in range(1, max_attempts + 1):
+        if _cancelled(cancel_event):
+            raise agents.AgentCancelled("brainstorm cancelled by user")
         chat.run_turn(
             root,
             agent=final_agent,
@@ -1485,6 +1582,7 @@ def generate_plan_from_synthesis(
             exclude=exclude,
             timeout_seconds=timeout_seconds,
             attachments=attachments,
+            cancel_event=cancel_event,
             **kwargs,
         )
         try:

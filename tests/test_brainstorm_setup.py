@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 
-from whyline_relay import brainstorm, config, recipes
+from whyline_relay import brainstorm, chat, config, recipes
 
 
 def test_slugify_lowercases_and_hyphenates():
@@ -157,12 +158,24 @@ def test_parse_timeout_selection_valid_inputs():
 
 
 def test_parse_timeout_selection_invalid_inputs():
-    assert brainstorm.parse_timeout_selection("0") is None
     assert brainstorm.parse_timeout_selection("10") is None
     assert brainstorm.parse_timeout_selection("20") is None
     assert brainstorm.parse_timeout_selection("90") is None
     assert brainstorm.parse_timeout_selection("abc") is None
     assert brainstorm.parse_timeout_selection("-15") is None
+    assert brainstorm.parse_timeout_selection("5") is None
+
+
+def test_parse_timeout_selection_unlimited_and_empty_default():
+    assert brainstorm.parse_timeout_selection("none") is chat.NO_LIMIT
+    assert brainstorm.parse_timeout_selection("No Limit") is chat.NO_LIMIT
+    assert brainstorm.parse_timeout_selection("  unlimited  ") is chat.NO_LIMIT
+    assert brainstorm.parse_timeout_selection("0") is chat.NO_LIMIT
+    assert brainstorm.parse_timeout_selection("") == 15
+    assert brainstorm.parse_timeout_selection("   ") == 15
+    assert brainstorm.parse_timeout_selection("", default=30) == 30
+    assert brainstorm.parse_timeout_selection("", default=chat.NO_LIMIT) is chat.NO_LIMIT
+    assert brainstorm.parse_timeout_selection("none") is not None
 
 
 def test_ask_brainstorm_setup_explicit_timeout_choices(tmp_path: Path):
@@ -231,6 +244,72 @@ def test_ask_brainstorm_setup_persists_timeout_for_resumed_run(tmp_path: Path):
     assert result2["timeout_minutes"] == 45
     assert result2["timeout_seconds"] == 2700
     assert any("[45]: " in p for p in prompts_seen)
+
+
+def _timeout_prompt(tmp_path: Path, topic: str, raw_timeout: str) -> tuple[dict, list[str]]:
+    settings = config.load(tmp_path)
+    prompts: list[str] = []
+    answers = iter([topic, "1", "1", "claude", raw_timeout])
+
+    def record(prompt=""):
+        prompts.append(prompt)
+        return next(answers)
+
+    result = brainstorm.ask_brainstorm_setup(
+        tmp_path, settings, input_fn=record, print_fn=lambda *a, **k: None,
+    )
+    return result, [prompt for prompt in prompts if prompt.startswith("Per-agent timeout:")]
+
+
+def test_timeout_prompt_defaults_to_15_when_missing(tmp_path: Path):
+    result, prompts = _timeout_prompt(tmp_path, "fresh topic", "")
+    assert prompts == [
+        "Per-agent timeout: 15 (default), 30, 45, 60 minutes, or none [15]: "
+    ]
+    assert result["timeout_seconds"] == 900
+    assert result["timeout_minutes"] == 15
+
+
+def test_timeout_prompt_preselects_none_for_the_sentinel(tmp_path: Path):
+    brainstorm.save_timeout(tmp_path, chat.NO_LIMIT, "saved topic")
+    result, prompts = _timeout_prompt(tmp_path, "saved topic", "")
+    assert prompts == [
+        "Per-agent timeout: 15 (default), 30, 45, 60 minutes, or none [none]: "
+    ]
+    assert result["timeout_seconds"] is chat.NO_LIMIT
+    assert result["timeout_minutes"] is None
+    payload = json.loads(brainstorm.timeout_path(tmp_path, "saved topic").read_text(encoding="utf-8"))
+    assert payload == {"timeout_seconds": None}
+
+
+def test_timeout_prompt_outside_menu_preselects_15(tmp_path: Path):
+    path = brainstorm.timeout_path(tmp_path, "odd topic")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"timeout_seconds": 300}), encoding="utf-8")
+    result, prompts = _timeout_prompt(tmp_path, "odd topic", "")
+    assert prompts == [
+        "Per-agent timeout: 15 (default), 30, 45, 60 minutes, or none [15]: "
+    ]
+    assert result["timeout_seconds"] == 900
+    assert result["timeout_minutes"] == 15
+
+
+def test_ask_brainstorm_setup_none_stores_null_without_dividing(tmp_path: Path):
+    settings = config.load(tmp_path)
+    for choice in ("none", "no limit", "unlimited", "0"):
+        answers = iter(["unlimited topic", "1", "1", "claude", choice])
+        result = brainstorm.ask_brainstorm_setup(
+            tmp_path, settings,
+            input_fn=lambda prompt="": next(answers),
+            print_fn=lambda *a, **k: None,
+        )
+        assert result["timeout_seconds"] is chat.NO_LIMIT
+        assert result["timeout_minutes"] is None
+        payload = json.loads(
+            brainstorm.timeout_path(tmp_path, "unlimited topic").read_text(encoding="utf-8")
+        )
+        assert payload == {"timeout_seconds": None}
+        assert "timeout_minutes" not in payload
 
 
 _UNATTENDED_SYNTHESIS_PARAGRAPH = (

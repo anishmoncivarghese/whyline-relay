@@ -489,8 +489,13 @@ def repl(
             timeout_seconds = setup.get("timeout_seconds")
             if timeout_seconds is None:
                 timeout_seconds = brainstorm.DEFAULT_TIMEOUT_SECONDS
-            timeout_minutes = setup.get("timeout_minutes", timeout_seconds // 60)
-            print_fn(f"Per-agent timeout: {timeout_minutes} minutes.")
+            if timeout_seconds is NO_LIMIT:
+                print_fn("Per-agent timeout: no limit.")
+            else:
+                timeout_minutes = setup.get("timeout_minutes")
+                if timeout_minutes is None:
+                    timeout_minutes = timeout_seconds // 60
+                print_fn(f"Per-agent timeout: {timeout_minutes} minutes.")
             events: list[brainstorm.ProgressEvent] = []
             actual_agents = brainstorm.run_pass_zero(
                 root, setup["models"], setup["topic"], settings=settings,
