@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,6 +126,46 @@ def run_setup_wizard(
 CHAT_TIMEOUT_SECONDS = 300
 
 
+class _NoLimit:
+    """No whyline kill timer. Not None, which is Chat's 300 second default."""
+
+    def __repr__(self) -> str:
+        return "NO_LIMIT"
+
+
+NO_LIMIT = _NoLimit()
+
+
+def _timeout_for_run(timeout_seconds: int | _NoLimit | None) -> int | None:
+    """The budget one `run_fn` call receives.
+
+    Omitted None is Chat's default. NO_LIMIT waits without a timer. A
+    positive int is forwarded. Zero is not unlimited here.
+    """
+    if timeout_seconds is None:
+        return CHAT_TIMEOUT_SECONDS
+    if timeout_seconds is NO_LIMIT:
+        return None
+    if (
+        isinstance(timeout_seconds, int)
+        and not isinstance(timeout_seconds, bool)
+        and timeout_seconds > 0
+    ):
+        return timeout_seconds
+    raise ValueError(
+        "timeout_seconds must be a positive integer, omitted, or NO_LIMIT, "
+        f"got {timeout_seconds!r}"
+    )
+
+
+def _raise_if_cancelled(
+    cancel_event: threading.Event | None, command: list[str]
+) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        name = command[0] if command else "agent"
+        raise agents.AgentCancelled(f"{name} cancelled by user")
+
+
 class AgentUnavailable(RuntimeError):
     """This agent has no command configured for chat in this repo."""
 
@@ -149,12 +190,16 @@ def _execute_agent_call(
     root: Path, agent: str, prompt: str, full_prompt: str,
     settings: "config.Config", run_fn, *, commit_message: str | None = None,
     commit_paths: list[Path] | None = None,
-    timeout_seconds: int | None = None,
+    timeout_seconds: int | _NoLimit | None = None,
     attachments: Sequence[Path] = (),
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     """Runs one attempt against `agent`. No chatlog write, no failover
     logic -- run_turn decides, after seeing the result, whether this was
     the whole story or whether a backup needs a turn too."""
+    # A rejected timeout must not commit generated permission files.
+    # Resumes below all receive this same full budget.
+    mapped_timeout = _timeout_for_run(timeout_seconds)
     command = resolve_command(settings, agent)
     adapter = config.adapter_for(settings, config_key(settings, agent))
     generated = init.ensure_permission_files(root, agent)
@@ -183,17 +228,17 @@ def _execute_agent_call(
     log_path = config.relay_dir(root) / "logs" / "chat-last-turn.log"
     call_command, call_prompt = turn_command, full_prompt
     for resumes in range(GROK_RESUMES + 1):
+        _raise_if_cancelled(cancel_event, call_command)
         result = run_fn(
             call_command,
             call_prompt,
             cwd=root,
             log_path=log_path,
-            timeout_seconds=(
-                CHAT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
-            ),
+            timeout_seconds=mapped_timeout,
             capture=True,
             echo=True,
             agent_name=agent,
+            cancel_event=cancel_event,
         )
         if adapter.uses_output_file:
             raw = (output_file.read_text(encoding="utf-8") if output_file.exists() else "") or (result.output or "")
@@ -201,9 +246,18 @@ def _execute_agent_call(
             raw = result.output or ""
         # Headless grok cancels its whole turn on an unlisted command or
         # fetch; continuing the same session keeps what it already did.
+        # Stop can exit 0 with the same stopReason. That one must not resume.
         session = grok.resumable_session(adapter, raw, turn_command)
+        if (
+            result.exit_code == 0
+            and grok.cancelled(adapter, raw, turn_command)
+            and cancel_event is not None
+            and cancel_event.is_set()
+        ):
+            _raise_if_cancelled(cancel_event, call_command)
         if session is None or resumes == GROK_RESUMES or result.exit_code != 0:
             break
+        _raise_if_cancelled(cancel_event, call_command)
         call_command = grok.resume_command(turn_command, session)
         call_prompt = grok.resume_prompt(turn_command)
     response = adapter.extract_response(raw)
@@ -214,6 +268,7 @@ def _execute_agent_call(
     # untracked file in the resulting stat (git diff on the working tree
     # never shows untracked files; the committed diff always does).
     message = commit_message or f"chat: {agent} turn"
+    _raise_if_cancelled(cancel_event, turn_command)
     if commit_paths is not None:
         # A caller that knows exactly what the turn is for (brainstorm) commits
         # only that, so unrelated uncommitted work stays out of its commits.
@@ -245,20 +300,24 @@ def run_turn(
     commit_message: str | None = None,
     exclude: frozenset[str] = frozenset(),
     commit_paths: list[Path] | None = None,
-    timeout_seconds: int | None = None,
+    timeout_seconds: int | _NoLimit | None = None,
     attachments: Sequence[Path] = (),
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     settings = settings if settings is not None else config.load(root)
     run_fn = run_fn if run_fn is not None else agents.run
     requested = agent
     resolved = failover.resolve_chat_agent(root, requested)
     full_prompt = _build_prompt(root, prompt)
+    # AgentCancelled propagates. It is not a failover reason, it does not
+    # write another backup override, and it does not append a chat record.
     attempt = _execute_agent_call(
         root, resolved, prompt, full_prompt, settings, run_fn,
         commit_message=commit_message,
         commit_paths=commit_paths,
         timeout_seconds=timeout_seconds,
         attachments=attachments,
+        cancel_event=cancel_event,
     )
     final_agent = resolved
     failover_notice: str | None = None
@@ -299,6 +358,7 @@ def run_turn(
             commit_paths=commit_paths,
             timeout_seconds=timeout_seconds,
             attachments=attachments,
+            cancel_event=cancel_event,
         )
         final_agent = backup
         current = backup

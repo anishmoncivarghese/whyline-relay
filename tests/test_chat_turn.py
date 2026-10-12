@@ -1,10 +1,12 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
 
-from whyline_relay import chat, chatlog, config
+from whyline_relay import chat, chatlog, config, failover
+from whyline_relay.agents import AgentCancelled, RunResult
 
 
 def _deliver(command: list[str], text: str) -> None:
@@ -535,3 +537,193 @@ def test_run_turn_gives_up_on_grok_after_its_resumes(tmp_path: Path):
     )
     assert record["ok"] is False
     assert len(calls) == 1 + chat.GROK_RESUMES
+
+
+def test_run_turn_timeout_none_still_uses_300(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    seen = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        seen.append(kwargs["timeout_seconds"])
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, timeout_seconds=None,
+    )
+    assert seen == [chat.CHAT_TIMEOUT_SECONDS]
+    assert chat.CHAT_TIMEOUT_SECONDS == 300
+
+
+@pytest.mark.parametrize("limit", [900, 1800, 2700, 3600])
+def test_an_explicit_timeout_reaches_every_failover_attempt(tmp_path: Path, limit: int):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[backup]\nchain = ["codex"]\n')
+    settings = config.load(tmp_path)
+    seen = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        seen.append(kwargs["timeout_seconds"])
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, timeout_seconds=limit,
+    )
+    assert record["agent"] == "codex"
+    assert seen == [limit, limit]
+
+
+def test_no_limit_reaches_every_failover_attempt_as_none(tmp_path: Path):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[backup]\nchain = ["codex"]\n')
+    settings = config.load(tmp_path)
+    seen = []
+    assert chat.NO_LIMIT is not None
+
+    def fake_run_fn(command, prompt, **kwargs):
+        seen.append(kwargs["timeout_seconds"])
+        if command[0] == "claude":
+            return RunResult(1, "You have exceeded your usage limit. Try again later.")
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    chat.run_turn(
+        tmp_path, agent="claude", prompt="ping", settings=settings,
+        run_fn=fake_run_fn, timeout_seconds=chat.NO_LIMIT,
+    )
+    assert seen == [None, None]
+
+
+def test_agent_cancelled_on_the_first_attempt_does_not_fail_over_or_commit(
+    tmp_path: Path,
+):
+    _init_repo(tmp_path)
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[backup]\nchain = ["codex"]\n')
+    settings = config.load(tmp_path)
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        calls.append(command[0])
+        (tmp_path / "new.txt").write_text("made by the agent\n")
+        raise AgentCancelled("claude cancelled by user")
+
+    with pytest.raises(AgentCancelled):
+        chat.run_turn(
+            tmp_path, agent="claude", prompt="add a file", settings=settings,
+            run_fn=fake_run_fn,
+        )
+    assert calls == ["claude"]
+    assert chatlog.load(tmp_path) == []
+    assert failover.read_overrides(tmp_path, failover.chat_path(tmp_path)) == {}
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "new.txt" in status
+    subjects = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "chat: claude turn" not in subjects
+    assert "chat: codex turn" not in subjects
+
+
+def test_a_set_event_after_a_normal_return_skips_commit_all(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    cancel = threading.Event()
+
+    def fake_run_fn(command, prompt, **kwargs):
+        assert kwargs["cancel_event"] is cancel
+        (tmp_path / "new.txt").write_text("made by the agent\n")
+        cancel.set()
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+
+    with pytest.raises(AgentCancelled, match="cancelled by user"):
+        chat.run_turn(
+            tmp_path, agent="claude", prompt="add a file", settings=settings,
+            run_fn=fake_run_fn, cancel_event=cancel,
+        )
+    assert chatlog.load(tmp_path) == []
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "new.txt" in status
+    subjects = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "chat: claude turn" not in subjects
+
+
+def test_a_set_event_after_a_normal_return_skips_commit_paths(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    cancel = threading.Event()
+    target = tmp_path / "only-this.txt"
+
+    def fake_run_fn(command, prompt, **kwargs):
+        target.write_text("scoped\n")
+        cancel.set()
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+
+    with pytest.raises(AgentCancelled, match="cancelled by user"):
+        chat.run_turn(
+            tmp_path, agent="claude", prompt="add a file", settings=settings,
+            run_fn=fake_run_fn, cancel_event=cancel, commit_paths=[target],
+        )
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "only-this.txt" in status
+    assert chatlog.load(tmp_path) == []
+
+
+def test_a_clear_cancel_event_still_commits(tmp_path: Path):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    cancel = threading.Event()
+
+    def fake_run_fn(command, prompt, **kwargs):
+        assert kwargs["cancel_event"] is cancel
+        (tmp_path / "new.txt").write_text("made by the agent\n")
+        return RunResult(0, '{"type":"result","result":"done"}\n')
+
+    record = chat.run_turn(
+        tmp_path, agent="claude", prompt="add a file", settings=settings,
+        run_fn=fake_run_fn, cancel_event=cancel,
+    )
+    assert record["files_changed"] == 1
+    assert "new.txt" in record["diff_stat"]
+
+
+@pytest.mark.parametrize("timeout_seconds", [0, -1])
+def test_a_non_positive_timeout_raises_and_does_not_call_run_fn(
+    tmp_path: Path, timeout_seconds: int
+):
+    _init_repo(tmp_path)
+    settings = config.load(tmp_path)
+    calls = []
+
+    def fake_run_fn(command, prompt, **kwargs):
+        calls.append(command)
+        return RunResult(0, '{"type":"result","result":"pong"}\n')
+
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        chat.run_turn(
+            tmp_path, agent="claude", prompt="ping", settings=settings,
+            run_fn=fake_run_fn, timeout_seconds=timeout_seconds,
+        )
+    assert calls == []
+    assert not (tmp_path / ".whyline" / "relay" / "claude-settings.json").exists()
