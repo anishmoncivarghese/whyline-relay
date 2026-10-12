@@ -4852,3 +4852,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 3979c55500e34daf991552f95d6c7714 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-10T19:15:15.178Z"} -->
+
+## 2026-10-12 — Release the approved RUN, RTO, and SBX work as whyline-relay 0.2.35
+
+**Actor:** codex
+**Role:** release
+**Task:** RUN-2
+
+**Because:** all required APIs are present, the full suite passes, the branch is a clean fast-forward from origin/main, and neither GitHub nor PyPI already has v0.2.35
+
+**Rejected:**
+
+- publish 0.2.34.2 — the plan reserves 0.2.35 for the combined unattended, timeout, cancellation, and sandbox-aware release
+- open 0.3 — these changes preserve the 0.2 API line and the console still pins below 0.3
+
+**Files:** pyproject.toml, docs/releases/v0.2.35.md
+
+<!-- whyline-event: 0eb56e5e205645f498c6b02a1c6009f0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-12T15:36:53.372Z"} -->
