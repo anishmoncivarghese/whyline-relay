@@ -417,3 +417,36 @@ def test_two_pipeline_roles_have_independent_overrides_even_on_the_same_backup(
     overrides = failover.read_overrides(tmp_path)
     assert overrides["drafter"].tried == ["codex"]
     assert overrides["checker"].tried == ["claude"]
+
+
+# Grok's exact output once its prepaid balance ran out (RUN-7, 2026-10-13).
+# None of the old markers matched, so the relay paused on "exited without
+# handing off" instead of switching to the backup.
+_GROK_402 = (
+    '{"type":"error","message":"Internal error: {\\n  \\"message\\": \\"API error '
+    '(status 402 Payment Required): Grok Build usage balance exhausted\\",\\n  '
+    '\\"http_status\\": 402\\n}"}\n'
+    "Error: Internal error: {\n"
+    '  "message": "API error (status 402 Payment Required): Grok Build usage balance exhausted",\n'
+    '  "http_status": 402\n'
+    "}\n"
+)
+
+
+def test_grok_out_of_paid_balance_is_a_usage_limit():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    assert failover.failover_reason(ADAPTER, _GROK_402, ["grok", "-p"]) == "rate-limit"
+
+
+def test_billing_exhaustion_wordings_are_usage_limits():
+    from whyline_relay import agents
+
+    for text in (
+        "402 Payment Required",
+        "Your credit balance is too low to access the API",
+        "insufficient_quota: You exceeded your current quota",
+        "Insufficient credits remaining",
+        "usage balance exhausted",
+    ):
+        assert agents.rate_limited(text), text

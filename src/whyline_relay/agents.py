@@ -43,6 +43,14 @@ RATE_LIMIT_MARKERS = (
     "session limit",
     "weekly limit",
     "out of credits",
+    # Prepaid balance or billing exhausted. Grok says "402 Payment Required:
+    # Grok Build usage balance exhausted", which none of the above matched.
+    "payment required",
+    "balance exhausted",
+    "credit balance is too low",
+    "insufficient credits",
+    "insufficient_quota",
+    "exceeded your current quota",
 )
 
 _terminal_lock = threading.Lock()
