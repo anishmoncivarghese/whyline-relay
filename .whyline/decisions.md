@@ -4870,3 +4870,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 0eb56e5e205645f498c6b02a1c6009f0 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-12T15:36:53.372Z"} -->
+
+## 2026-10-13 — Count billing exhaustion (402 Payment Required, balance exhausted, insufficient credits/quota) as a usage limit so failover walks the backup chain
+
+**Actor:** claude
+**Role:** implementer
+**Task:** FAILOVER-402
+
+**Because:** On 2026-10-13 Grok ran out of prepaid balance during RUN-7; its 402 text matched no RATE_LIMIT_MARKERS entry, so failover_reason returned None and the relay paused instead of switching to the saved backup
+
+**Rejected:**
+
+- Treat every no-handoff exit as a failover — an agent that simply forgot to hand off would silently be replaced and its partial work reviewed by someone else
+
+**Files:** src/whyline_relay/agents.py
+
+<!-- whyline-event: d3bc2c9f4292428cb95bb4083f84810b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-13T04:42:27.814Z"} -->
