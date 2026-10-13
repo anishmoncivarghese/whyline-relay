@@ -527,6 +527,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Task      {saved.task_id}")
     print(f"Branch    {saved.branch}")
     print(f"Plan      {saved.plan}")
+    if active is not None:
+        # The saved pause is only rewritten at the next pause or finish, so
+        # while an agent runs it is history, not the current state.
+        print(f"Last pause  {saved.paused_reason}")
+        return EXIT_OK
     print(f"Paused    {saved.paused_reason}")
     if saved.log_path:
         print(f"Log       {saved.log_path}")

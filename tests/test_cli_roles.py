@@ -54,3 +54,46 @@ def test_dry_run_uses_the_configured_implementer(tmp_path: Path, capsys, monkeyp
     would_run = next(line for line in output.splitlines() if line.startswith("Would run:"))
     assert would_run.startswith("Would run: claude ")
     assert "--from claude --to codex --status ready-for-review" in output
+
+
+def test_status_while_running_does_not_offer_the_old_pause_as_current(
+    tmp_path: Path, capsys
+):
+    from whyline_relay import state
+
+    state.save(
+        tmp_path,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/x",
+            task_id="T-1",
+            round=1,
+            base_commit="abc",
+            paused_reason="agy exceeded 1800s and was terminated",
+            log_path="log.txt",
+        ),
+    )
+    write_marker(tmp_path, agent="antigravity", role="implementer")
+
+    assert cli.main(["status", "--repo", str(tmp_path)]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert out.startswith("Running: antigravity implementing T-1")
+    assert "Paused    " not in out
+    assert "Resume with" not in out
+    assert "Last pause  agy exceeded 1800s and was terminated" in out
+
+
+def test_status_when_paused_still_shows_the_pause_and_resume(tmp_path: Path, capsys):
+    from whyline_relay import state
+
+    state.save(
+        tmp_path,
+        state.RelayState(
+            plan="plan.md", branch="relay/x", task_id="T-1", round=1,
+            base_commit="abc", paused_reason="stopped", log_path="",
+        ),
+    )
+    assert cli.main(["status", "--repo", str(tmp_path)]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Paused    stopped" in out
+    assert "Resume with" in out
