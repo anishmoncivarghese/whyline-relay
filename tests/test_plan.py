@@ -85,3 +85,36 @@ def test_relay_profile_directive_is_parsed():
 def test_relay_profile_directive_requires_a_name():
     content = "- [ ] T-1: build the thing\n  relay-profile:\n"
     assert plan.parse(content)[0].profile is None
+
+
+def test_ids_since_previous_release_is_the_open_interval_above_the_task():
+    tasks = plan.parse(
+        "- [x] EARLY: before\n"
+        "- [x] REL-0: first ship\n"
+        "  relay-profile: release\n"
+        "- [ ] MID-1: one\n"
+        "- [ ] VER-0: earlier check\n"
+        "  relay-profile: verify\n"
+        "- [ ] MID-2: two\n"
+        "- [ ] VER-1: check\n"
+        "  relay-profile: verify\n"
+        "- [ ] GAP: between verify and the next release\n"
+        "- [ ] REL-1: second ship\n"
+        "  relay-profile: release\n"
+        "- [ ] LATE: after\n"
+    )
+    assert plan.ids_since_previous_release(tasks, "VER-1") == [
+        "MID-1",
+        "VER-0",
+        "MID-2",
+    ]
+    assert plan.ids_since_previous_release(tasks, "REL-1") == [
+        "MID-1",
+        "VER-0",
+        "MID-2",
+        "VER-1",
+        "GAP",
+    ]
+    assert plan.ids_since_previous_release(tasks, "REL-0") == ["EARLY"]
+    assert plan.ids_since_previous_release(tasks, "EARLY") == []
+    assert plan.ids_since_previous_release(tasks, "NOPE") == []

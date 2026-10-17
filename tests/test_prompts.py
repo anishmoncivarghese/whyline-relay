@@ -106,6 +106,59 @@ def test_plan_draft_and_plan_review_are_built_in_templates(tmp_path):
     assert prompts.load(tmp_path, "plan-review") == prompts.PLAN_REVIEW
 
 
+def test_plan_tests_is_a_built_in_template(tmp_path):
+    text = prompts.load(tmp_path, "plan-tests")
+    assert text == prompts.PLAN_TESTS
+    assert "draft-plan.tests.md" in text
+    assert "draft-plan.md" in text
+    assert "kind: auto" in text
+    assert "kind: manual" in text
+    assert "happy path" in text
+    assert "crash, offline, dirty repository, stale input" in text
+    assert "Do not write code." in text
+    assert "{task_text}" in text
+
+
+def test_brainstorm_test_plan_prompt_lists_every_criterion_and_shares_plan_tests_rules():
+    criteria = [
+        "the cache evicts the oldest key",
+        "a missing key returns None",
+        "a concurrent write does not corrupt the map",
+    ]
+    text = prompts.brainstorm_test_plan_prompt(
+        shared_path="notes.md",
+        draft_path="draft.md",
+        test_path="draft.tests.md",
+        criteria=criteria,
+    )
+    assert "notes.md" in text
+    assert "draft.md" in text
+    assert "draft.tests.md" in text
+    for item in criteria:
+        assert item in text
+    assert "at least one scenario" in text
+    assert "kind: auto" in text
+    assert "kind: manual" in text
+    assert "happy path" in text
+    assert "crash, offline, dirty repository, stale input" in text
+    assert "Do not write code." in text
+    assert "testplan.validate" in text
+
+
+def test_test_planner_addenda_stay_out_of_the_base_plan_prompts():
+    assert "relay-profile: verify" not in prompts.PLAN_DRAFT
+    assert "testplan.validate" not in prompts.PLAN_REVIEW
+    assert "naming the scenarios it must automate" in prompts.PLAN_DRAFT_TEST_ADDENDUM
+    assert "relay-profile: verify" in prompts.PLAN_DRAFT_TEST_ADDENDUM
+    assert "testplan.validate" in prompts.PLAN_REVIEW_TEST_ADDENDUM
+    assert "treat every problem as a reason to revise" in prompts.PLAN_REVIEW_TEST_ADDENDUM
+    assert "before its release task" in prompts.PLAN_REVIEW_TEST_ADDENDUM
+    assert "revise-tests" in prompts.PLAN_REVIEW_TEST_ADDENDUM
+    assert prompts.planner_test_addendum("draft") == prompts.PLAN_DRAFT_TEST_ADDENDUM
+    assert prompts.planner_test_addendum("review") == prompts.PLAN_REVIEW_TEST_ADDENDUM
+    assert prompts.planner_test_addendum("tests") == ""
+
+
 def test_the_planner_templates_use_the_configured_pipeline_placeholders():
     for template in (prompts.PLAN_DRAFT, prompts.PLAN_REVIEW):
         rendered = prompts.render(
@@ -344,3 +397,37 @@ def test_repository_footer_shows_task_repo_commands_without_cd(tmp_path):
     assert f"uv run --directory {quoted} pytest" in footer
     assert f"git -C {quoted} diff" in footer
     assert "`cd " not in footer
+
+
+class _Scenario:
+    def __init__(self, scenario_id, title, covers, steps, expected):
+        self.id = scenario_id
+        self.title = title
+        self.covers = covers
+        self.steps = steps
+        self.expected = expected
+
+
+def test_verify_task_addendum_lists_only_the_scenarios_it_is_given():
+    text = prompts.verify_task_addendum(
+        [_Scenario("TP-1", "Cache evicts", ("WL-1", "WL-2"), ("write",), ("gone",))],
+        test_plan="plan.tests.md",
+    )
+    assert "### TP-1: Cache evicts" in text
+    assert "TP-2" not in text
+    assert "tests/acceptance/" in text
+    assert "named after its scenario id" in text
+    assert "ready only when those tests pass" in text
+    assert "kind: manual" in text
+    assert "plan.tests.md" in text
+    assert "not skipped" in text
+    assert "covers: WL-1, WL-2" in text
+    assert "- write" in text
+    assert "- gone" in text
+
+
+def test_verify_task_addendum_with_nothing_in_range_names_no_scenario():
+    text = prompts.verify_task_addendum((), test_plan="plan.tests.md")
+    assert "### " not in text
+    assert "no automatic scenarios in this range" in text
+    assert "tests/acceptance/" in text

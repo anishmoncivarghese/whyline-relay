@@ -503,6 +503,53 @@ def test_read_backup_broken_file_raises_config_error(tmp_path: Path):
         setup.read_backup(repo)
 
 
+def _outside_planner(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    kept: list[str] = []
+    skipping = False
+    for line in lines:
+        if line.strip() == "[planner]":
+            skipping = True
+            continue
+        if skipping and line.lstrip().startswith("["):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "".join(kept)
+
+
+def test_write_planner_sets_test_and_leaves_every_other_table(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    path = _relay_config(repo)
+    before = path.read_text()
+    setup.write_planner(repo, "claude", "codex", "claude")
+    after = path.read_text()
+    assert config.load(repo).planner == config.PlannerConfig(
+        draft="claude", review="codex", max_visits=4, test="claude"
+    )
+    assert _outside_planner(after) == _outside_planner(before)
+    assert 'test = "claude"' in after
+    assert "max_visits = 4" in after
+    assert "[pipeline]\n" in after
+    assert "[backup]\n" in after
+    assert "[agents.aider]\n" in after
+    assert _git(repo, "log", "-1", "--format=%s") == (
+        "setup: plans drafted by claude, tested by claude, reviewed by codex\n"
+    )
+
+
+def test_write_planner_empty_test_writes_an_empty_key(tmp_path: Path):
+    repo = _repo_with_config(tmp_path)
+    setup.write_planner(repo, "claude", "codex", "")
+    text = _relay_config(repo).read_text()
+    assert config.load(repo).planner.test == ""
+    assert 'test = ""' in text
+    assert "max_visits = 4" in text
+    assert _git(repo, "log", "-1", "--format=%s") == (
+        "setup: plans drafted by claude, reviewed by codex\n"
+    )
+
+
 def test_write_backup_changes_the_chain_and_leaves_other_tables(tmp_path: Path):
     repo = _repo_with_config(tmp_path)
     path = _relay_config(repo)

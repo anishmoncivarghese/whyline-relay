@@ -1,5 +1,8 @@
+import errno
 import json
 from pathlib import Path
+
+import pytest
 
 from whyline_relay import state
 
@@ -199,3 +202,73 @@ def test_plan_state_and_relay_state_live_at_different_paths(tmp_path: Path):
     assert state.path(tmp_path) != state.plan_path(tmp_path)
     assert state.load(tmp_path) == sample()
     assert state.load_plan(tmp_path) == sample_plan()
+
+
+@pytest.mark.parametrize("errno_code", [errno.ENOSPC, errno.EDQUOT])
+def test_save_on_a_full_disk_keeps_the_old_file_and_raises(
+    tmp_path: Path, monkeypatch, errno_code: int
+):
+    original = sample()
+    state.save(tmp_path, original)
+    target = state.path(tmp_path)
+    before = target.read_bytes()
+    real_write = Path.write_text
+
+    def full(self, data, *args, **kwargs):
+        if self.name.endswith(".json.tmp"):
+            real_write(self, "partial", encoding="utf-8")
+            raise OSError(errno_code, "No space left on device")
+        return real_write(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", full)
+    replacement = state.RelayState(
+        plan=original.plan,
+        branch=original.branch,
+        task_id="WL-9",
+        round=1,
+        base_commit=original.base_commit,
+        paused_reason="other",
+        log_path=original.log_path,
+    )
+    with pytest.raises(state.DiskFull) as raised:
+        state.save(tmp_path, replacement)
+    assert target.read_bytes() == before
+    assert state.load(tmp_path) == original
+    assert list(target.parent.glob("*.json.tmp")) == []
+    assert raised.value.path == target
+    assert raised.value.free_bytes >= 0
+
+
+def test_save_plan_on_a_full_disk_keeps_the_old_file_and_raises(
+    tmp_path: Path, monkeypatch
+):
+    original = sample_plan()
+    state.save_plan(tmp_path, original)
+    target = state.plan_path(tmp_path)
+    before = target.read_bytes()
+    real_write = Path.write_text
+
+    def full(self, data, *args, **kwargs):
+        if self.name.endswith(".json.tmp"):
+            real_write(self, "partial", encoding="utf-8")
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", full)
+    replacement = state.PlanState(
+        description="something else",
+        stage=original.stage,
+        round=original.round,
+        stage_visits=original.stage_visits,
+        agent=original.agent,
+        feedback=original.feedback,
+        draft_path=original.draft_path,
+        paused_reason=original.paused_reason,
+        log_path=original.log_path,
+    )
+    with pytest.raises(state.DiskFull) as raised:
+        state.save_plan(tmp_path, replacement)
+    assert target.read_bytes() == before
+    assert state.load_plan(tmp_path) == original
+    assert list(target.parent.glob("*.json.tmp")) == []
+    assert raised.value.path == target

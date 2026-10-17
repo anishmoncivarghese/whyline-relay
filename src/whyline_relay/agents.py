@@ -51,7 +51,31 @@ RATE_LIMIT_MARKERS = (
     "insufficient credits",
     "insufficient_quota",
     "exceeded your current quota",
+    # Antigravity's quota line on 2026-10-17 matched none of the above:
+    # "RESOURCE_EXHAUSTED (code 429): Individual quota reached."
+    "quota reached",
+    "resource_exhausted",
+    "code 429",
+    "429 too many requests",
+    "upgrade your subscription to increase your limits",
 )
+
+# A model that is briefly out of capacity, not a usage limit. These clear in
+# minutes, so a match must not become a sticky switch.
+OVERLOAD_MARKERS = (
+    "model is at capacity",
+    "selected model is at capacity",
+    "503 service unavailable",
+    "service unavailable",
+    "overloaded",
+    "overloaded_error",
+    "529",
+    "server is busy",
+)
+
+# Below this, preflight and each agent turn report a FAIL. disk_usage counts
+# bytes, so the floor is a gibibyte.
+DISK_FLOOR_BYTES = 1024 ** 3
 
 _terminal_lock = threading.Lock()
 
@@ -84,6 +108,19 @@ def build_argv(command: list[str], prompt: str) -> list[str]:
 def rate_limited(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in RATE_LIMIT_MARKERS)
+
+
+def overloaded(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in OVERLOAD_MARKERS)
+
+
+def low_disk_message(free_bytes: int) -> str | None:
+    """The FAIL line when `free_bytes` is under 1 GB, else None."""
+    if free_bytes >= DISK_FLOOR_BYTES:
+        return None
+    mb = free_bytes // (1024 * 1024)
+    return f"disk has {mb} MB free; the relay needs at least 1 GB"
 
 
 def format_duration(seconds: float) -> str:

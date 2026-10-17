@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 import shlex
 
@@ -261,6 +262,78 @@ Send back a draft whose release, publish, tag or deploy tasks lack
 Exactly one of the outcomes listed below.
 """
 
+# Appended only when a Test planner is configured, after the unchanged
+# plan-draft / plan-review templates. An empty `test` never includes these.
+PLAN_DRAFT_TEST_ADDENDUM = """
+## Test planner
+
+Put a task with `relay-profile: verify` immediately before every `relay-profile: release` task, naming the scenarios it must automate.
+"""
+
+PLAN_REVIEW_TEST_ADDENDUM = """
+## Test plan
+
+Review both `.whyline/relay/draft-plan.md` and `.whyline/relay/draft-plan.tests.md`.
+Run `testplan.validate` on the test plan against the plan and treat every problem as a reason to revise.
+Check that every phase of the plan ends with a `relay-profile: verify` task before its release task.
+Hand off `revise` when the plan should change, and `revise-tests` when the test plan should change.
+"""
+
+# Shared by PLAN_TESTS and the brainstorm Test planner turn so the format
+# and coverage rules cannot drift between the two paths.
+PLAN_TESTS_RULES = """Each scenario is a Markdown checkbox with indented detail:
+
+- [ ] TP-<n>: <title>
+  covers: <task id>, <task id>
+  kind: auto
+  steps:
+    - <one step the checker performs>
+  expected:
+    - <what a passing check shows>
+
+`kind: auto` is for behaviour a test can check. `kind: manual` is for anything
+on screen or on another device. For each feature, write a happy path, edge
+cases, and failure cases (crash, offline, dirty repository, stale input).
+Do not write code.
+
+A plan task you deliberately leave without a scenario needs a top-level line
+`not-covered: <task id> — <reason>`. Tasks marked `relay-profile: release` or
+`relay-profile: verify` need no scenario.
+"""
+
+PLAN_TESTS = """{sync_packet}
+
+You are writing the test plan for a drafted plan. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to write the test plan
+
+The request is the task text above. Read `.whyline/relay/draft-plan.md` in full.
+That file is the draft plan. Write `.whyline/relay/draft-plan.tests.md` beside it.
+
+""" + PLAN_TESTS_RULES + """
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --file .whyline/relay/draft-plan.tests.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+test plan, hand off blocked with one --question per decision, and put the choices
+in the question itself, e.g. "Which broker? (a) Kite (b) Upstox". Don't ask about
+anything you can reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
 SPEC_DRAFT = """{sync_packet}
 
 You are drafting a design spec. Round {round}.
@@ -350,9 +423,79 @@ TEMPLATES = {
     "security": SECURITY,
     "plan-draft": PLAN_DRAFT,
     "plan-review": PLAN_REVIEW,
+    "plan-tests": PLAN_TESTS,
     "spec-draft": SPEC_DRAFT,
     "spec-review": SPEC_REVIEW,
 }
+
+
+def planner_test_addendum(stage_id: str) -> str:
+    """Extra draft or review instructions used only when a Test planner is set."""
+    if stage_id == "draft":
+        return PLAN_DRAFT_TEST_ADDENDUM
+    if stage_id == "review":
+        return PLAN_REVIEW_TEST_ADDENDUM
+    return ""
+
+
+def brainstorm_test_plan_prompt(
+    *,
+    shared_path: Path | str,
+    draft_path: Path | str,
+    test_path: Path | str,
+    criteria: Sequence[str],
+) -> str:
+    """The Test planner turn after a brainstorm plan draft.
+
+    Same format and coverage rules as PLAN_TESTS. Lists every success or
+    acceptance criterion the synthesis stated so each becomes a scenario.
+    """
+    if criteria:
+        listed = "\n".join(f"- {item}" for item in criteria)
+    else:
+        listed = (
+            "(none listed as a list; still cover every success or "
+            "acceptance criterion the synthesis states)"
+        )
+    return (
+        f"Read {shared_path} in full, especially its \"## Final Synthesis\" "
+        f"section, and read the draft plan at {draft_path} in full. Write a "
+        f"test plan at {test_path} beside the draft.\n\n"
+        "Every success or acceptance criterion the synthesis states must "
+        "become at least one scenario. The synthesis states these:\n"
+        f"{listed}\n\n"
+        f"{PLAN_TESTS_RULES}"
+        "Run `testplan.validate` on the test plan against the plan and treat "
+        "every problem as a reason to revise."
+    )
+
+
+def verify_task_addendum(scenarios: Sequence[object], *, test_plan: str) -> str:
+    """Instructions and in-range automatic scenarios for a verify task.
+
+    `scenarios` is already filtered. Each item needs `id`, `title`, `covers`,
+    `steps`, and `expected`. The text names only those scenarios.
+    """
+    blocks: list[str] = []
+    for scenario in scenarios:
+        steps = "\n".join(f"- {step}" for step in scenario.steps)
+        expected = "\n".join(f"- {item}" for item in scenario.expected)
+        blocks.append(
+            f"### {scenario.id}: {scenario.title}\n"
+            f"covers: {', '.join(scenario.covers)}\n"
+            f"steps:\n{steps}\n"
+            f"expected:\n{expected}"
+        )
+    listed = "\n\n".join(blocks) if blocks else "(no automatic scenarios in this range)"
+    return (
+        "\n\n## Automatic scenarios\n\n"
+        "Turn each automatic scenario below into an automated test under "
+        "`tests/acceptance/` named after its scenario id, and run it. This task "
+        "is ready only when those tests pass. A scenario that cannot be "
+        f"automated must be changed to `kind: manual` in `{test_plan}` with the "
+        "reason, not skipped.\n\n"
+        f"{listed}\n"
+    )
 
 
 def prompts_dir(root: Path) -> Path:

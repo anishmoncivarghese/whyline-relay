@@ -44,6 +44,7 @@ class PlannerConfig:
     draft: str = "codex"
     review: str = "claude"
     max_visits: int = 3
+    test: str = ""
 
 
 def _pipeline_fingerprint(raw_pipeline: dict) -> str:
@@ -441,10 +442,17 @@ def load(root: Path) -> Config:
         or planner_max_visits < 1
     ):
         raise ConfigError("[planner] max_visits must be a positive integer")
+    # Missing, or an explicit empty string, means no Test planner. Any other
+    # value is an agent name, checked the same way as draft and review.
+    if "test" not in raw_planner or raw_planner["test"] == "":
+        planner_test = ""
+    else:
+        planner_test = _planner_agent("test", "")
     planner_cfg = PlannerConfig(
         draft=_planner_agent("draft", default_draft),
         review=_planner_agent("review", default_review),
         max_visits=planner_max_visits,
+        test=planner_test,
     )
 
     if "timeout_minutes" in raw:

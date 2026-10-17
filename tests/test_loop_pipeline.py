@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import re
 import subprocess
@@ -685,3 +686,328 @@ def test_a_pipeline_stage_switches_to_the_chain_backup_on_no_handoff(
     overrides = failover.read_overrides(repo)
     assert overrides["solo"].agent == "aider"
     assert overrides["solo"].tried == ["codex"]
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _commit(root: Path, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", message], cwd=root, check=True, capture_output=True
+    )
+
+
+def _scenario(scenario_id: str, covers: str, *, kind: str = "auto", note: str = "") -> str:
+    lines = [
+        f"- [ ] {scenario_id}: {scenario_id} title",
+        f"  covers: {covers}",
+        f"  kind: {kind}",
+        "  steps:",
+        f"    - run {scenario_id}",
+        "  expected:",
+        f"    - {scenario_id} holds",
+    ]
+    if note:
+        lines.append(f"  note: {note}")
+    return "\n".join(lines)
+
+
+_PHASE_PLAN = """\
+- [x] EARLY: before the release
+  Already shipped.
+- [x] REL-0: previous release
+  relay-profile: release
+- [x] MID-1: in range
+  Do the first half.
+- [x] MID-2: also in range
+  Do the second half.
+- [ ] VER-1: verify the phase
+  relay-profile: verify
+- [ ] GAP: after the verify task
+  Not part of this verify.
+- [ ] REL-1: next release
+  relay-profile: release
+- [ ] LATE: after the release
+  Belongs to the next phase.
+"""
+
+
+def _phase_tests() -> str:
+    parts = [
+        _scenario("TP-EARLY", "EARLY"),
+        _scenario("TP-MID", "MID-1", note="keep"),
+        _scenario("TP-SCREEN", "MID-1", kind="manual"),
+        _scenario("TP-MID2", "MID-1, MID-2"),
+        _scenario("TP-GAP", "GAP"),
+        _scenario("TP-SPAN", "MID-2, LATE"),
+        _scenario("TP-LATE", "LATE"),
+    ]
+    return "\n".join(parts) + "\n"
+
+
+def _listed(prompt: str) -> list[str]:
+    return re.findall(r"(?m)^### (\S+):", prompt)
+
+
+def _capturing_run(specs: list[str], captured: list[str], *, edit: Path | None = None):
+    base = _scripted_run(specs)
+    edited = {"done": False}
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+        cancel_event=None,
+        env=None,
+    ):
+        captured.append(prompt)
+        if edit is not None and not edited["done"]:
+            edit.write_text(edit.read_text().replace("note: keep", "note: needs a device"))
+            edited["done"] = True
+        return base(
+            command,
+            prompt,
+            cwd=cwd,
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            which=which,
+            echo=echo,
+            agent_name=agent_name,
+            cancel_event=cancel_event,
+            env=env,
+        )
+
+    return run
+
+
+def _task_commit(root: Path, task_id: str) -> str:
+    needle = f"({task_id})"
+    for line in _git(root, "log", "--pretty=format:%H %s").splitlines():
+        sha, subject = line.split(" ", 1)
+        if needle in subject and not subject.startswith("chore: tick"):
+            return sha
+    raise AssertionError(_git(root, "log", "--pretty=format:%s"))
+
+
+def test_verify_prompt_lists_exactly_the_in_range_auto_scenarios(repo, monkeypatch):
+    (repo / "plan.md").write_text(_PHASE_PLAN)
+    tests = repo / "plan.tests.md"
+    tests.write_text(_phase_tests())
+    _commit(repo, "plan")
+    captured: list[str] = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _capturing_run(
+            ["claude:ready", "claude:passed", "claude:approved"],
+            captured,
+            edit=tests,
+        ),
+    )
+    outcomes = loop.run_plan(
+        repo,
+        settings_with_pipeline(repo, make_pipeline()),
+        repo / "plan.md",
+        branch="main",
+        only="VER-1",
+        echo=False,
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["VER-1"]
+    assert len(captured) == 3
+    for prompt in captured:
+        assert _listed(prompt) == ["TP-MID", "TP-MID2", "TP-SPAN"]
+        assert "TP-EARLY" not in prompt
+        assert "TP-SCREEN" not in prompt
+        assert "TP-GAP" not in prompt
+        assert "TP-LATE" not in prompt
+        assert "tests/acceptance/" in prompt
+        assert "named after its scenario id" in prompt
+        assert "ready only when those tests pass" in prompt
+        assert "kind: manual" in prompt
+        assert "not skipped" in prompt
+        assert "profile: full" in prompt
+    sha = _task_commit(repo, "VER-1")
+    assert "plan.tests.md" in _git(repo, "show", "--name-only", "--pretty=format:", sha).split()
+    assert "needs a device" in _git(repo, "show", f"{sha}:plan.tests.md")
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_verify_without_a_test_plan_runs_as_an_ordinary_task(repo, monkeypatch):
+    (repo / "plan.md").write_text(
+        "- [ ] VER-1: verify the phase\n"
+        "  relay-profile: verify\n"
+        "  Check it.\n"
+        "- [ ] PLAIN: an ordinary task\n"
+        "  Do it.\n"
+    )
+    _commit(repo, "plan")
+    captured: list[str] = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _capturing_run(
+            ["claude:ready", "claude:passed", "claude:approved"],
+            captured,
+        ),
+    )
+    outcomes = loop.run_plan(
+        repo,
+        settings_with_pipeline(repo, make_pipeline()),
+        repo / "plan.md",
+        branch="main",
+        only="VER-1",
+        echo=False,
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["VER-1"]
+    assert len(captured) == 3
+    for prompt in captured:
+        assert "Automatic scenarios" not in prompt
+        assert "tests/acceptance/" not in prompt
+        assert "kind: manual" not in prompt
+        assert "profile: full" in prompt
+    assert "- [x] VER-1" in (repo / "plan.md").read_text()
+    assert "plan.tests.md" not in _git(repo, "log", "--name-only", "--pretty=format:")
+
+
+def _commit_one_file_then(path: Path, message: str, specs: list[str], contents: str):
+    """First agent turn commits exactly `path`, then the scripted handoffs run."""
+    scripted = _scripted_run(specs)
+    committed = {"done": False}
+
+    def run(command, prompt, **kwargs):
+        if not committed["done"]:
+            committed["done"] = True
+            cwd = kwargs["cwd"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents)
+            relative = path.resolve().relative_to(Path(cwd).resolve())
+            subprocess.run(
+                ["git", "add", "--", str(relative)],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+            )
+        return scripted(command, prompt, **kwargs)
+
+    return run
+
+
+def test_a_config_only_commit_during_a_task_moves_the_base(repo, monkeypatch, capsys):
+    config_path = repo / ".whyline" / "relay" / "config.toml"
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _commit_one_file_then(
+            config_path,
+            "setup: backup chain grok",
+            ["claude:ready", "claude:passed", "claude:approved"],
+            'plan = "plan.md"\n',
+        ),
+    )
+    outcome = loop.run_task(
+        repo,
+        settings_with_pipeline(repo, make_pipeline()),
+        TASK,
+        base_commit=head(repo),
+        echo=True,
+    )
+    assert outcome.committed is True
+    settings_sha = next(
+        line.split(" ", 1)[0]
+        for line in _git(repo, "log", "--pretty=format:%H %s").splitlines()
+        if "setup: backup chain grok" in line
+    )
+    task_sha = _task_commit(repo, "T-1")
+    assert _git(repo, "rev-parse", "--verify", f"{task_sha}^").strip() == settings_sha
+    short = settings_sha[:7]
+    assert (
+        f"Settings changed during T-1 ({short} setup: backup chain grok); "
+        f"continuing from {short}."
+        in capsys.readouterr().out
+    )
+    names = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", settings_sha)
+    assert names.split() == [".whyline/relay/config.toml"]
+
+
+def test_a_commit_touching_any_other_file_still_pauses(repo, monkeypatch):
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _commit_one_file_then(
+            repo / "README.md",
+            "feat: not settings",
+            ["claude:ready"],
+            "changed\n",
+        ),
+    )
+    with pytest.raises(loop.Paused, match="only the relay itself commits"):
+        loop.run_task(
+            repo,
+            settings_with_pipeline(repo, make_pipeline()),
+            TASK,
+            base_commit=head(repo),
+            echo=False,
+        )
+
+
+def test_overload_uses_the_backup_for_one_turn_then_the_configured_agent(
+    repo, monkeypatch, capsys
+):
+    from whyline_relay import failover
+
+    specs = [
+        "claude:ready",
+        "claude:passed",
+        "codex:rejected",
+        "claude:ready",
+        "claude:passed",
+        "claude:approved",
+    ]
+    scripted = _scripted_run(specs)
+    seen: list[str] = []
+    overloaded = {"done": False}
+
+    def run(command, prompt, **kwargs):
+        agent_name = kwargs.get("agent_name")
+        seen.append(agent_name)
+        if agent_name == "codex" and not overloaded["done"]:
+            overloaded["done"] = True
+            log_path = kwargs["log_path"]
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("Selected model is at capacity\n")
+            return 1
+        return scripted(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    settings = dataclasses.replace(
+        settings_with_pipeline(repo, make_pipeline()),
+        agents={"codex": ["codex"], "claude": ["claude"], "grok": ["grok"]},
+        adapters={"grok": "generic"},
+        backup_chain=["grok"],
+    )
+    outcome = loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=True)
+    assert outcome.committed is True
+    assert seen == ["codex", "grok", "claude", "claude", "codex", "claude", "claude"]
+    assert failover.read_overrides(repo) == {}
+    assert not (repo / ".whyline" / "relay" / "active-roles.json").exists()
+    assert failover.pipeline_effective_agent(repo, settings, "implementer") == "codex"
+    assert (
+        "codex: model at capacity; using grok for this turn"
+        in capsys.readouterr().out
+    )

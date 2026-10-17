@@ -152,7 +152,7 @@ def test_an_unauthenticated_implementer_switches_to_its_backup(
     )
     monkeypatch.setattr(
         loop.failover,
-        "failover_reason",
+        "classify",
         lambda adapter, text, command, runner=None: "auth",
     )
     base = loop.gitcheck.head_commit(repo)
@@ -297,6 +297,136 @@ def test_chain_exhaustion_pauses_with_a_distinct_message(repo, tmp_path):
     assert "every backup in the chain is unavailable" in str(excinfo.value)
     assert "codex" in str(excinfo.value)
     assert "aider" in str(excinfo.value)
+
+
+QUOTA = '''#!/usr/bin/env python3
+import sys
+print("RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 158h14m22s.")
+sys.exit(1)
+'''
+
+OVERLOAD = '''#!/usr/bin/env python3
+import sys
+print("Selected model is at capacity")
+sys.exit(1)
+'''
+
+
+def test_antigravity_quota_switches_to_the_first_backup_and_stores_the_reset(
+    repo, tmp_path
+):
+    from datetime import datetime, timedelta
+
+    limited = tmp_path / "quota.py"
+    limited.write_text(QUOTA)
+    settings = settings_with_backup(
+        repo,
+        [sys.executable, str(limited)],
+        "aider",
+        [
+            sys.executable, FAKE, str(repo), "aider", "claude",
+            "ready-for-review", "no",
+        ],
+        ["aider"],
+    )
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    override = failover.read_overrides(repo)["implementer"]
+    assert override.agent == "aider"
+    assert override.reason == "rate-limit"
+    reset = datetime.fromisoformat(override.resets_at)
+    remaining = reset - datetime.now(reset.tzinfo)
+    assert timedelta(hours=158, minutes=10) < remaining < timedelta(hours=158, minutes=20)
+
+
+def test_overload_hands_the_turn_to_the_backup_without_a_sticky_override(
+    repo, tmp_path, monkeypatch, capsys
+):
+    overloaded = tmp_path / "over.py"
+    overloaded.write_text(OVERLOAD)
+    seen = []
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        seen.append(kwargs.get("agent_name"))
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    settings = settings_with_backup(
+        repo,
+        [sys.executable, str(overloaded)],
+        "aider",
+        [
+            sys.executable, FAKE, str(repo), "aider", "claude",
+            "ready-for-review", "no",
+        ],
+        ["aider"],
+    )
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=True)
+    assert outcome.committed
+    # codex overloads, aider takes that turn, and the review stays on claude.
+    assert seen[:3] == ["codex", "aider", "claude"]
+    assert failover.read_overrides(repo) == {}
+    assert (
+        "codex: model at capacity; using aider for this turn"
+        in capsys.readouterr().out
+    )
+
+
+def test_overload_with_an_exhausted_chain_pauses_for_capacity(repo, tmp_path):
+    overloaded = tmp_path / "over.py"
+    overloaded.write_text(OVERLOAD)
+    settings = settings_with_backup(
+        repo,
+        [sys.executable, str(overloaded)],
+        "aider",
+        [sys.executable, str(overloaded)],
+        ["aider"],
+    )
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    reason = raised.value.reason
+    assert reason == (
+        "aider hit a temporary capacity error (Selected model is at capacity); "
+        "resume in a few minutes or change its model"
+    )
+    assert "every backup in the chain is unavailable" not in reason
+    assert failover.read_overrides(repo) == {}
+
+
+def test_overload_with_no_backup_pauses_for_capacity(repo, tmp_path):
+    overloaded = tmp_path / "over.py"
+    overloaded.write_text(OVERLOAD)
+    base_settings = config.load(repo)
+    settings = replace(
+        base_settings,
+        agents={**base_settings.agents, "codex": [sys.executable, str(overloaded)]},
+    )
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert raised.value.reason == (
+        "codex hit a temporary capacity error (Selected model is at capacity); "
+        "resume in a few minutes or change its model"
+    )
+
+
+def test_a_turn_fails_when_the_volume_has_under_1gb_free(repo, monkeypatch):
+    class Usage:
+        total = 0
+        used = 0
+        free = 12 * 1024 * 1024
+
+    monkeypatch.setattr(loop.shutil, "disk_usage", lambda path: Usage())
+    settings = config.load(repo)
+    with pytest.raises(
+        loop.Paused,
+        match="disk has 12 MB free; the relay needs at least 1 GB",
+    ):
+        loop.run_task(repo, settings, TASK, base_commit=loop.gitcheck.head_commit(repo), echo=False)
 
 
 def test_no_chain_configured_pauses_exactly_as_before(repo, tmp_path):

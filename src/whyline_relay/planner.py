@@ -1,6 +1,10 @@
 """The planner: drafts a plan.md from a free-text description via its own small
 draft<->review pipeline, then a human approval gate.
 
+When ``[planner] test`` names an agent, a tests stage sits between draft and
+review, and approval also commits the test plan beside the plan. With no Test
+planner, the pipeline, prompts, and approve stay as they are without one.
+
 Reuses pipeline.py's Role/Stage/Profile/Pipeline engine and loop.py's run_agent/
 check_visit_cap -- shared, not duplicated, since both were already shared
 between _run_task and _run_configured_task before this module became a third
@@ -19,7 +23,7 @@ from pathlib import Path
 
 from whyline_relay import config, failover, gitcheck, handoff, init, invocation
 from whyline_relay import pipeline as pipeline_module
-from whyline_relay import plan, prompts, running, state, whylinecmd
+from whyline_relay import plan, prompts, running, state, testplan, whylinecmd
 from whyline_relay import loop
 
 
@@ -74,7 +78,8 @@ def approve(
 ) -> Path:
     """Write and commit the plan plus any decision history produced drafting it.
 
-    Raises plan.PlanError for a draft that isn't usable, and PlanExists when a
+    Raises plan.PlanError for a draft that isn't usable, or, when a Test planner
+    is set, for a missing or invalid draft test plan. Raises PlanExists when a
     plan is already there and ``replace`` is false. Other dirty paths remain
     untouched.
     """
@@ -86,14 +91,21 @@ def approve(
     target = target if named else root / settings.plan
     if target.exists() and not replace:
         raise PlanExists(f"{target} already exists")
+    test_text = _approved_test_plan(settings, draft_path, text)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
+    paths = [target, root / ".whyline" / "decisions.md"]
+    if test_text is not None:
+        test_target = testplan.path_for(target)
+        test_target.parent.mkdir(parents=True, exist_ok=True)
+        test_target.write_text(test_text, encoding="utf-8")
+        paths = [target, test_target, root / ".whyline" / "decisions.md"]
     if named:
         shown = target.relative_to(root).as_posix() if target.is_relative_to(root) else str(target)
         message = f"docs: add plan {shown} drafted by {drafted_by}"
     else:
         message = f"docs: add plan drafted by {drafted_by}"
-    gitcheck.commit_paths(root, [target, root / ".whyline" / "decisions.md"], message)
+    gitcheck.commit_paths(root, paths, message)
     if clear_checkpoint:
         state.clear_plan(root)
     return target
@@ -103,8 +115,31 @@ def draft_path(root: Path, kind: _Kind = PLAN_KIND) -> Path:
     return config.relay_dir(root) / kind.draft_name
 
 
+def _approved_test_plan(
+    settings: config.Config, draft_path: Path, plan_text: str
+) -> str | None:
+    """The draft test plan to commit beside the plan, or None when no Test planner.
+
+    Raises plan.PlanError before anything is written. An empty ``test`` returns
+    None without reading a test plan, so approve's writes stay as they are today.
+    """
+    if not settings.planner.test:
+        return None
+    source = testplan.path_for(draft_path)
+    if not source.is_file():
+        raise plan.PlanError(f"no test plan at {source}")
+    test_text = source.read_text(encoding="utf-8")
+    problems = testplan.validate(test_text, plan_text)
+    if problems:
+        raise plan.PlanError("; ".join(problems))
+    return test_text
+
+
 def _pipeline_for(settings: config.Config, kind: _Kind = PLAN_KIND) -> pipeline_module.Pipeline:
     cfg = settings.planner
+    # A spec has no test plan. Only a plan grows the tests stage.
+    if cfg.test and kind == PLAN_KIND:
+        return _plan_pipeline_with_tests(cfg, kind)
     return pipeline_module.Pipeline(
         roles={
             "draft": pipeline_module.Role(name="draft", agent=cfg.draft),
@@ -132,6 +167,51 @@ def _pipeline_for(settings: config.Config, kind: _Kind = PLAN_KIND) -> pipeline_
         },
         profiles={
             "default": pipeline_module.Profile("default", ("draft", "review"))
+        },
+        default_profile="default",
+    )
+
+
+def _plan_pipeline_with_tests(
+    cfg: config.PlannerConfig, kind: _Kind
+) -> pipeline_module.Pipeline:
+    """draft → tests → review. `revise` still returns to draft, so tests runs again."""
+    return pipeline_module.Pipeline(
+        roles={
+            "draft": pipeline_module.Role(name="draft", agent=cfg.draft),
+            "tests": pipeline_module.Role(name="tests", agent=cfg.test),
+            "review": pipeline_module.Role(name="review", agent=cfg.review),
+        },
+        stages={
+            "draft": pipeline_module.Stage(
+                id="draft",
+                role="draft",
+                prompt=kind.draft_prompt,
+                transitions={"ready": "@next", "blocked": "@blocked"},
+                max_visits=cfg.max_visits,
+            ),
+            "tests": pipeline_module.Stage(
+                id="tests",
+                role="tests",
+                prompt="plan-tests",
+                transitions={"ready": "@next", "blocked": "@blocked"},
+                max_visits=cfg.max_visits,
+            ),
+            "review": pipeline_module.Stage(
+                id="review",
+                role="review",
+                prompt=kind.review_prompt,
+                transitions={
+                    "approved": "@complete",
+                    "revise": "draft",
+                    "revise-tests": "tests",
+                    "blocked": "@blocked",
+                },
+                max_visits=cfg.max_visits,
+            ),
+        },
+        profiles={
+            "default": pipeline_module.Profile("default", ("draft", "tests", "review"))
         },
         default_profile="default",
     )
@@ -296,8 +376,8 @@ def _drive_pipeline(
             actor=agent,
             stage=current_stage_id,
             profile="default",
-            prompt_suffix=prompts.stage_footer(
-                stage, pipe, "default", effective_agents, agent, task.task_id
+            prompt_suffix=_prompt_suffix(
+                settings, kind, stage, pipe, effective_agents, agent, task.task_id
             ),
             attachments=paths,
             runner=runner,
@@ -480,11 +560,39 @@ def answer_feedback(questions: Sequence[str], answers: str) -> str:
 _STAGE_WORDS = {"draft": "drafting the plan", "review": "reviewing the draft"}
 
 
+def _prompt_suffix(
+    settings: config.Config,
+    kind: _Kind,
+    stage: pipeline_module.Stage,
+    pipe: pipeline_module.Pipeline,
+    effective_agents: dict[str, str],
+    agent: str,
+    task_id: str,
+) -> str:
+    """The routing footer, plus Test-planner rules only when that agent is set.
+
+    With no Test planner the suffix is the footer alone, the same text as before.
+    """
+    footer = prompts.stage_footer(
+        stage, pipe, "default", effective_agents, agent, task_id
+    )
+    if kind != PLAN_KIND or not settings.planner.test:
+        return footer
+    extra = prompts.planner_test_addendum(stage.id)
+    if not extra:
+        return footer
+    return extra + footer
+
+
 def _announcer(print_fn, kind: _Kind = PLAN_KIND):
     if print_fn is None:
         return None
     noun = "the spec" if kind == SPEC_KIND else "the plan"
-    words = {"draft": f"drafting {noun}", "review": "reviewing the draft"}
+    words = {
+        "draft": f"drafting {noun}",
+        "review": "reviewing the draft",
+        "tests": "writing the test plan",
+    }
     return lambda stage_id, agent: print_fn(
         f"{agent} is {words.get(stage_id, stage_id)}"
     )

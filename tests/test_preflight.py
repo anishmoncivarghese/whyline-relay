@@ -174,6 +174,49 @@ def test_a_task_naming_an_unknown_relay_profile_fails(tmp_path):
     )
 
 
+def test_a_verify_marker_on_the_default_profile_does_not_block_start(
+    tmp_path, monkeypatch, capsys
+):
+    """A pipeline with no profile named verify still starts a verify task.
+
+    The marker runs the default profile. Preflight used to FAIL it, and
+    cmd_start aborted before that fallback could run.
+    """
+    root = _pipeline_repo(tmp_path)
+    (root / "plan.md").write_text(
+        "- [ ] VER-1: verify the phase\n"
+        "  relay-profile: verify\n"
+        "  Run the automatic scenarios.\n"
+    )
+    checks = preflight.run(
+        root, root / "plan.md", allow_dirty=True, runner=successful_runner()
+    )
+    assert not [
+        check
+        for check in checks
+        if check.status == "FAIL" and "relay-profile" in check.message
+    ]
+    assert preflight.failures(checks) == 0
+
+    real_run = preflight.run
+
+    def run(*args, **kwargs):
+        kwargs.setdefault("runner", successful_runner())
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(cli.preflight, "run", run)
+    launched: list[bool] = []
+    monkeypatch.setattr(
+        cli.loop, "run_plan", lambda *args, **kwargs: launched.append(True) or []
+    )
+
+    code = cli.main(["start", "--repo", str(root), "--allow-dirty"])
+
+    assert code == cli.EXIT_OK, capsys.readouterr().err
+    assert launched == [True]
+    assert "relay-profile" not in capsys.readouterr().err
+
+
 def test_a_task_naming_relay_profile_with_no_pipeline_configured_warns(ready_repo: Path):
     (ready_repo / "plan.md").write_text("- [ ] T-1: x\n  relay-profile: full\n")
     checks = preflight.run(ready_repo, runner=successful_runner())
@@ -1099,3 +1142,30 @@ def test_start_dry_run_never_runs_preflight_or_login(ready_repo: Path, monkeypat
     monkeypatch.setattr(cli, "_launch_checks", lambda *args, **kwargs: pytest.fail("checks ran"))
     monkeypatch.setattr(cli.whylinecmd, "sync", lambda *args, **kwargs: "PACKET")
     assert cli.main(["start", "--repo", str(ready_repo), "--dry-run"]) == cli.EXIT_OK
+
+
+def test_preflight_fails_when_the_volume_has_under_1gb_free(ready_repo, monkeypatch):
+    class Usage:
+        total = 10 * 1024 ** 3
+        used = 0
+        free = 12 * 1024 * 1024
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", lambda path: Usage())
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    assert preflight.Check(
+        "FAIL",
+        "disk has 12 MB free; the relay needs at least 1 GB",
+    ) in checks
+    # The live-relay line stays last, as the documented order asserts.
+    assert checks[-1].message == "no other relay is running here"
+
+
+def test_preflight_accepts_exactly_1gb_free(ready_repo, monkeypatch):
+    class Usage:
+        total = 10 * 1024 ** 3
+        used = 0
+        free = 1024 ** 3
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", lambda path: Usage())
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    assert all("disk has" not in check.message for check in checks)

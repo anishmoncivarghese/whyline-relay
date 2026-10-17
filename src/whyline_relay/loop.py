@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -29,6 +30,7 @@ from whyline_relay import (
     routing,
     running,
     state,
+    testplan,
     whylinecmd,
 )
 from whyline_relay.adapters import bypass, grok
@@ -206,6 +208,7 @@ def run_agent(
     runner: failover.Runner = subprocess.run,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path."""
+    _refuse_low_disk(root)
     adapter = config.adapter_for(settings, agent)
     repo = task_repo(root, task)
     command = _command_with_task_dir(
@@ -354,6 +357,198 @@ def _no_handoff_detail(
     return adapter.diagnose(text)
 
 
+_CONFIG_ONLY = ".whyline/relay/config.toml"
+
+
+def _short_sha(commit: str) -> str:
+    return commit[:7]
+
+
+def _settings_commits(repo: Path, base: str) -> list[tuple[str, str]] | None:
+    """Commits in `base..HEAD` when every one touches only the relay config.
+
+    None when any of those commits touches another path, or the range cannot
+    be read. An empty list means HEAD is still `base`.
+    """
+    head = gitcheck.head_commit(repo)
+    if head == base:
+        return []
+    try:
+        listing = gitcheck._git(repo, "rev-list", "--reverse", f"{base}..{head}")
+    except gitcheck.GitError:
+        return None
+    found: list[tuple[str, str]] = []
+    for commit in listing.splitlines():
+        if not commit:
+            continue
+        try:
+            names = gitcheck._git(
+                repo,
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                commit,
+            )
+        except gitcheck.GitError:
+            return None
+        files = [line.strip() for line in names.splitlines() if line.strip()]
+        if files != [_CONFIG_ONLY]:
+            return None
+        message = gitcheck.commit_message(repo, commit).splitlines()
+        subject = message[0].strip() if message else ""
+        found.append((commit, subject))
+    return found
+
+
+def _advance_base_past_settings(
+    repo: Path, task: plan.Task, base_commit: str, *, echo: bool
+) -> str | None:
+    """Return HEAD when `base_commit..HEAD` is config.toml only.
+
+    None means some commit touches another path, and the caller keeps today's
+    pause. The progress line names each settings commit and the new base.
+    """
+    described = _settings_commits(repo, base_commit)
+    if described is None:
+        return None
+    if not described:
+        return base_commit
+    head = gitcheck.head_commit(repo)
+    if echo:
+        short_head = _short_sha(head)
+        for commit, subject in described:
+            agents.print_status(
+                f"Settings changed during {task.task_id} "
+                f"({_short_sha(commit)} {subject}); continuing from {short_head}."
+            )
+    return head
+
+
+def _last_nonempty_line(text: str) -> str:
+    for line in reversed(text.splitlines()):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _refuse_low_disk(root: Path) -> None:
+    """Pause before a turn when the volume has under 1 GB free."""
+    low = agents.low_disk_message(shutil.disk_usage(root).free)
+    if low is None:
+        return
+    print(f"  FAIL  {low}")
+    raise Paused(low)
+
+
+def _mount_point(path: Path) -> str:
+    try:
+        current = path.resolve()
+    except OSError:
+        current = path
+    if not current.is_dir():
+        current = current.parent
+    last = current
+    while True:
+        if os.path.ismount(current):
+            return str(current)
+        parent = current.parent
+        if parent == current:
+            return str(last)
+        current = parent
+
+
+def _die_disk_full(error: state.DiskFull) -> None:
+    """Tell the operator and stop. No traceback: the disk, not a bug, failed."""
+    mb = max(0, error.free_bytes) // (1024 * 1024)
+    volume = _mount_point(error.path)
+    print(
+        f"Disk full: {mb} MB free on {volume}. "
+        "Free some space, then run whyline relay resume."
+    )
+    raise SystemExit(3)
+
+
+def _failover_no_handoff(
+    root: Path,
+    settings: config.Config,
+    *,
+    agent: str,
+    role: str,
+    text: str,
+    target: Path,
+    runner: failover.Runner,
+    echo: bool,
+    ephemeral: dict[str, str],
+    ephemeral_tried: dict[str, list[str]],
+) -> bool:
+    """Handle a turn that produced no handoff.
+
+    True means retry this stage on another agent. False means the text is not
+    a failover reason. A Paused stop is raised when nothing usable remains.
+    Overload retries for this turn only and writes no sticky override.
+    """
+    adapter = config.adapter_for(settings, agent)
+    command = settings.agents.get(agent, [])
+    reason = failover.classify(adapter, text, command, runner=runner)
+    if reason is None:
+        return False
+    if reason == "overload":
+        tried = list(ephemeral_tried.get(role, []))
+        if agent not in tried:
+            tried.append(agent)
+        backup = failover.next_backup(settings.backup_chain, set(tried))
+        if backup is None:
+            last = _last_nonempty_line(text)
+            raise Paused(
+                f"{agent} hit a temporary capacity error ({last}); "
+                "resume in a few minutes or change its model",
+                target,
+            )
+        ephemeral[role] = backup
+        ephemeral_tried[role] = tried
+        if echo:
+            agents.print_status(
+                f"{agent}: model at capacity; using {backup} for this turn"
+            )
+        return True
+
+    existing = failover.read_overrides(root).get(role)
+    tried_sticky = list(existing.tried) if existing is not None else []
+    if agent not in tried_sticky:
+        tried_sticky.append(agent)
+    backup = failover.next_backup(settings.backup_chain, set(tried_sticky))
+    if backup is not None:
+        verb, _ = failover.REASON_TEXT[reason]
+        visible = grok.rate_limit_text(adapter, text, command)
+        failover.write_override(
+            root,
+            role,
+            failover.ActiveOverride(
+                agent=backup,
+                backup_for=agent,
+                reason=reason,
+                since=datetime.now().astimezone().isoformat(),
+                tried=tried_sticky,
+                resets_at=failover.reset_deadline(visible) if reason == "rate-limit" else "",
+            ),
+        )
+        if echo:
+            agents.print_status(
+                f"==> relay: {role} switched from {agent} to {backup} "
+                f"({agent} {verb})"
+            )
+        return True
+    if not settings.backup_chain:
+        raise Paused(failover.pause_message(agent, role, reason, existing), target)
+    raise Paused(
+        f"every backup in the chain is unavailable for {role} "
+        f"({', '.join(sorted(tried_sticky))} all failed)",
+        target,
+    )
+
+
 def _approved(
     root: Path, task: plan.Task, base_commit: str, round_: int, log: Path | None
 ) -> Outcome:
@@ -394,6 +589,8 @@ def _commit_and_approve(
     summary: str,
     *,
     empty_if_clean: bool = False,
+    echo: bool = False,
+    remember: Callable[[str], None] | None = None,
 ) -> Outcome:
     """The relay itself makes a configured pipeline's one finishing commit (spec 5.6).
 
@@ -410,13 +607,17 @@ def _commit_and_approve(
     and an approval with no such commit still pauses.
     """
     repo = task_repo(root, task)
-    if gitcheck.head_commit(repo) != base_commit:
+    slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+    if slid is None or gitcheck.head_commit(repo) != slid:
         raise Paused(
             f"{task.task_id}: HEAD moved before the relay could make its own commit; "
             f"a stage committed when it must not have. Undo it with `git reset "
             f"{base_commit[:12]}` (your files stay), then resume",
             log,
         )
+    if slid != base_commit and remember is not None:
+        remember(slid)
+    base_commit = slid
     if not gitcheck.commit_all(repo, commit_message(task, summary)) and empty_if_clean:
         gitcheck.commit_empty(repo, commit_message(task, ""))
     return _approved(root, task, base_commit, round_, log)
@@ -433,6 +634,8 @@ def _run_task(
     start_round: int = 1,
     on_turn: Callable[[int, str | None, dict], None] | None = None,
     runner: failover.Runner = subprocess.run,
+    extra_prompt: str = "",
+    base_holder: list[str] | None = None,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -449,6 +652,15 @@ def _run_task(
     round_ = start_round
     feedback = ""
     next_move = routing.IMPLEMENT
+    ephemeral: dict[str, str] = {}
+    ephemeral_tried: dict[str, list[str]] = {}
+
+    def remember(commit: str) -> None:
+        nonlocal base_commit
+        base_commit = commit
+        if base_holder is not None:
+            base_holder[0] = commit
+
     implementer = failover.effective_agent(root, settings, "implementer")
     reviewer = failover.effective_agent(root, settings, "reviewer")
     gitcheck.ensure_relay_ignored(root)
@@ -479,6 +691,14 @@ def _run_task(
             return _approved(root, task, base_commit, round_, None)
         role = "implementer" if next_move == routing.IMPLEMENT else "reviewer"
         agent = implementer if role == "implementer" else reviewer
+        if role in ephemeral:
+            agent = ephemeral[role]
+            if role == "implementer":
+                implementer = agent
+            else:
+                reviewer = agent
+        else:
+            ephemeral_tried.pop(role, None)
         template = "implement" if role == "implementer" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
@@ -498,17 +718,23 @@ def _run_task(
             echo,
             implementer=implementer,
             reviewer=reviewer,
+            prompt_suffix=extra_prompt,
             runner=runner,
         )
         if role == "implementer" and gitcheck.head_commit(repo) != head_before:
             # Codex's sandbox does not stop it committing (measured on
             # codex-cli 0.155.1); only the prompt says not to, so check.
-            raise Paused(
-                f"{agent} made a commit, which the relay forbids (only the reviewer "
-                f"commits). Undo it with `git reset {head_before[:12]}` (your files "
-                "stay), then resume",
-                target,
-            )
+            # A commit that only edits the relay config is Set up or the
+            # console bar saving, not the implementer's work.
+            slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+            if slid is None:
+                raise Paused(
+                    f"{agent} made a commit, which the relay forbids (only the reviewer "
+                    f"commits). Undo it with `git reset {head_before[:12]}` (your files "
+                    "stay), then resume",
+                    target,
+                )
+            remember(slid)
 
         record = handoff.read(root)
         move = routing.decide(
@@ -524,50 +750,28 @@ def _run_task(
                 text = target.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 text = ""
+            if _failover_no_handoff(
+                root,
+                settings,
+                agent=agent,
+                role=role,
+                text=text,
+                target=target,
+                runner=runner,
+                echo=echo,
+                ephemeral=ephemeral,
+                ephemeral_tried=ephemeral_tried,
+            ):
+                continue
             adapter = config.adapter_for(settings, agent)
-            reason = failover.failover_reason(
-                adapter, text, settings.agents[agent], runner=runner
-            )
-            if reason is not None:
-                existing = failover.read_overrides(root).get(role)
-                tried = list(existing.tried) if existing is not None else []
-                if agent not in tried:
-                    tried.append(agent)
-                backup = failover.next_backup(settings.backup_chain, set(tried))
-                if backup is not None:
-                    verb, _ = failover.REASON_TEXT[reason]
-                    failover.write_override(
-                        root,
-                        role,
-                        failover.ActiveOverride(
-                            agent=backup,
-                            backup_for=agent,
-                            reason=reason,
-                            since=datetime.now().astimezone().isoformat(),
-                            tried=tried,
-                        ),
-                    )
-                    if echo:
-                        agents.print_status(
-                            f"==> relay: {role} switched from {agent} to {backup} "
-                            f"({agent} {verb})"
-                        )
-                    continue
-                if not settings.backup_chain:
-                    raise Paused(
-                        failover.pause_message(agent, role, reason, existing), target
-                    )
-                raise Paused(
-                    f"every backup in the chain is unavailable for {role} "
-                    f"({', '.join(sorted(tried))} all failed)",
-                    target,
-                )
             raise Paused(
                 f"{agent} exited without handing off"
                 f"{_no_handoff_detail(target, adapter, settings.agents[agent])}; "
                 "nothing was routed",
                 target,
             )
+        ephemeral.pop(role, None)
+        ephemeral_tried.pop(role, None)
         if record.task != task.task_id:
             raise Paused(
                 f"{agent} handed off for {record.task!r}, but this run is on "
@@ -591,7 +795,10 @@ def _run_task(
         if move == routing.APPROVED:
             if gitcheck.commit_verified(repo, base_commit, task.task_id):
                 return _approved(root, task, base_commit, round_, target)  # an older review.md committed
-            return _commit_and_approve(root, task, base_commit, round_, target, record.summary)
+            return _commit_and_approve(
+                root, task, base_commit, round_, target, record.summary,
+                echo=echo, remember=remember,
+            )
         if move == routing.IMPLEMENT:
             feedback = record.summary
             round_ += 1
@@ -602,6 +809,18 @@ def _run_task(
                     target,
                 )
         next_move = move
+
+
+def _profile_for(task: plan.Task, pipe: pipeline.Pipeline) -> str:
+    """The pipeline profile a task runs.
+
+    `relay-profile: verify` is a task marker. It selects a pipeline profile
+    only when one is actually named `verify`. Otherwise the task runs the
+    default profile, the same stages as a task that names no profile.
+    """
+    if task.profile == "verify" and task.profile not in pipe.profiles:
+        return pipe.default_profile
+    return task.profile or pipe.default_profile
 
 
 def _run_configured_task(
@@ -615,6 +834,8 @@ def _run_configured_task(
     start_round: int = 1,
     on_turn: Callable[[int, str | None, dict], None] | None = None,
     runner: failover.Runner = subprocess.run,
+    extra_prompt: str = "",
+    base_holder: list[str] | None = None,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
@@ -633,6 +854,14 @@ def _run_configured_task(
     caught here by re-deciding on whatever handoff already exists before the
     main loop restarts, so it is never re-run and never silently dropped.
     """
+    def remember(commit: str) -> None:
+        nonlocal base_commit
+        base_commit = commit
+        if base_holder is not None:
+            base_holder[0] = commit
+
+    ephemeral: dict[str, str] = {}
+    ephemeral_tried: dict[str, list[str]] = {}
     pipe = settings.pipeline
     effective_agents = {
         name: failover.pipeline_effective_agent(root, settings, name)
@@ -642,7 +871,7 @@ def _run_configured_task(
     feedback = ""
     gitcheck.ensure_relay_ignored(root)
     repo = task_repo(root, task)
-    start_profile = task.profile or pipe.default_profile
+    start_profile = _profile_for(task, pipe)
     start_stage_id = pipe.profiles[start_profile].stages[0]
     whylinecmd.claim(
         root,
@@ -674,7 +903,7 @@ def _run_configured_task(
                 )
             return _commit_and_approve(
                 root, task, base_commit, round_, None, current.summary,
-                empty_if_clean=True,
+                empty_if_clean=True, echo=echo, remember=remember,
             )
         profile_name = saved.profile
         current_stage_id = saved.stage
@@ -714,7 +943,7 @@ def _run_configured_task(
             elif resumed.kind == "complete":
                 return _commit_and_approve(
                     root, task, base_commit, round_, None, current.summary,
-                    empty_if_clean=True,
+                    empty_if_clean=True, echo=echo, remember=remember,
                 )
             elif resumed.kind == "blocked":
                 raise Paused(
@@ -742,7 +971,19 @@ def _run_configured_task(
             for name in pipe.roles
         }
         stage = pipe.stages[current_stage_id]
-        agent = effective_agents[stage.role]
+        if stage.role in ephemeral:
+            agent = ephemeral[stage.role]
+        else:
+            agent = effective_agents[stage.role]
+            ephemeral_tried.pop(stage.role, None)
+        turn_implementer = (
+            agent if stage.role == "implementer"
+            else effective_agents.get("implementer", implementer_agent)
+        )
+        turn_reviewer = (
+            agent if stage.role == "reviewer"
+            else effective_agents.get("reviewer", reviewer_agent)
+        )
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
         head_before = gitcheck.head_commit(repo)
@@ -764,26 +1005,29 @@ def _run_configured_task(
             round_,
             feedback,
             echo,
-            implementer=implementer_agent,
-            reviewer=reviewer_agent,
+            implementer=turn_implementer,
+            reviewer=turn_reviewer,
             action_label=stage.id,
             log_suffix=stage.id,
             actor=agent,
             stage=current_stage_id,
             profile=profile_name,
-            prompt_suffix=prompts.stage_footer(
+            prompt_suffix=extra_prompt + prompts.stage_footer(
                 stage, pipe, profile_name, effective_agents, agent, task.task_id
             ),
             runner=runner,
         )
         if gitcheck.head_commit(repo) != head_before:
-            raise Paused(
-                f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
-                "forbids: for a configured pipeline, only the relay itself commits, "
-                f"after every stage approves. Undo it with `git reset "
-                f"{head_before[:12]}` (your files stay), then resume",
-                target,
-            )
+            slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+            if slid is None:
+                raise Paused(
+                    f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
+                    "forbids: for a configured pipeline, only the relay itself commits, "
+                    f"after every stage approves. Undo it with `git reset "
+                    f"{head_before[:12]}` (your files stay), then resume",
+                    target,
+                )
+            remember(slid)
         record = handoff.read(root)
         decision = pipeline.decide(
             record,
@@ -798,51 +1042,28 @@ def _run_configured_task(
                 text = target.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 text = ""
+            if _failover_no_handoff(
+                root,
+                settings,
+                agent=agent,
+                role=stage.role,
+                text=text,
+                target=target,
+                runner=runner,
+                echo=echo,
+                ephemeral=ephemeral,
+                ephemeral_tried=ephemeral_tried,
+            ):
+                continue
             adapter = config.adapter_for(settings, agent)
-            reason = failover.failover_reason(
-                adapter, text, settings.agents[agent], runner=runner
-            )
-            if reason is not None:
-                existing = failover.read_overrides(root).get(stage.role)
-                tried = list(existing.tried) if existing is not None else []
-                if agent not in tried:
-                    tried.append(agent)
-                backup = failover.next_backup(settings.backup_chain, set(tried))
-                if backup is not None:
-                    verb, _ = failover.REASON_TEXT[reason]
-                    failover.write_override(
-                        root,
-                        stage.role,
-                        failover.ActiveOverride(
-                            agent=backup,
-                            backup_for=agent,
-                            reason=reason,
-                            since=datetime.now().astimezone().isoformat(),
-                            tried=tried,
-                        ),
-                    )
-                    if echo:
-                        agents.print_status(
-                            f"==> relay: {stage.role} switched from {agent} to "
-                            f"{backup} ({agent} {verb})"
-                        )
-                    continue
-                if not settings.backup_chain:
-                    raise Paused(
-                        failover.pause_message(agent, stage.role, reason, existing),
-                        target,
-                    )
-                raise Paused(
-                    f"every backup in the chain is unavailable for {stage.role} "
-                    f"({', '.join(sorted(tried))} all failed)",
-                    target,
-                )
             raise Paused(
                 f"{agent} exited without handing off"
                 f"{_no_handoff_detail(target, adapter, settings.agents[agent])}; "
                 "nothing was routed",
                 target,
             )
+        ephemeral.pop(stage.role, None)
+        ephemeral_tried.pop(stage.role, None)
         if record.task != task.task_id:
             raise Paused(
                 f"{agent} handed off for {record.task!r}, but this run is on "
@@ -882,7 +1103,7 @@ def _run_configured_task(
                 )
             return _commit_and_approve(
                 root, task, base_commit, round_, target, record.summary,
-                empty_if_clean=True,
+                empty_if_clean=True, echo=echo, remember=remember,
             )
         if _sandbox_backroute(
             pipe,
@@ -917,6 +1138,8 @@ def run_task(
     on_turn: Callable[[int, str | None, dict], None] | None = None,
     _clear_running: bool = True,
     runner: failover.Runner = subprocess.run,
+    extra_prompt: str = "",
+    base_holder: list[str] | None = None,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
@@ -931,6 +1154,8 @@ def run_task(
             start_round=start_round,
             on_turn=on_turn,
             runner=runner,
+            extra_prompt=extra_prompt,
+            base_holder=base_holder,
         )
     finally:
         if _clear_running:
@@ -976,28 +1201,62 @@ def _save_pause(
     timeout_minutes: int,
 ) -> None:
     stage_state = progress.get("stage_state") or {}
-    state.save(
-        root,
-        state.RelayState(
-            plan=str(plan_path),
-            branch=branch,
-            task_id=task.task_id,
-            round=progress["round"],
-            base_commit=base_commit,
-            paused_reason=reason,
-            log_path=str(log or ""),
-            only=only or "",
-            last_handoff_id=progress["last"] or "",
-            profile=stage_state.get("profile", ""),
-            stage=stage_state.get("stage", ""),
-            stage_visits=stage_state.get("stage_visits", {}),
-            pipeline_fingerprint=stage_state.get("pipeline_fingerprint", ""),
-            timeout_minutes=timeout_minutes,
-        ),
-    )
+    try:
+        state.save(
+            root,
+            state.RelayState(
+                plan=str(plan_path),
+                branch=branch,
+                task_id=task.task_id,
+                round=progress["round"],
+                base_commit=base_commit,
+                paused_reason=reason,
+                log_path=str(log or ""),
+                only=only or "",
+                last_handoff_id=progress["last"] or "",
+                profile=stage_state.get("profile", ""),
+                stage=stage_state.get("stage", ""),
+                stage_visits=stage_state.get("stage_visits", {}),
+                pipeline_fingerprint=stage_state.get("pipeline_fingerprint", ""),
+                timeout_minutes=timeout_minutes,
+            ),
+        )
+    except state.DiskFull as error:
+        _die_disk_full(error)
 
 
 DECISION_LOG = Path(".whyline") / "decisions.md"
+
+
+def _verify_test_plan(plan_path: Path, task: plan.Task) -> Path | None:
+    """The test plan a verify task carries, or None when the task is ordinary.
+
+    A verify task with no test plan beside its plan is an ordinary task: no
+    scenario prompt, and the tick commit does not look for a test plan.
+    """
+    if task.profile != "verify":
+        return None
+    path = testplan.path_for(plan_path)
+    return path if path.is_file() else None
+
+
+def _verify_prompt(root: Path, plan_path: Path, task: plan.Task) -> str:
+    """Automatic scenarios for a verify task, already limited to its phase."""
+    path = _verify_test_plan(plan_path, task)
+    if path is None:
+        return ""
+    tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+    in_range = set(plan.ids_since_previous_release(tasks, task.task_id))
+    scenarios = [
+        scenario
+        for scenario in testplan.parse(path.read_text(encoding="utf-8"))
+        if scenario.kind == "auto" and in_range.intersection(scenario.covers)
+    ]
+    try:
+        shown = str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        shown = str(path)
+    return prompts.verify_task_addendum(scenarios, test_plan=shown)
 
 
 def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
@@ -1005,7 +1264,10 @@ def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
 
     The plan file is exempt: it is ticked and committed straight afterwards.
     For a task in another repository, so is the relay repository's decision
-    log, which agents append to there and the tick commit carries.
+    log, which agents append to there and the tick commit carries. A verify
+    task's test plan is exempt for the same reason when it is still dirty:
+    the task repository's finishing commit cannot see a file that lives
+    beside the plan.
     """
     try:
         own = str(plan_path.resolve().relative_to(root.resolve()))
@@ -1015,6 +1277,12 @@ def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
     exempt = {own}
     if repo != root.resolve():
         exempt.add(str(DECISION_LOG))
+    test_plan = _verify_test_plan(plan_path, task)
+    if test_plan is not None:
+        try:
+            exempt.add(str(test_plan.resolve().relative_to(root.resolve())))
+        except ValueError:
+            pass
     leftovers = [path for path in gitcheck.dirty_paths(root) if path not in exempt]
     if repo != root.resolve():
         leftovers += [str(repo / path) for path in gitcheck.dirty_paths(repo)]
@@ -1050,12 +1318,18 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
 
     Re-reads the plan first: an agent may have edited it while it worked, and
     ticking a copy read before the run would silently overwrite that edit.
+    A verify task also commits its test plan when that file still has changes.
+    The finishing commit already includes it when it lives in the task
+    repository; this catches the copy that lives beside the plan instead.
     """
     current = plan_path.read_text(encoding="utf-8")
     plan_path.write_text(plan.tick(current, task.task_id), encoding="utf-8")
     paths = [plan_path]
     if task_repo(root, task) != root.resolve():
         paths.append(root / DECISION_LOG)
+    test_plan = _verify_test_plan(plan_path, task)
+    if test_plan is not None:
+        paths.append(test_plan)
     gitcheck.commit_paths(root, paths, f"chore: tick {task.task_id} in the plan")
 
 
@@ -1120,6 +1394,124 @@ def _with_release_implementer(settings: config.Config, release_agent: str) -> co
     return dataclasses.replace(settings, pipeline=dataclasses.replace(pipeline, roles=roles))
 
 
+class ManualCheckError(ValueError):
+    """A manual-check command cannot be applied to this pause."""
+
+
+def _plan_file(root: Path, saved: state.RelayState) -> Path:
+    path = Path(saved.plan)
+    return path if path.is_absolute() else root / path
+
+
+def _paused_release_state(root: Path) -> state.RelayState | None:
+    """The saved pause when it is a release, or manual checks before one."""
+    saved = state.load(root)
+    if saved is None:
+        return None
+    reason = saved.paused_reason
+    if reason.startswith(testplan.MANUAL_PREFIX) or reason.startswith(RELEASE_PREFIX):
+        return saved
+    return None
+
+
+def _open_manual_checks(
+    plan_path: Path, tasks: list[plan.Task], task_id: str
+) -> list[testplan.Scenario]:
+    """Unchecked manual scenarios for the tasks since the previous release.
+
+    No test plan beside the plan means there is nothing to confirm.
+    """
+    test_path = testplan.path_for(plan_path)
+    if not test_path.is_file():
+        return []
+    task_ids = plan.ids_since_previous_release(tasks, task_id)
+    return testplan.open_manual(test_path.read_text(encoding="utf-8"), task_ids)
+
+
+def manual_checks(root: Path) -> tuple[state.RelayState, list[testplan.Scenario]] | None:
+    """The paused release and the manual checks still open for it.
+
+    None when this pause is not a release and not manual checks before one.
+    """
+    saved = _paused_release_state(root)
+    if saved is None:
+        return None
+    plan_path = _plan_file(root, saved)
+    if not plan_path.is_file():
+        return saved, []
+    tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+    return saved, _open_manual_checks(plan_path, tasks, saved.task_id)
+
+
+def manual_refusal(root: Path) -> str | None:
+    """The open-check list when `done` or `resume` must refuse, else None."""
+    found = manual_checks(root)
+    if found is None:
+        return None
+    saved, pending = found
+    if not pending:
+        return None
+    return (
+        "Refusing while manual checks are open:\n"
+        + testplan.pause_reason(saved.task_id, pending)
+    )
+
+
+def record_manual(
+    root: Path,
+    scenario_id: str,
+    *,
+    passed: bool,
+    note: str | None = None,
+) -> list[testplan.Scenario]:
+    """Tick or fail one open manual check and commit only the test plan.
+
+    Returns the checks still open afterwards. The release stays paused.
+    """
+    saved = _paused_release_state(root)
+    if saved is None:
+        raise ManualCheckError("the relay is not paused before a release")
+    gitcheck.ensure_relay_ignored(root)
+    if saved.branch:
+        gitcheck.ensure_branch(root, saved.branch)
+    plan_path = _plan_file(root, saved)
+    if not plan_path.is_file():
+        raise ManualCheckError(f"no plan at {plan_path}")
+    test_path = testplan.path_for(plan_path)
+    if not test_path.is_file():
+        raise ManualCheckError(f"no test plan beside {plan_path.name}")
+    tasks = plan.parse(plan_path.read_text(encoding="utf-8"))
+    text = test_path.read_text(encoding="utf-8")
+    task_ids = plan.ids_since_previous_release(tasks, saved.task_id)
+    open_ids = {scenario.id for scenario in testplan.open_manual(text, task_ids)}
+    if scenario_id not in open_ids:
+        raise ManualCheckError(
+            f"{scenario_id} is not an open manual check for {saved.task_id}"
+        )
+    if passed:
+        updated = testplan.mark_passed(text, scenario_id, note)
+        message = f"test: confirm {scenario_id}"
+    else:
+        if note is None or not note.strip():
+            raise ManualCheckError("fail needs a note")
+        updated = testplan.mark_failed(text, scenario_id, note)
+        message = f"test: fail {scenario_id}"
+    test_path.write_text(updated, encoding="utf-8")
+    if not gitcheck.commit_paths(root, [test_path], message):
+        raise ManualCheckError(
+            f"{test_path.name} did not change, so nothing was committed"
+        )
+    remaining = testplan.open_manual(test_path.read_text(encoding="utf-8"), task_ids)
+    if saved.paused_reason.startswith(testplan.MANUAL_PREFIX):
+        state.save(
+            root,
+            dataclasses.replace(
+                saved, paused_reason=testplan.pause_reason(saved.task_id, remaining)
+            ),
+        )
+    return remaining
+
+
 def _run_plan(
     root: Path,
     settings: config.Config,
@@ -1158,6 +1550,34 @@ def _run_plan(
             state.clear(root)
             return outcomes
 
+        # Manual checks gate every release, whoever runs it, before it
+        # starts. An empty base means it has not started, so resume comes
+        # back through this gate. A pause that already has a base is the
+        # release itself and continues.
+        release_not_started = not (
+            resuming is not None
+            and resuming.task_id == task.task_id
+            and bool(resuming.base_commit)
+        )
+        if task.profile == "release" and release_not_started:
+            pending = _open_manual_checks(plan_path, tasks, task.task_id)
+            if pending:
+                reason = testplan.pause_reason(task.task_id, pending)
+                gitcheck.ensure_relay_ignored(root)
+                _save_pause(
+                    root,
+                    plan_path,
+                    branch,
+                    task,
+                    "",
+                    reason,
+                    None,
+                    only,
+                    {"round": 1, "last": None},
+                    timeout_minutes=settings.timeout_minutes,
+                )
+                raise Paused(reason)
+
         if task.profile == "release" and settings.release_role == "human":
             checklist = "\n".join(l.strip() for l in task.text.splitlines()[1:]
                                   if l.strip() and not l.strip().startswith("relay-profile:"))
@@ -1195,6 +1615,7 @@ def _run_plan(
             )
             raise
         base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(repo)
+        base_holder = [base_commit]
         resuming = None
 
         def on_turn(round_: int, previous_id: str | None, stage_state: dict) -> None:
@@ -1214,19 +1635,23 @@ def _run_plan(
                 on_turn=on_turn,
                 _clear_running=False,
                 runner=runner,
+                extra_prompt=_verify_prompt(root, plan_path, task),
+                base_holder=base_holder,
             )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
+        except state.DiskFull as error:
+            _die_disk_full(error)
         except Paused as paused:
             _save_pause(
-                root, plan_path, branch, task, base_commit,
+                root, plan_path, branch, task, base_holder[0],
                 paused.reason, paused.log_path, only, progress,
                 timeout_minutes=settings.timeout_minutes,
             )
             raise
         except KeyboardInterrupt:
             _save_pause(
-                root, plan_path, branch, task, base_commit,
+                root, plan_path, branch, task, base_holder[0],
                 "interrupted by the user (Ctrl+C)", None, only, progress,
                 timeout_minutes=settings.timeout_minutes,
             )

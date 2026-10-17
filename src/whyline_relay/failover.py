@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +31,13 @@ class ActiveOverride:
     reason: str  # "rate-limit" | "auth"
     since: str  # ISO timestamp
     tried: list[str] = field(default_factory=list)
+    # Absolute ISO time the usage limit lifts, or "" when the text gave none
+    # or the override was written before this field.
+    resets_at: str = ""
+
+
+# "Resets in 158h14m22s" or "Resets in 158h14m". Seconds are optional.
+_RESET_IN = re.compile(r"resets in\s+(\d+)h(\d+)m(?:(\d+)s)?", re.IGNORECASE)
 
 
 def path(root: Path, filename: str = "active-roles.json") -> Path:
@@ -63,8 +72,13 @@ def read_overrides(
         tried = record.get("tried")
         if not isinstance(tried, list) or not all(isinstance(t, str) for t in tried):
             tried = []
+        resets_at = record.get("resets_at", "")
+        if not isinstance(resets_at, str):
+            resets_at = ""
         result[role] = ActiveOverride(
-            **{f: record[f] for f in required}, tried=list(tried)
+            **{f: record[f] for f in required},
+            tried=list(tried),
+            resets_at=resets_at,
         )
     return result
 
@@ -156,27 +170,67 @@ def still_logged_in(adapter: Adapter, runner: Runner = subprocess.run) -> bool:
     return result.returncode == 0
 
 
+def classify(
+    adapter: Adapter,
+    text: str,
+    command: list[str],
+    runner: Runner = subprocess.run,
+) -> str | None:
+    """'rate-limit', 'overload', 'auth', or None. Only when a turn produced no handoff.
+
+    Rate-limit is checked before overload, and overload before auth. The auth
+    check runs only when `command` is actually the adapter's own binary — the
+    same restriction preflight._logins already applies, and for the same reason:
+    a stand-in command (a test fixture, or a deliberately different wrapper)
+    must never have someone else's login checked against it.
+    """
+    visible = grok.rate_limit_text(adapter, text, command)
+    if agents.rate_limited(visible):
+        return "rate-limit"
+    if agents.overloaded(visible):
+        return "overload"
+    checkable = (
+        adapter.login_argv is not None
+        and bool(command)
+        and Path(command[0]).name == adapter.binary
+    )
+    if checkable and not still_logged_in(adapter, runner):
+        return "auth"
+    return None
+
+
 def failover_reason(
     adapter: Adapter,
     text: str,
     command: list[str],
     runner: Runner = subprocess.run,
 ) -> str | None:
-    """'rate-limit', 'auth', or None. Checked only when a turn produced no handoff.
+    """'rate-limit', 'auth', or None.
 
-    The auth check runs only when `command` is actually the adapter's own binary —
-    the same restriction preflight._logins already applies, and for the same reason:
-    a stand-in command (a test fixture, or a deliberately different wrapper) must never
-    have someone else's login checked against it.
+    Overload is deliberately absent. It is a one-turn switch (`classify`
+    returns it), and callers of this function — chat in particular — write a
+    sticky override for every reason they see. A capacity error clears in
+    minutes and must not stick.
     """
-    if rate_limited(adapter, text, command):
-        return "rate-limit"
-    checkable = (
-        adapter.login_argv is not None and Path(command[0]).name == adapter.binary
-    )
-    if checkable and not still_logged_in(adapter, runner):
-        return "auth"
-    return None
+    reason = classify(adapter, text, command, runner)
+    if reason == "overload":
+        return None
+    return reason
+
+
+def reset_deadline(text: str, *, now: datetime | None = None) -> str:
+    """ISO time when `Resets in <N>h<M>m` (optional seconds) lifts, or ""."""
+    match = _RESET_IN.search(text)
+    if match is None:
+        return ""
+    hours = int(match.group(1))
+    minutes = int(match.group(2))
+    seconds = int(match.group(3) or 0)
+    moment = now if now is not None else datetime.now().astimezone()
+    if moment.tzinfo is None:
+        moment = moment.astimezone()
+    deadline = moment + timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    return deadline.isoformat()
 
 
 def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:

@@ -34,6 +34,7 @@ from whyline_relay import (
     running,
     setup,
     state,
+    testplan,
     whylinecmd,
 )
 
@@ -193,6 +194,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-checks",
         action="store_true",
         help="Skip the preflight checks.",
+    )
+
+    manual_parser = subparsers.add_parser(
+        "manual", help="List or confirm manual checks for the paused release"
+    )
+    manual_parser.add_argument(
+        "scenario",
+        nargs="?",
+        default=None,
+        help="Scenario id to confirm, for example TP-1. Omit to list open checks.",
+    )
+    manual_parser.add_argument(
+        "result",
+        nargs="?",
+        default=None,
+        choices=("pass", "fail"),
+        help="pass ticks the scenario; fail records a failure note.",
+    )
+    manual_parser.add_argument(
+        "note",
+        nargs="*",
+        default=[],
+        help="A note. Optional for pass, required for fail.",
+    )
+    manual_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
     )
 
     doctor = subparsers.add_parser("doctor", help="Check that the relay is ready to run")
@@ -437,6 +464,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if saved is None:
         print("Nothing to resume.", file=sys.stderr)
         return EXIT_ERROR
+    try:
+        refusal = loop.manual_refusal(root)
+    except plan.PlanError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return EXIT_ERROR
     if saved.paused_reason.startswith(loop.RELEASE_PREFIX):
         print(
             f"This is a release task for you: do its steps, then run: "
@@ -535,6 +570,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Paused    {saved.paused_reason}")
     if saved.log_path:
         print(f"Log       {saved.log_path}")
+    if saved.paused_reason.startswith(testplan.MANUAL_PREFIX):
+        print(f"Confirm with: {invocation.command('manual')}")
     print(f"Resume with: {invocation.command('resume')}")
     return EXIT_OK
 
@@ -671,6 +708,8 @@ def _report_pause(paused: loop.Paused) -> int:
     print(f"\nPaused: {paused.reason}", file=sys.stderr)
     if paused.log_path is not None:
         print(f"Log: {paused.log_path}", file=sys.stderr)
+    if paused.reason.startswith(testplan.MANUAL_PREFIX):
+        print(f"Confirm with: {invocation.command('manual')}", file=sys.stderr)
     print(f"Resume with: {invocation.command('resume')}", file=sys.stderr)
     notify.send("whyline-relay paused", paused.reason)
     return EXIT_PAUSED
@@ -875,6 +914,20 @@ def cmd_done(args: argparse.Namespace) -> int:
     saved_branch = saved.branch if saved else None
     saved_only = saved.only if saved else None
     try:
+        refusal = loop.manual_refusal(root)
+    except plan.PlanError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return EXIT_ERROR
+    if saved is not None and saved.paused_reason.startswith(testplan.MANUAL_PREFIX):
+        print(
+            f"Manual checks are confirmed. Resume to start {saved.task_id}.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    try:
         loop.mark_done(root, args.task_id)
     except ValueError as error:
         print(str(error), file=sys.stderr)
@@ -888,6 +941,64 @@ def cmd_done(args: argparse.Namespace) -> int:
         allow_dirty=args.allow_dirty,
         skip_checks=args.skip_checks,
     )
+
+
+def cmd_manual(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    active = running.live(root)
+    if active is not None:
+        print(
+            f"Refusing to confirm manual checks: another relay is running here "
+            f"(pid {active.pid}). Run `{invocation.command('stop')}` first.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if args.scenario is None:
+        try:
+            found = loop.manual_checks(root)
+        except plan.PlanError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_ERROR
+        if found is None:
+            print("the relay is not paused before a release", file=sys.stderr)
+            return EXIT_ERROR
+        saved, pending = found
+        if not pending:
+            print("No open manual checks.")
+            return EXIT_OK
+        print(testplan.pause_reason(saved.task_id, pending))
+        return EXIT_OK
+    if args.result is None:
+        print(
+            f"say pass or fail, for example: "
+            f"{invocation.command('manual')} {args.scenario} pass",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    note = " ".join(args.note).strip()
+    if args.result == "fail" and not note:
+        print("fail needs a note", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        remaining = loop.record_manual(
+            root,
+            args.scenario,
+            passed=args.result == "pass",
+            note=note or None,
+        )
+    except (loop.ManualCheckError, ValueError, gitcheck.GitError, plan.PlanError) as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_ERROR
+    if args.result == "pass":
+        print(f"Passed {args.scenario}.")
+    else:
+        print(f"Recorded a failure for {args.scenario}.")
+    saved = state.load(root)
+    if remaining and saved is not None:
+        print(testplan.pause_reason(saved.task_id, remaining))
+    elif not remaining:
+        print("All manual checks passed. Resume to start the release.")
+    return EXIT_OK
 
 
 def cmd_skip(args: argparse.Namespace) -> int:
@@ -949,6 +1060,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "resume": cmd_resume,
             "done": cmd_done,
             "skip": cmd_skip,
+            "manual": cmd_manual,
             "status": cmd_status,
             "stop": cmd_stop,
             "init": cmd_init,

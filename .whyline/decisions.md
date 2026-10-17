@@ -4887,3 +4887,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: d3bc2c9f4292428cb95bb4083f84810b -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-13T04:42:27.814Z"} -->
+
+## 2026-10-17 — Release the approved TPL-6 implementation as whyline-relay 0.2.38
+
+**Actor:** codex
+**Role:** release
+**Task:** TPL-6
+
+**Because:** The exact release tree passes uv run pytest -q, uv lock --check, git diff --check, the wheel and sdist build, the sdist contains no internal paths, and a clean Python 3.11 environment installs and reports whyline-relay 0.2.38
+
+**Rejected:**
+
+- Tag the dirty tree — tags and the trusted-publishing workflow require a committed, reproducible release tree
+
+**Files:** pyproject.toml, src/whyline_relay/__init__.py, docs/releases/v0.2.38.md
+
+<!-- whyline-event: 892aae516b014ce28f18bddda1f05631 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-17T20:46:31.383Z"} -->

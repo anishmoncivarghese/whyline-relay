@@ -2,12 +2,55 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from whyline_relay import config
+
+
+class DiskFull(Exception):
+    """A state write failed because the volume is out of space.
+
+    The previous state file is left as it was. `path` is that file, and
+    `free_bytes` is what the volume still reported afterwards.
+    """
+
+    def __init__(self, path: Path, free_bytes: int):
+        self.path = path
+        self.free_bytes = free_bytes
+        super().__init__(path, free_bytes)
+
+
+def _free_bytes(path: Path) -> int:
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return 0
+
+
+def _write_atomic(target: Path, payload: str) -> None:
+    """Write `payload` to `target` via a temp file in the same directory.
+
+    Both the write and the replace sit in one try. ENOSPC or EDQUOT removes
+    the temp file, leaves `target` untouched, and raises DiskFull.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        os.replace(temporary, target)
+    except OSError as error:
+        if getattr(error, "errno", None) not in (errno.ENOSPC, errno.EDQUOT):
+            raise
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise DiskFull(target, _free_bytes(target.parent)) from error
 
 
 @dataclass(frozen=True)
@@ -54,11 +97,7 @@ def path(root: Path) -> Path:
 
 def save(root: Path, value: RelayState) -> None:
     """Write atomically: a half-written state file would strand a resume."""
-    target = path(root)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(asdict(value), indent=2), encoding="utf-8")
-    os.replace(temporary, target)
+    _write_atomic(path(root), json.dumps(asdict(value), indent=2))
 
 
 def load(root: Path) -> RelayState | None:
@@ -80,11 +119,7 @@ def plan_path(root: Path, name: str = "plan-state.json") -> Path:
 def save_plan(root: Path, value: PlanState, name: str = "plan-state.json") -> None:
     """Write atomically, exactly like save() -- a half-written checkpoint would
     strand a `resume` the same way for either kind of state."""
-    target = plan_path(root, name=name)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(asdict(value), indent=2), encoding="utf-8")
-    os.replace(temporary, target)
+    _write_atomic(plan_path(root, name=name), json.dumps(asdict(value), indent=2))
 
 
 def load_plan(root: Path, name: str = "plan-state.json") -> PlanState | None:

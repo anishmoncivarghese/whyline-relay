@@ -1,3 +1,4 @@
+import errno
 import json
 import re
 import subprocess
@@ -393,3 +394,43 @@ def test_resume_goes_straight_to_the_review_when_codex_already_handed_off(
         only="WL-1", resume=True, echo=False,
     )
     assert calls == ["claude"]
+
+
+def test_a_full_disk_during_save_pause_exits_3_without_a_traceback(
+    repo: Path, monkeypatch, capsys
+):
+    from whyline_relay import state
+
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, FAKE, "silent", str(repo)],
+            "claude": [sys.executable, FAKE, "approve", str(repo)],
+        },
+        status_map=base.status_map,
+    )
+    real_write = Path.write_text
+
+    def full(self, data, *args, **kwargs):
+        if self.name == "state.json.tmp":
+            real_write(self, "partial", encoding="utf-8")
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", full)
+    with pytest.raises(SystemExit) as raised:
+        loop.run_plan(
+            repo, settings, repo / "plan.md", branch="relay/plan", echo=False
+        )
+    assert raised.value.code == 3
+    captured = capsys.readouterr()
+    text = captured.out + captured.err
+    assert "Disk full:" in text
+    assert "whyline relay resume" in text
+    assert "Traceback" not in text
+    assert state.load(repo) is None
+    assert list((repo / ".whyline" / "relay").glob("*.json.tmp")) == []

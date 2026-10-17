@@ -199,6 +199,27 @@ def test_rate_limit_marker_is_recognised():
     assert not agents.rate_limited("all tests passed")
 
 
+def test_quota_wordings_the_relay_used_to_miss_are_usage_limits():
+    assert agents.rate_limited(
+        "RESOURCE_EXHAUSTED (code 429): Individual quota reached."
+    )
+    assert agents.rate_limited("429 Too Many Requests")
+    assert agents.rate_limited(
+        "Upgrade your subscription to increase your limits"
+    )
+    assert not agents.rate_limited("Selected model is at capacity")
+
+
+def test_capacity_and_503_are_overload_not_a_usage_limit():
+    assert agents.overloaded("Selected model is at capacity")
+    assert agents.overloaded("503 Service Unavailable")
+    assert agents.overloaded("server is busy")
+    assert not agents.overloaded("all tests passed")
+    assert not agents.overloaded(
+        "RESOURCE_EXHAUSTED (code 429): Individual quota reached."
+    )
+
+
 @pytest.mark.parametrize(
     ("seconds", "formatted"),
     [(0, "0s"), (59.9, "59s"), (60, "1m0s"), (345.9, "5m45s")],

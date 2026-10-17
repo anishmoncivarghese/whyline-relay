@@ -222,12 +222,24 @@ def write_timeout_minutes(root: Path, minutes: int, *, commit: bool = True) -> P
     )
 
 
-def write_planner(root: Path, draft: str, review: str, *, commit: bool = True) -> Path:
-    """Who drafts and who reviews plans ([planner] draft / review)."""
+def write_planner(
+    root: Path, draft: str, review: str, test: str = "", *, commit: bool = True
+) -> Path:
+    """Who drafts, who writes the test plan, and who reviews ([planner]).
+
+    `test` is an agent name, or "" for no Test planner. The key is always
+    written, including the empty string, so a later read round-trips. Every
+    other table is left as it was.
+    """
+    message = f"setup: plans drafted by {draft}, reviewed by {review}"
+    if test:
+        message = f"setup: plans drafted by {draft}, tested by {test}, reviewed by {review}"
     return _write_config(
         root,
-        lambda text: _set_keys(text, "planner", {"draft": draft, "review": review}),
-        f"setup: plans drafted by {draft}, reviewed by {review}",
+        lambda text: _set_keys(
+            text, "planner", {"draft": draft, "review": review, "test": test}
+        ),
+        message,
         commit,
     )
 

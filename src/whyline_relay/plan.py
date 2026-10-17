@@ -97,6 +97,25 @@ def find(tasks: list[Task], task_id: str) -> Task | None:
     return None
 
 
+def ids_since_previous_release(tasks: list[Task], task_id: str) -> list[str]:
+    """Ids of tasks above `task_id` and below the previous release task.
+
+    The previous release is the nearest earlier task whose profile is
+    `release`. With no earlier release, the range starts at the first task.
+    `task_id` is not included. Tasks after it are not included. An unknown
+    id yields an empty list.
+    """
+    index = next((i for i, task in enumerate(tasks) if task.task_id == task_id), None)
+    if index is None:
+        return []
+    start = 0
+    for earlier in range(index - 1, -1, -1):
+        if tasks[earlier].profile == "release":
+            start = earlier + 1
+            break
+    return [task.task_id for task in tasks[start:index]]
+
+
 def tick(content: str, task_id: str) -> str:
     """Return `content` with `task_id`'s checkbox marked done. Only that line changes."""
     task = find(parse(content), task_id)

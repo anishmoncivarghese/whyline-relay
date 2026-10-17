@@ -106,6 +106,44 @@ def test_planner_max_visits_must_be_a_positive_integer(tmp_path: Path):
         config.load(tmp_path)
 
 
+def test_planner_test_round_trips(tmp_path: Path):
+    write(
+        tmp_path,
+        '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+        '[planner]\ndraft = "claude"\nreview = "codex"\ntest = "claude"\n'
+        "max_visits = 4\n",
+    )
+    assert config.load(tmp_path).planner == config.PlannerConfig(
+        draft="claude", review="codex", max_visits=4, test="claude"
+    )
+
+
+def test_planner_test_empty_string_means_no_test_planner(tmp_path: Path):
+    write(tmp_path, '[planner]\ntest = ""\n')
+    assert config.load(tmp_path).planner.test == ""
+
+
+def test_planner_test_naming_an_unknown_agent_is_refused(tmp_path: Path):
+    write(tmp_path, '[planner]\ntest = "nonexistent"\n')
+    with pytest.raises(config.ConfigError, match="not a built-in agent"):
+        config.load(tmp_path)
+
+
+def test_planner_test_must_be_a_string(tmp_path: Path):
+    write(tmp_path, "[planner]\ntest = 3\n")
+    with pytest.raises(config.ConfigError, match=r"\[planner\] test must be a string"):
+        config.load(tmp_path)
+
+
+def test_planner_test_may_name_a_configured_generic_agent(tmp_path: Path):
+    write(
+        tmp_path,
+        '[planner]\ntest = "grok"\n'
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n',
+    )
+    assert config.load(tmp_path).planner.test == "grok"
+
+
 def test_a_generic_agent_needs_adapter_and_command(tmp_path: Path):
     write(tmp_path, '[agents.aider]\ncommand = ["aider", "--message"]\n')
     with pytest.raises(config.ConfigError, match=r"agent 'aider' is not built in"):

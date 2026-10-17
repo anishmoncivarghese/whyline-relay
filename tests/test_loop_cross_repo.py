@@ -407,3 +407,82 @@ def test_resume_after_a_dirty_repo_pause_starts_the_task_fresh(repos, monkeypatc
     )
     assert "(T-1)" in git(work, "log", "-1", "--format=%s")
     assert "- [x] T-1" in (root / "plan.md").read_text()
+
+
+def test_a_cross_repo_verify_task_commits_the_test_plan_with_the_tick(
+    repos, monkeypatch
+):
+    root, work = repos
+    (root / "plan.md").write_text(
+        "- [x] MID-1: in range\n"
+        "  Do the work.\n"
+        "- [ ] VER-1: verify the phase\n"
+        "  relay-profile: verify\n"
+        f"  relay-repo: {work}\n"
+    )
+    (root / "plan.tests.md").write_text(
+        "- [ ] TP-1: the work holds\n"
+        "  covers: MID-1\n"
+        "  kind: auto\n"
+        "  steps:\n"
+        "    - run it\n"
+        "  expected:\n"
+        "    - it holds\n"
+        "  note: keep\n"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "verify plan")
+    captured: list[str] = []
+    base = scripted(["claude:ready", "claude:passed", "claude:approved"], work)
+
+    def run(
+        command,
+        prompt,
+        *,
+        cwd,
+        log_path,
+        timeout_seconds,
+        which=None,
+        echo=True,
+        agent_name=None,
+        cancel_event=None,
+        env=None,
+    ):
+        captured.append(prompt)
+        path = Path(cwd) / "plan.tests.md"
+        text = path.read_text()
+        if "note: keep" in text:
+            path.write_text(text.replace("note: keep", "note: needs a device"))
+        return base(
+            command,
+            prompt,
+            cwd=cwd,
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            which=which,
+            echo=echo,
+            agent_name=agent_name,
+            cancel_event=cancel_event,
+            env=env,
+        )
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    outcomes = loop.run_plan(
+        root,
+        settings_with_pipeline(root, make_pipeline()),
+        root / "plan.md",
+        branch="relay/plan",
+        only="VER-1",
+        echo=False,
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["VER-1"]
+    assert captured and "### TP-1:" in captured[0]
+    assert "TP-9" not in captured[0]
+    assert git(root, "log", "-1", "--format=%s") == "chore: tick VER-1 in the plan"
+    names = git(root, "show", "--name-only", "--format=", "HEAD").split()
+    assert "plan.tests.md" in names
+    assert "plan.md" in names
+    assert "needs a device" in git(root, "show", "HEAD:plan.tests.md")
+    assert "plan.tests.md" not in git(work, "show", "--name-only", "--format=", "HEAD").split()
+    assert git(root, "status", "--porcelain") == ""
+    assert git(work, "status", "--porcelain") == ""

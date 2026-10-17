@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, config, loop, planner, state
+from whyline_relay import cli, config, loop, planner, prompts, state
 
 
 FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
@@ -33,7 +33,7 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     return tmp_path
 
 
-def settings_with_planner(root: Path, max_visits=3) -> config.Config:
+def settings_with_planner(root: Path, max_visits=3, test: str = "") -> config.Config:
     base = config.load(root)
     return config.Config(
         plan=base.plan,
@@ -43,9 +43,24 @@ def settings_with_planner(root: Path, max_visits=3) -> config.Config:
         agents={"codex": ["codex"], "claude": ["claude"]},
         status_map=base.status_map,
         planner=config.PlannerConfig(
-            draft="codex", review="claude", max_visits=max_visits
+            draft="codex", review="claude", max_visits=max_visits, test=test
         ),
     )
+
+
+def _log_stages(repo: Path) -> list[str]:
+    logs = sorted((repo / ".whyline" / "relay" / "logs").glob("*.log"))
+    return [path.stem.split("-")[-1] for path in logs]
+
+
+def _recording_run(specs: list[str], seen: list[str]):
+    scripted = _scripted_run(specs)
+
+    def run(command, prompt, **kwargs):
+        seen.append(prompt)
+        return scripted(command, prompt, **kwargs)
+
+    return run
 
 
 def _scripted_run(specs: list[str]):
@@ -372,6 +387,134 @@ def test_requesting_changes_redrafts_before_the_gate_reappears(repo, monkeypatch
 
 def test_discard_with_no_session_says_so(repo):
     assert planner.discard(repo) == "Nothing to discard."
+
+
+def test_an_empty_test_planner_keeps_two_stages(repo):
+    pipe = planner._pipeline_for(settings_with_planner(repo))
+    assert pipe.profiles["default"].stages == ("draft", "review")
+    assert set(pipe.stages) == {"draft", "review"}
+    assert pipe.stages["draft"].prompt == "plan-draft"
+    assert pipe.stages["review"].prompt == "plan-review"
+    assert pipe.stages["review"].transitions == {
+        "approved": "@complete",
+        "revise": "draft",
+        "blocked": "@blocked",
+    }
+
+
+def test_a_test_planner_inserts_tests_between_draft_and_review(repo):
+    pipe = planner._pipeline_for(settings_with_planner(repo, test="codex"))
+    assert pipe.profiles["default"].stages == ("draft", "tests", "review")
+    assert pipe.stages["tests"].prompt == "plan-tests"
+    assert pipe.stages["tests"].role == "tests"
+    assert pipe.roles["tests"].agent == "codex"
+    assert pipe.stages["tests"].transitions["ready"] == "@next"
+    assert pipe.stages["review"].transitions["revise"] == "draft"
+    assert pipe.stages["review"].transitions["revise-tests"] == "tests"
+    assert pipe.stages["review"].transitions["approved"] == "@complete"
+
+
+def test_a_spec_pipeline_stays_two_stages_when_a_test_planner_is_set(repo):
+    pipe = planner._pipeline_for(
+        settings_with_planner(repo, test="codex"), kind=planner.SPEC_KIND
+    )
+    assert pipe.profiles["default"].stages == ("draft", "review")
+    assert pipe.stages["draft"].prompt == "spec-draft"
+    assert "tests" not in pipe.stages
+
+
+def test_revise_tests_returns_to_the_tests_stage(repo, monkeypatch):
+    settings = settings_with_planner(repo, test="codex")
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(
+            [
+                "codex:ready",
+                "claude:ready",
+                "codex:revise-tests",
+                "claude:ready",
+                "claude:approved",
+            ]
+        ),
+    )
+    planner._run_pipeline(repo, settings, DESCRIPTION, echo=False)
+    assert state.load_plan(repo).stage == "@complete"
+    assert _log_stages(repo) == ["draft", "tests", "review", "tests", "review"]
+
+
+def test_a_revised_draft_runs_the_tests_stage_again(repo, monkeypatch):
+    settings = settings_with_planner(repo, test="codex")
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _scripted_run(
+            [
+                "codex:ready",
+                "claude:ready",
+                "codex:revise",
+                "codex:ready",
+                "claude:ready",
+                "claude:approved",
+            ]
+        ),
+    )
+    planner._run_pipeline(repo, settings, DESCRIPTION, echo=False)
+    assert state.load_plan(repo).stage == "@complete"
+    assert _log_stages(repo) == [
+        "draft",
+        "tests",
+        "review",
+        "draft",
+        "tests",
+        "review",
+    ]
+
+
+def test_prompts_gain_test_plan_rules_only_when_a_test_planner_is_set(repo, monkeypatch):
+    draft_body = prompts.render(
+        prompts.PLAN_DRAFT,
+        task_id=planner.PLAN_TASK_ID,
+        task_text=DESCRIPTION,
+        sync_packet="PACKET",
+        round_=1,
+        review_feedback="",
+        actor="codex",
+        role="draft",
+        stage="draft",
+        profile="default",
+    )
+    empty = []
+    monkeypatch.setattr(
+        loop.agents, "run", _recording_run(["claude:ready", "claude:approved"], empty)
+    )
+    planner._run_pipeline(repo, settings_with_planner(repo), DESCRIPTION, echo=False)
+    assert empty[0].startswith(draft_body)
+    assert "relay-profile: verify" not in empty[0]
+    assert "testplan.validate" not in empty[1]
+
+    seen = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _recording_run(["codex:ready", "claude:ready", "claude:approved"], seen),
+    )
+    planner._run_pipeline(
+        repo, settings_with_planner(repo, test="codex"), DESCRIPTION, echo=False
+    )
+    assert seen[0].startswith(draft_body)
+    assert "naming the scenarios it must automate" in seen[0]
+    assert "relay-profile: verify" in seen[0]
+    assert "draft-plan.tests.md" in seen[1]
+    assert DESCRIPTION in seen[1]
+    assert "happy path" in seen[1]
+    assert "crash, offline, dirty repository, stale input" in seen[1]
+    assert "Do not write code." in seen[1]
+    assert "kind: auto" in seen[1] and "kind: manual" in seen[1]
+    assert "testplan.validate" in seen[2]
+    assert "treat every problem as a reason to revise" in seen[2]
+    assert "before its release task" in seen[2]
+    assert "revise-tests" in seen[2]
 
 
 def test_resuming_at_complete_reprints_the_draft_without_rerunning_any_agent(

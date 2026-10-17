@@ -99,7 +99,7 @@ from whyline_relay import loop
 FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
 
 
-def _settings(root: Path) -> config.Config:
+def _settings(root: Path, test: str = "") -> config.Config:
     base = config.load(root)
     return config.Config(
         plan=base.plan,
@@ -108,8 +108,21 @@ def _settings(root: Path) -> config.Config:
         branch_prefix=base.branch_prefix,
         agents={"codex": ["codex"], "claude": ["claude"]},
         status_map=base.status_map,
-        planner=config.PlannerConfig(draft="codex", review="claude", max_visits=3),
+        planner=config.PlannerConfig(
+            draft="codex", review="claude", max_visits=3, test=test
+        ),
     )
+
+
+_PLAN = "- [ ] T-1: build it\n  Do the thing.\n"
+_TESTS = """- [ ] TP-1: Build works
+  covers: T-1
+  kind: auto
+  steps:
+    - run the check
+  expected:
+    - the check passes
+"""
 
 
 def _scripted(repo: Path, specs: list[str], prompts: list[str]):
@@ -226,3 +239,65 @@ def test_resume_draft_at_complete_runs_no_agent(repo, monkeypatch, quiet_whyline
 
 def test_pending_description_is_none_without_a_draft(repo):
     assert planner.pending_description(repo) is None
+
+
+def test_approve_with_an_empty_test_planner_writes_one_file(repo: Path):
+    from whyline_relay import testplan
+
+    draft = repo / "d.md"
+    draft.write_text(_PLAN)
+    testplan.path_for(draft).write_text(_TESTS)
+    target = planner.approve(repo, _settings(repo), draft, drafted_by="codex")
+    assert target == repo / "plan.md"
+    assert target.read_text() == _PLAN
+    assert not (repo / "plan.tests.md").exists()
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
+
+
+def test_approve_with_a_test_planner_commits_the_plan_and_the_test_plan(repo: Path):
+    from whyline_relay import testplan
+
+    draft = repo / ".whyline" / "relay" / "draft-plan.md"
+    draft.parent.mkdir(parents=True)
+    draft.write_text(_PLAN)
+    testplan.path_for(draft).write_text(_TESTS)
+    target = repo / "plans" / "cache.plan.md"
+    result = planner.approve(
+        repo, _settings(repo, test="codex"), draft, drafted_by="codex", target=target
+    )
+    tests = testplan.path_for(target)
+    assert result == target
+    assert target.read_text() == _PLAN
+    assert tests == repo / "plans" / "cache.tests.md"
+    assert tests.read_text() == _TESTS
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == [
+        "plans/cache.plan.md",
+        "plans/cache.tests.md",
+    ]
+    assert _git(repo, "log", "-1", "--format=%s").strip() == (
+        "docs: add plan plans/cache.plan.md drafted by codex"
+    )
+
+
+def test_an_invalid_test_plan_blocks_approval_and_names_the_problem(repo: Path):
+    from whyline_relay import testplan
+
+    draft = repo / "d.md"
+    draft.write_text(_PLAN)
+    testplan.path_for(draft).write_text(
+        "- [ ] TP-1: nope\n  covers: NO-SUCH\n  kind: auto\n"
+    )
+    with pytest.raises(plan.PlanError, match="TP-1 covers NO-SUCH") as raised:
+        planner.approve(repo, _settings(repo, test="codex"), draft, drafted_by="codex")
+    assert "T-1 is not covered" in str(raised.value)
+    assert not (repo / "plan.md").exists()
+    assert not (repo / "plan.tests.md").exists()
+    assert _git(repo, "log", "-1", "--format=%s").strip() == "initial"
+
+
+def test_a_missing_test_plan_blocks_approval(repo: Path):
+    draft = repo / "d.md"
+    draft.write_text(_PLAN)
+    with pytest.raises(plan.PlanError, match="no test plan"):
+        planner.approve(repo, _settings(repo, test="codex"), draft, drafted_by="codex")
+    assert not (repo / "plan.md").exists()

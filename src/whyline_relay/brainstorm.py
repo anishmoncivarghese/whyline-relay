@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from whyline_relay import agents, chat, config, gitcheck, plan
+from whyline_relay import agents, chat, config, gitcheck, plan, prompts, testplan
 
 MODEL_OPTIONS = (
     ("1", "claude", "Claude"),
@@ -1439,6 +1439,34 @@ PLAN_GENERATION_PROMPT = (
     '"1. Which broker? (a) Kite (b) Upstox"; still write every task you can.'
 )
 
+_CRITERIA_MARK = re.compile(
+    r"(?:is\s+successful\s+when|acceptance\s+criteria|success\s+criteria)\s*:?\s*$",
+    re.IGNORECASE,
+)
+_CRITERIA_ITEM = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
+
+
+def acceptance_criteria(text: str) -> list[str]:
+    """Success or acceptance criteria stated in a synthesis, in file order."""
+    found: list[str] = []
+    collecting = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if _CRITERIA_MARK.search(stripped):
+            collecting = True
+            continue
+        if not collecting:
+            continue
+        if stripped.startswith("#"):
+            break
+        item = _CRITERIA_ITEM.match(stripped)
+        if item:
+            found.append(item.group(1).strip())
+            continue
+        if stripped:
+            break
+    return found
+
 
 class NothingToSynthesize(RuntimeError):
     """The shared brainstorm doc has no real content to turn into a plan."""
@@ -1453,13 +1481,15 @@ def owned_paths(root: Path, topic: str, models: Sequence[tuple[str, str]]) -> li
     and nothing else: a brainstorm run while other work is uncommitted used to
     sweep that work into "brainstorm: ..." commits via `git add -A`, and an
     agent that strays outside its brief doesn't get that committed either."""
+    draft = plan_draft_path(root)
     return [
         *(temp_path(root, key) for key, _ in models),
         shared_path(root, topic),
         _actual_agents_path(root, topic),
         _status_path(root, topic),
         _timeout_path(root, topic),
-        plan_draft_path(root),
+        draft,
+        testplan.path_for(draft),
     ]
 
 
@@ -1518,6 +1548,98 @@ def revise_synthesis(
     )
 
 
+def _write_test_plan_from_synthesis(
+    root: Path,
+    settings: "config.Config",
+    models: list[tuple[str, str]],
+    topic: str,
+    draft: Path,
+    shared: Path,
+    *,
+    kwargs: dict,
+    max_attempts: int,
+    timeout_seconds: int | None,
+    attachments: Sequence[Path],
+    cancel_event: threading.Event | None,
+    print_fn,
+) -> None:
+    """One more chat turn: the Test planner writes the test plan beside `draft`.
+
+    Failover walks settings.backup_chain the same way the plan draft does
+    (inside chat.run_turn). Only a successful current turn can leave a test
+    plan. A turn that is not ok keeps the plan draft, removes a valid file
+    already beside it so a later approve cannot reuse that stale plan, and
+    reports that no test plan was written. It does not raise.
+    """
+    test_agent = settings.planner.test
+    if not test_agent:
+        return
+    test_path = testplan.path_for(draft)
+    criteria = acceptance_criteria(final_synthesis(root, topic))
+    exclude = frozenset(key for key, _ in models if key != test_agent)
+    plan_text = draft.read_text(encoding="utf-8")
+    prompt = prompts.brainstorm_test_plan_prompt(
+        shared_path=shared,
+        draft_path=draft,
+        test_path=test_path,
+        criteria=criteria,
+    )
+    last_problems: list[str] = []
+    for attempt in range(1, max_attempts + 1):
+        if _cancelled(cancel_event):
+            raise agents.AgentCancelled("brainstorm cancelled by user")
+        record = chat.run_turn(
+            root,
+            agent=test_agent,
+            prompt=prompt,
+            settings=settings,
+            commit_message=(
+                f'brainstorm: {test_agent} writes the test plan from synthesis '
+                f'on "{topic}"'
+            ),
+            commit_paths=owned_paths(root, topic, models),
+            exclude=exclude,
+            timeout_seconds=timeout_seconds,
+            attachments=attachments,
+            cancel_event=cancel_event,
+            **kwargs,
+        )
+        # Check the turn before the file. A valid test plan left by an
+        # earlier run would otherwise pass validation and look like this
+        # turn's output, including to a later approve.
+        if not record.get("ok"):
+            if test_path.is_file():
+                existing = test_path.read_text(encoding="utf-8")
+                if existing and not testplan.validate(existing, plan_text):
+                    test_path.unlink()
+            notice = record.get("failover_notice") or "the Test planner failed"
+            print_fn(f"No test plan was written: {notice}")
+            return
+        test_text = (
+            test_path.read_text(encoding="utf-8") if test_path.is_file() else ""
+        )
+        last_problems = (
+            testplan.validate(test_text, plan_text)
+            if test_text
+            else [f"no test plan at {test_path}"]
+        )
+        if not last_problems:
+            return
+        if attempt < max_attempts:
+            prompt = (
+                prompts.brainstorm_test_plan_prompt(
+                    shared_path=shared,
+                    draft_path=draft,
+                    test_path=test_path,
+                    criteria=criteria,
+                )
+                + f"\n\nYour previous attempt at {test_path} did not validate: "
+                + "; ".join(last_problems)
+                + f"\n\nRewrite the whole file at {test_path}, fixing this."
+            )
+    print_fn("No test plan was written: " + "; ".join(last_problems))
+
+
 def generate_plan_from_synthesis(
     root: Path,
     settings: "config.Config",
@@ -1532,6 +1654,7 @@ def generate_plan_from_synthesis(
     timeout_seconds: int | None = None,
     attachments: Sequence[Path] = (),
     cancel_event: threading.Event | None = None,
+    print_fn=None,
 ) -> Path:
     """Prompts final_agent to turn its own synthesis into a real plan.md,
     validating with plan.parse() and retrying once on a parse error. A draft
@@ -1546,7 +1669,13 @@ def generate_plan_from_synthesis(
     `timeout_seconds` applies to every draft attempt. Omitted, the topic
     file is loaded; a missing load is DEFAULT_TIMEOUT_SECONDS.
     chat.NO_LIMIT waits with no timer. A set `cancel_event` returns before
-    the next attempt. An attempt that already committed stays committed."""
+    the next attempt. An attempt that already committed stays committed.
+    When ``settings.planner.test`` names an agent, one more turn writes the
+    test plan beside the draft. A Test planner failure walks the backup
+    chain the same way the plan draft does; an exhausted chain keeps the
+    plan draft, drops a stale valid test plan, and reports that no test
+    plan was written."""
+    print_fn = print_fn if print_fn is not None else print
     timeout_seconds = _resolve_timeout(root, topic, timeout_seconds)
     shared = shared_path(root, topic)
     if not shared.exists() or not shared.read_text(encoding="utf-8").strip():
@@ -1589,6 +1718,20 @@ def generate_plan_from_synthesis(
             tasks = plan.parse(draft.read_text(encoding="utf-8"))
             if not tasks:
                 raise plan.PlanError(f"{draft} has no checklist tasks")
+            _write_test_plan_from_synthesis(
+                root,
+                settings,
+                models,
+                topic,
+                draft,
+                shared,
+                kwargs=kwargs,
+                max_attempts=max_attempts,
+                timeout_seconds=timeout_seconds,
+                attachments=attachments,
+                cancel_event=cancel_event,
+                print_fn=print_fn,
+            )
             return draft
         except plan.PlanError as error:
             last_error = error

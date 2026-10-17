@@ -433,6 +433,48 @@ _GROK_402 = (
 )
 
 
+_ANTIGRAVITY_QUOTA = (
+    "RESOURCE_EXHAUSTED (code 429): Individual quota reached. "
+    "Resets in 158h14m22s."
+)
+
+
+def test_antigravity_quota_text_is_a_rate_limit_not_an_overload():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    assert failover.classify(ADAPTER, _ANTIGRAVITY_QUOTA, ["agy"]) == "rate-limit"
+    assert failover.failover_reason(ADAPTER, _ANTIGRAVITY_QUOTA, ["agy"]) == "rate-limit"
+
+
+def test_capacity_and_503_classify_as_overload():
+    from whyline_relay.adapters.generic import ADAPTER
+
+    assert (
+        failover.classify(ADAPTER, "Selected model is at capacity", ["codex"])
+        == "overload"
+    )
+    assert (
+        failover.classify(ADAPTER, "503 Service Unavailable", ["codex"])
+        == "overload"
+    )
+    # Chat writes a sticky override for every failover_reason. Capacity must
+    # not come back from that function.
+    assert failover.failover_reason(
+        ADAPTER, "Selected model is at capacity", ["codex"]
+    ) is None
+
+
+def test_reset_deadline_stores_an_absolute_time():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
+    deadline = failover.reset_deadline(_ANTIGRAVITY_QUOTA, now=now)
+    assert datetime.fromisoformat(deadline) - now == timedelta(
+        hours=158, minutes=14, seconds=22
+    )
+    assert failover.reset_deadline("no reset here") == ""
+
+
 def test_grok_out_of_paid_balance_is_a_usage_limit():
     from whyline_relay.adapters.generic import ADAPTER
 

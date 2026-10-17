@@ -10,6 +10,7 @@ from typing import Callable, Literal, TextIO
 
 from whyline_relay import (
     adapters,
+    agents,
     config,
     gitcheck,
     invocation,
@@ -434,7 +435,12 @@ def _plan_checks(
                         "but no [pipeline] is configured; it will be ignored",
                     )
                 )
-            elif task.profile not in pipeline.profiles:
+            elif (
+                task.profile not in pipeline.profiles
+                # `verify` is a marker. With no profile of that name, _profile_for
+                # runs the default profile, so startup must let that task through.
+                and loop._profile_for(task, pipeline) not in pipeline.profiles
+            ):
                 checks.append(
                     _result(
                         "FAIL",
@@ -565,6 +571,10 @@ def run(
                 if dirty
                 else _result("ok", "working tree is clean")
             )
+
+    low_disk = agents.low_disk_message(shutil.disk_usage(root).free)
+    if low_disk is not None:
+        results.append(_result("FAIL", low_disk))
 
     active = running.live(root)
     results.append(
