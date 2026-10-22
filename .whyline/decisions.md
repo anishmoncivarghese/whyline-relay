@@ -4946,3 +4946,19 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e671607171e5463c913eae3de10b5c75 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-24T11:08:04.213Z"} -->
+## 2026-10-22 — Plan RLY-1..3: plan-only commits mid-task, roles status wording, generic model_flag
+
+**Actor:** claude
+**Role:** planner
+**Task:** RLY-PLAN
+
+**Because:** Found while running agentdock's Idea Inbox plan: plan insertions needed a lucky pause, roles status blamed the wrong agent, and Set up cannot give grok/antigravity a model
+
+**Rejected:**
+
+- Work around all three in agentdock's console only — RLY-1 cannot be done outside the relay loop
+
+**Files:** relay-followups-plan.md
+
+<!-- whyline-event: 12ca473f142e4ccbac809feec3807ad3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-22T04:08:16.933Z"} -->
