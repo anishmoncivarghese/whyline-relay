@@ -4925,3 +4925,24 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: a32ca4ff363346ca9fcbd86f6a8ebb98 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-24T11:03:35.006Z"} -->
+
+## 2026-10-24 — Release whyline-relay 0.2.39 for prefixed Grok cancellation recovery
+
+**Actor:** codex
+**Role:** release
+**Task:** GROK-JSON-REL
+
+**Because:** The exact tagged tree passed the focused and full suites locally, all four GitHub release jobs, archive safety checks, isolated Python 3.11 wheel installation, and the published wheel extracts the real PANE-1 Grok session id
+
+**Rejected:**
+
+- Use only an editable local install — a later uv sync would restore 0.2.38 and reproduce the pause
+
+**Test:** uv run pytest -q: passed
+**Test:** GitHub release workflow 40088435057: passed
+**Test:** PyPI whyline-relay 0.2.39: published
+
+**Files:** pyproject.toml, docs/releases/v0.2.39.md
+
+<!-- whyline-event: e671607171e5463c913eae3de10b5c75 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-24T11:08:04.213Z"} -->
