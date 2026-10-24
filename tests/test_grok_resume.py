@@ -15,6 +15,22 @@ COMMAND = ["grok", "--output-format", "json", "--allow", "Edit",
            "--allow", "Bash(git add:*)", "-p"]
 
 
+def test_a_prefixed_pretty_printed_cancellation_names_its_session():
+    output = (
+        "permission required: Execute `python -c \"import whyline_relay\"` "
+        "was not run, as a headless run cannot ask for approval\n"
+        "{\n"
+        '  "text": "I will inspect the relay package.",\n'
+        '  "stopReason": "cancelled",\n'
+        '  "sessionId": "01a16d84-8d8e-7181-a955-e60435e7a788"\n'
+        "}\n"
+    )
+
+    assert grok.resumable_session(generic.ADAPTER, output, COMMAND) == (
+        "01a16d84-8d8e-7181-a955-e60435e7a788"
+    )
+
+
 def test_a_cancelled_grok_turn_names_its_session_for_resuming():
     assert grok.resumable_session(generic.ADAPTER, CANCELLED, COMMAND) == "s-1"
 

@@ -4904,3 +4904,24 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 892aae516b014ce28f18bddda1f05631 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-17T20:46:31.383Z"} -->
+
+## 2026-10-24 — Parse a trailing Grok JSON block after permission diagnostics
+
+**Actor:** codex
+**Role:** implementer
+**Task:** GROK-JSON-1
+
+**Because:** Headless Grok prefixes its pretty-printed cancelled result with a permission-required line; accepting only a complete document or one compact final JSON line hid stopReason and sessionId, so Relay paused instead of using its existing same-session recovery
+
+**Rejected:**
+
+- Add more Grok shell allow rules — future unlisted commands would reproduce the same cancellation
+- Special-case the console pause text — the relay adapter is the source that must recover the structured result for every caller
+
+**Test:** uv run pytest -q tests/test_grok_resume.py: passed
+**Test:** uv run pytest -q: passed
+
+**Files:** src/whyline_relay/adapters/base.py, tests/test_grok_resume.py
+
+<!-- whyline-event: a32ca4ff363346ca9fcbd86f6a8ebb98 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-10-24T11:03:35.006Z"} -->
