@@ -106,3 +106,16 @@ The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can
   - a marker without `stage`/`visit` (the 0.2.38 shape) still reads, with "" and 0
   - a marker with `visit: "2"` is rejected
   - the echo includes `visit 2` only on a revisit
+
+- [ ] RLY-12: Ask testers and reviewers for one `--issue` per problem, and hand the list to the implementer
+  Edit `src/whyline_relay/prompts.py`, `src/whyline_relay/handoff.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
+  Needs whyline (agentdock) with `whyline handoff --issue` (agentdock RST-5). With an older whyline, `--issue` is refused, so gate the prompt text on `whylinecmd` reporting support (`whyline handoff --help` lists `--issue`, cached per process), and keep today's text otherwise.
+  1. `Handoff` gains `issues: tuple[str, ...] = ()`, read with `_texts(record, "issues")`.
+  2. The built-in `TEST` and `REVIEW` templates, in their failed/changes outcome: "Pass one `--issue "<one concrete problem, with file and line when known>"` per problem, in priority order, as well as `--summary`." Passed and approved outcomes don't take `--issue`.
+  3. When the loop sends work back to the implementer, the feedback becomes the summary followed by `Issues to fix:` and a numbered list of `issues` (when there are any). The implement template asks the implementer to say in its summary which numbers it fixed.
+  4. The status echo after a send-back becomes `==> relay: <stage> sent <task> back with N issues` (or `with its summary` when there are none).
+  Tests:
+  - `issues` round-trip through `read`, and an old record without them reads as ()
+  - the prompts include `--issue` only when supported
+  - the implementer's feedback has the numbered list
+  - the echo with and without issues
