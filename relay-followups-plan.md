@@ -72,3 +72,21 @@ At JOB-8, grok was out of credit ("402 Payment Required: Grok Build usage balanc
   Add `failover.ready_agents(root, settings, *, which=shutil.which, runner=subprocess.run, now=None) -> list[AgentReadiness]`. `AgentReadiness` is a frozen dataclass `(agent, ready: bool, why: str)`, one row per configured or builtin agent, in config order. `why` is "" when ready, otherwise one of "not installed", "not logged in", "out of quota until <YYYY-MM-DD HH:MM>", "out of quota (reset time unknown)". Reuse preflight's PATH and login checks; do not run the agents.
   `whyline relay roles status` prints one line per agent from it, after today's lines. agentdock's console calls the same function (SWP-1).
   Tests: each `why` case, config order, a limited agent is not ready even though it is logged in, and `roles status` prints the rows.
+
+## Found while running agentdock's workflows-1-engine plan (2026-10-31)
+
+At WF-13, every stage approved, then the relay's own commit failed with `git add -A failed: fatal: Unable to create '/Users/anish/agentdock/.git/index.lock': File exists.` The lock belonged to whyline console's `git status` poll, which runs several times a second; the lock was gone a second later. The relay treated the failure as fatal and cleared its state, so the approved work sat uncommitted with `task: (none)`, and Resolve recommended stashing it. agentdock now sets `GIT_OPTIONAL_LOCKS=0` so its own polls stop taking the lock, but any other tool can still hold it briefly (an editor, a git GUI, another agent).
+
+- [ ] RLY-10: Wait out a brief git index lock, and never lose an approved task to a commit failure
+  Edit `src/whyline_relay/gitcheck.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
+  1. `gitcheck._git` retries a command whose stderr contains `index.lock': File exists` (or `Unable to create` and `index.lock`), waiting 0.25 s, 0.5 s, 1 s, 2 s, 2 s, 2 s (about 8 s in all). It does not retry any other failure. The wait uses an injectable `sleep`, so tests never sleep. After the last try it raises `GitError` with the original message plus `(another git program held the index lock for 8 s; close it, then resume)`.
+  2. The relay's read-only git calls (`status`, `diff`, `rev-parse`, `log`, `show`) run with `GIT_OPTIONAL_LOCKS=0` in their environment, so the relay never holds the lock for a status check either.
+  3. A `GitError` from `_commit_and_approve` (in `commit_all` or `commit_empty`) raises `Paused`, not a crash, with the reason `<task>: approved, but the commit failed: <error>. Resume commits it.` State keeps the task and the approved handoff, so `resume` goes straight to the commit (the existing approved-handoff path) without running any stage again.
+  4. The ticked-plan commit gets the same handling: a failure pauses with the task approved and committed, and resume only ticks.
+  Tests:
+  - a lock error that clears on the third try commits, with the expected sleeps
+  - a lock error that never clears raises with the plain message
+  - a non-lock git error is not retried
+  - read-only calls carry `GIT_OPTIONAL_LOCKS=0`
+  - a commit failure after approval pauses with state kept, and resume commits without running a stage (assert the stub runner is never called)
+  - a tick-commit failure pauses, and resume only ticks
