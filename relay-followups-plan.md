@@ -90,3 +90,19 @@ At WF-13, every stage approved, then the relay's own commit failed with `git add
   - read-only calls carry `GIT_OPTIONAL_LOCKS=0`
   - a commit failure after approval pauses with state kept, and resume commits without running a stage (assert the stub runner is never called)
   - a tick-commit failure pauses, and resume only ticks
+
+## Requested while running agentdock's job-search-4 plan (2026-10-31)
+
+The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can't tell whether the task is being implemented, reviewed or fixed after a rejection, or how many times it has gone round. `running.json` already holds the role and round, but not the stage or how many times that stage has run.
+
+- [ ] RLY-11: Put the stage and its visit count in the live-run marker
+  Edit `src/whyline_relay/running.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
+  1. `Running` gains `stage: str = ""` and `visit: int = 0`, both defaulted, so an older marker still reads. `read` rejects a non-str `stage` or non-int `visit`, the same way it checks the other fields.
+  2. `running.start_turn(root, agent, task, round_, role="", *, stage="", visit=0)` writes them.
+  3. `run_agent` gains keyword `visit: int = 0` and passes `stage` and `visit` through to `start_turn`. The pipeline loop passes `visit=stage_visits[current_stage_id]`. The legacy path (no pipeline) passes the stage id it already uses as `action_label` and visit 0.
+  4. The status echo becomes `==> {agent}: {action} {task} (round R of N)` on a first visit, and `==> {agent}: {action} {task}, visit V (round R of N)` when V > 1. Nothing else in the echo changes.
+  Tests:
+  - an implement → review → implement → review run writes visits 1, 1, 2, 2 to the marker (assert after each stub turn)
+  - a marker without `stage`/`visit` (the 0.2.38 shape) still reads, with "" and 0
+  - a marker with `visit: "2"` is rejected
+  - the echo includes `visit 2` only on a revisit
