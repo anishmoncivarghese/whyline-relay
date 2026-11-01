@@ -68,7 +68,7 @@ At JOB-8, grok was out of credit ("402 Payment Required: Grok Build usage balanc
   A successful turn by an agent clears its record.
   Tests: a 429 with "Resets in 159h57m31s" records the right deadline; the chain skips a limited backup without running it; a past deadline is dropped; a 402 balance message records rate-limit with a 24-hour expiry; overload records nothing; a successful turn clears the record; the "every backup" pause still fires when every chain entry is limited.
 
-- [ ] RLY-9: Say which agents are ready, and why the others are not
+- [x] RLY-9: Say which agents are ready, and why the others are not
   Edit `src/whyline_relay/failover.py`, `src/whyline_relay/preflight.py` and `src/whyline_relay/roles.py`, with tests in `tests/`.
   Add `failover.ready_agents(root, settings, *, which=shutil.which, runner=subprocess.run, now=None) -> list[AgentReadiness]`. `AgentReadiness` is a frozen dataclass `(agent, ready: bool, why: str)`, one row per configured or builtin agent, in config order. `why` is "" when ready, otherwise one of "not installed", "not logged in", "out of quota until <YYYY-MM-DD HH:MM>", "out of quota (reset time unknown)". Reuse preflight's PATH and login checks; do not run the agents.
   `whyline relay roles status` prints one line per agent from it, after today's lines. agentdock's console calls the same function (SWP-1).
