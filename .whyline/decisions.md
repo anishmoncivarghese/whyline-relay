@@ -5191,3 +5191,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: fccaea1ffbf1421ca81c5c2a1e0be276 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:09:01.592Z"} -->
+
+## 2026-11-01 — Claude rules are appended in config.load for every agent on the claude adapter, after the model flag
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-5
+
+**Because:** load() is where builtin commands get model; doing it there means preflight, bypass checks and logs all see the command that actually runs, and claude variants (adapter = "claude") get the same limits
+
+**Rejected:**
+
+- Appending at run time in loop.run_agent — the configured command would differ from what runs, and the spec names config.py
+- Only the literal 'claude' agent — variants like claude-opus are the same headless CLI and need the same limits
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/claude.py
+
+<!-- whyline-event: dd2db4bc59cb4f0d94ddc6744acc264a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:23:12.253Z"} -->
+
+## 2026-11-01 — A command already carrying --append-system-prompt or --append-system-prompt-file (also the --flag=value form) is left exactly as configured
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-5
+
+**Because:** the repository's own system prompt text wins, and passing the flag twice would make claude's behaviour depend on which one it honours
+
+**Rejected:**
+
+- Merging relay rules into the repository's text — silently rewrites user config
+
+**Files:** src/whyline_relay/adapters/claude.py
+
+<!-- whyline-event: d2ffb6317b7243a8921c462691d68906 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:23:14.075Z"} -->
+
+## 2026-11-01 — Pass RLY-5 behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-5
+
+**Because:** Focused Claude-rule coverage passed and the full suite passed with 1179 tests; detected, configured, and empty test commands behave correctly, repository prompt flags are not doubled, the user prompt remains last, and codex/generic agents are unchanged
+
+**Files:** src/whyline_relay/adapters/claude.py, src/whyline_relay/config.py, src/whyline_relay/recipes.py, tests/test_claude_rules.py
+
+<!-- whyline-event: 5f7536b25a1c49e8ba12897a2c3231fe -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:26:17.149Z"} -->
+
+## 2026-11-01 — Approve RLY-5 Claude limits and test-command prompt behavior
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-5
+
+**Because:** The implementation appends the shared headless rules and resolved test command only to Claude-adapter commands, preserves repository-supplied system-prompt flags and prompt ordering, leaves other adapters unchanged, and uv run pytest -q passed
+
+**Files:** src/whyline_relay/adapters/claude.py, src/whyline_relay/config.py, src/whyline_relay/recipes.py, tests/test_claude_rules.py
+
+<!-- whyline-event: e7286b726a90471ab82b5a0dfdabfcbb -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:29:17.151Z"} -->

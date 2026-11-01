@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from whyline_relay import adapters, pipeline as pipeline_module, recipes
+from whyline_relay.adapters import claude as claude_adapter
 
 DEFAULTS = {
     "plan": "plan.md",
@@ -437,6 +438,15 @@ def load(root: Path) -> Config:
             continue
         agents[name] = list(command)
         configured_adapters[name] = "generic"
+
+    # Every agent on the claude adapter, the built-in one and its variants.
+    claude_agents = [
+        name for name in agents if configured_adapters.get(name, name) == "claude"
+    ]
+    if claude_agents:
+        rules_test_command = test_command(root)
+        for name in claude_agents:
+            agents[name] = claude_adapter.with_rules(agents[name], rules_test_command)
 
     role_values = dict(raw.get("roles") or {})
     release_role = role_values.pop("release", "human")

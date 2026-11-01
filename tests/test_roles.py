@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, failover, roles
+from whyline_relay import config, failover, recipes, roles
 
 
 def _write(root: Path, text: str) -> None:
@@ -110,6 +110,8 @@ def test_set_role_with_a_model_writes_the_agents_block(tmp_path):
         *config.DEFAULTS["agents"]["claude"],
         "--model",
         "opus",
+        "--append-system-prompt",
+        recipes.CLAUDE_RULES,
     ]
 
 

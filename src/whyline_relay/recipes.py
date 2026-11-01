@@ -16,6 +16,12 @@ GROK_RULES = (
     "shell commands."
 )
 
+# Headless claude gets the same limits, plus the one test command it may run.
+# adapters.claude.system_prompt fills in the command, or drops that line when
+# the repository has none.
+CLAUDE_RULES = GROK_RULES
+CLAUDE_TEST_RULE = "Run tests only with `{test_command}`."
+
 # `-p` must stay last: the relay appends the prompt as the final argument,
 # and both CLIs' `-p` swallows whatever token follows it.
 RECIPES: dict[str, tuple[str, ...]] = {

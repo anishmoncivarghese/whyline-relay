@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from whyline_relay import recipes
 from whyline_relay.adapters.base import (
     Adapter,
     Manages,
@@ -73,6 +74,26 @@ def diagnose(text: str) -> str:
                 "Check .whyline/relay/claude-settings.json"
             )
     return last_line_detail(text)
+
+
+# A command that already passes its own system prompt text keeps it, undoubled.
+RULES_FLAGS = ("--append-system-prompt", "--append-system-prompt-file")
+
+
+def system_prompt(test_command: str) -> str:
+    if not test_command:
+        return recipes.CLAUDE_RULES
+    test_rule = recipes.CLAUDE_TEST_RULE.format(test_command=test_command)
+    return f"{recipes.CLAUDE_RULES} {test_rule}"
+
+
+def with_rules(command: list[str], test_command: str) -> list[str]:
+    """`command` plus `--append-system-prompt <rules>`, unless it already
+    carries either system-prompt flag. The relay appends the prompt after
+    this, so the prompt stays the last argument."""
+    if any(part.split("=", 1)[0] in RULES_FLAGS for part in command):
+        return list(command)
+    return [*command, "--append-system-prompt", system_prompt(test_command)]
 
 
 def extract_response(text: str) -> str:

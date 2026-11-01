@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config
+from whyline_relay import config, recipes
 
+# A bare tmp_path has no stack, so claude gets the rules without a test line.
+NO_TEST_RULES = ["--append-system-prompt", recipes.CLAUDE_RULES]
 
 PIPELINE_TOML = '''
 [roles]
@@ -344,7 +346,9 @@ def test_a_custom_name_may_alias_the_claude_adapter(tmp_path: Path):
         '[agents.claude-opus]\nadapter = "claude"\n',
     )
     loaded = config.load(tmp_path)
-    assert loaded.agents["claude-opus"] == config.DEFAULTS["agents"]["claude"]
+    assert loaded.agents["claude-opus"] == [
+        *config.DEFAULTS["agents"]["claude"], *NO_TEST_RULES
+    ]
     assert config.adapter_for(loaded, "claude-opus").name == "claude"
 
 
@@ -355,7 +359,9 @@ def test_a_claude_variant_can_override_command_and_add_a_model(tmp_path: Path):
         'command = ["claude", "-p"]\nmodel = "opus"\n',
     )
     loaded = config.load(tmp_path)
-    assert loaded.agents["claude-opus"] == ["claude", "-p", "--model", "opus"]
+    assert loaded.agents["claude-opus"] == [
+        "claude", "-p", "--model", "opus", *NO_TEST_RULES
+    ]
     assert config.adapter_for(loaded, "claude-opus").name == "claude"
 
 
@@ -378,6 +384,7 @@ def test_the_literal_built_in_name_can_also_take_a_model(tmp_path: Path):
         *config.DEFAULTS["agents"]["claude"],
         "--model",
         "haiku",
+        *NO_TEST_RULES,
     ]
 
 
