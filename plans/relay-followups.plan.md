@@ -96,7 +96,7 @@ At WF-13, every stage approved, then the relay's own commit failed with `git add
 
 The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can't tell whether the task is being implemented, reviewed or fixed after a rejection, or how many times it has gone round. `running.json` already holds the role and round, but not the stage or how many times that stage has run.
 
-- [ ] RLY-11: Put the stage and its visit count in the live-run marker
+- [x] RLY-11: Put the stage and its visit count in the live-run marker
   Edit `src/whyline_relay/running.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
   1. `Running` gains `stage: str = ""` and `visit: int = 0`, both defaulted, so an older marker still reads. `read` rejects a non-str `stage` or non-int `visit`, the same way it checks the other fields.
   2. `running.start_turn(root, agent, task, round_, role="", *, stage="", visit=0)` writes them.
