@@ -15,7 +15,7 @@ Global constraints:
 - No new dependency.
 - Run the focused tests and the complete suite after each task.
 
-- [ ] RDOC-1: Public document kinds and a `documents` module
+- [x] RDOC-1: Public document kinds and a `documents` module
   Edit `src/whyline_relay/planner.py`, `src/whyline_relay/prompts.py`, a new `src/whyline_relay/documents.py` and their tests only.
   1. Make `_Kind` public as `DocKind(task_id, draft_name, state_name, draft_prompt, review_prompt)`. Keep `_Kind` as an alias. Add `DocKind.named(name)`, which builds `task_id="__<name>__"`, `draft_name="draft-<name>.md"`, `state_name="<name>-state.json"` and prompts `<name>-draft`/`<name>-review`. The checkpoint and draft file are separate for each name.
   2. Add built-in prompts, in the style of `SPEC_DRAFT`/`SPEC_REVIEW`:
