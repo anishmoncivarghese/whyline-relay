@@ -108,7 +108,7 @@ The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can
   - a marker with `visit: "2"` is rejected
   - the echo includes `visit 2` only on a revisit
 
-- [ ] RLY-12: Ask testers and reviewers for one `--issue` per problem, and hand the list to the implementer
+- [x] RLY-12: Ask testers and reviewers for one `--issue` per problem, and hand the list to the implementer
   Edit `src/whyline_relay/prompts.py`, `src/whyline_relay/handoff.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
   Needs whyline (agentdock) with `whyline handoff --issue` (agentdock RST-5). With an older whyline, `--issue` is refused, so gate the prompt text on `whylinecmd` reporting support (`whyline handoff --help` lists `--issue`, cached per process), and keep today's text otherwise.
   1. `Handoff` gains `issues: tuple[str, ...] = ()`, read with `_texts(record, "issues")`.
