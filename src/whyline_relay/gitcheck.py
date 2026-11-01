@@ -161,6 +161,17 @@ def dirty_paths(root: Path) -> list[str]:
     return [line.split(maxsplit=1)[1] for line in output.splitlines() if line.strip()]
 
 
+def differs_from(root: Path, base_commit: str) -> bool:
+    """True when the working tree, untracked files included, differs from
+    `base_commit` outside `.whyline/`. Notes and handoffs live there, so a turn
+    that only recorded them has not written any code."""
+    changed = _git(root, "diff", "--name-only", "-z", base_commit, "--").split("\0")
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+    return any(
+        path and not path.startswith(".whyline/") for path in changed + untracked
+    )
+
+
 def commit_decision_log(root: Path, task_id: str) -> bool:
     """Commit `.whyline/decisions.md` when it is the only change in the tree.
 

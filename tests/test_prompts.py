@@ -67,6 +67,24 @@ def test_review_template_requires_independent_plain_test_command():
     assert "environment-variable prefixes, pipes, or shell chains" in prompts.REVIEW
 
 
+def test_implement_template_hands_off_ready_when_only_the_test_run_was_refused():
+    text = " ".join(prompts.IMPLEMENT.split())
+    assert "only the test run was refused, do not use blocked" in text
+    assert "the denied command in your summary" in text
+
+
+def test_test_template_shows_the_previous_stages_feedback():
+    rendered = prompts.render(
+        prompts.TEST,
+        task_id="T-1",
+        task_text="T-1: x",
+        sync_packet="",
+        round_=2,
+        review_feedback="claude could not run `pytest`; the tester will run the tests.",
+    )
+    assert "claude could not run `pytest`; the tester will run the tests." in rendered
+
+
 def test_review_template_blocks_when_test_command_is_denied():
     assert "If a test command is denied, do not approve" in prompts.REVIEW
     assert "--status blocked" in prompts.REVIEW

@@ -31,6 +31,8 @@ Finish by handing off, exactly once, with exactly these values:
       --summary "<what you changed>" --file <each file you touched> \
       --test "<command>: <result>" --risk "<anything the reviewer should check>"
 
-If you cannot complete the task, hand off with --status blocked and a --question
-saying what you need. Do not exit without running whyline handoff: the relay
-reads that record to decide what happens next, and stops if it is missing.
+If the code is written and only the test run was refused, do not use blocked:
+hand off with the ready status above and the denied command in your summary,
+and the tester will run the tests. If you cannot complete the task, hand off with --status blocked and a
+--question saying what you need. Do not exit without running whyline handoff: the
+relay reads that record to decide what happens next, and stops if it is missing.

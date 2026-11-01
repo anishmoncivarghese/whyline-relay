@@ -150,6 +150,64 @@ def _blocked_pause_reason(
     return _blocked_reason(agent, record)
 
 
+def _is_test_command(command: str, test_command: str | None) -> bool:
+    words = (test_command or "").split()
+    return (
+        "pytest" in command
+        or "npm test" in command
+        or (bool(words) and words[0] in command)
+    )
+
+
+def _test_only_refusal(
+    root: Path,
+    settings: config.Config,
+    agent: str,
+    record: handoff.Handoff,
+    target: Path,
+    repo: Path,
+    base_commit: str,
+) -> str | None:
+    """The first refused command when an implementer wrote code and was
+    stopped only by refused test commands; otherwise None. The tester runs the
+    tests next, so a draft that is otherwise done need not wait for a human.
+    Only Claude's output reports denials, so other agents always pause."""
+    if record.questions or config.adapter_for(settings, agent).name != "claude":
+        return None
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    denied = claude_adapter.denied_commands(text)
+    if not denied:
+        return None
+    try:
+        configured = config.configured_test_command(root)
+    except config.ConfigError:
+        configured = None
+    if not all(_is_test_command(command, configured) for command in denied):
+        return None
+    try:
+        if not gitcheck.differs_from(repo, base_commit):
+            return None
+    except gitcheck.GitError:
+        return None
+    return denied[0]
+
+
+def _ready_target(
+    pipe: pipeline.Pipeline, profile_name: str, stage: pipeline.Stage
+) -> str | None:
+    """The stage a `ready` handoff from `stage` goes to, or None when it does
+    not route to another stage."""
+    target = stage.transitions.get("ready")
+    if target == "@next":
+        order = pipe.profiles[profile_name].stages
+        index = order.index(stage.id)
+        target = order[index + 1] if index + 1 < len(order) else None
+    return target if target in pipe.stages else None
+
+
 def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     reason = f"{agent} reported blocked: {record.summary or 'no summary given'}"
     for question in record.questions:
@@ -1069,6 +1127,30 @@ def _run_configured_task(
                 current_stage_id=current_stage_id,
                 profile_name=profile_name,
             )
+            resumed_stage = pipe.stages[current_stage_id]
+            moved_on = ""
+            if resumed.kind == "blocked" and resumed_stage.role == "implementer":
+                # The saved round is the turn that wrote this handoff, so its
+                # log holds the refusals the fresh path would have read.
+                refused_by = current.from_actor or effective_agents[resumed_stage.role]
+                ready_stage = _ready_target(pipe, profile_name, resumed_stage)
+                refused = ready_stage and _test_only_refusal(
+                    root,
+                    settings,
+                    refused_by,
+                    current,
+                    log_path(root, task.task_id, round_, refused_by, current_stage_id),
+                    repo,
+                    base_commit,
+                )
+                if refused:
+                    moved_on = (
+                        f"{refused_by} could not run `{refused}`; "
+                        "the tester will run the tests."
+                    )
+                    if echo:
+                        agents.print_status(moved_on)
+                    resumed = pipeline.Decision("advance", ready_stage)
             if resumed.kind == "advance":
                 # Pause before the visit is counted, or resume would burn one
                 # for the stage the refusal was about to be sent back to.
@@ -1090,7 +1172,9 @@ def _run_configured_task(
                     stage_visits.get(current_stage_id, 0) + 1
                 )
                 check_visit_cap(pipe, current_stage_id, stage_visits, task)
-                feedback = current.summary
+                feedback = "\n\n".join(
+                    part for part in (moved_on, current.summary) if part
+                )
             elif resumed.kind == "complete":
                 return _commit_and_approve(
                     root, task, base_commit, round_, None, current.summary,
@@ -1232,6 +1316,19 @@ def _run_configured_task(
                 f"`{invocation.command('init')} --overwrite`",
                 target,
             )
+        moved_on = ""
+        if decision.kind == "blocked" and stage.role == "implementer":
+            ready_stage = _ready_target(pipe, profile_name, stage)
+            refused = ready_stage and _test_only_refusal(
+                root, settings, agent, record, target, repo, base_commit
+            )
+            if refused:
+                moved_on = (
+                    f"{agent} could not run `{refused}`; the tester will run the tests."
+                )
+                if echo:
+                    agents.print_status(moved_on)
+                decision = pipeline.Decision("advance", ready_stage)
         if decision.kind == "blocked":
             raise Paused(
                 _blocked_pause_reason(root, settings, agent, record, target), target
@@ -1270,7 +1367,7 @@ def _run_configured_task(
             record.summary,
         ):
             raise Paused(_sandbox_pause_reason(agent, record.summary), target)
-        feedback = record.summary
+        feedback = "\n\n".join(part for part in (moved_on, record.summary) if part)
         current_stage_id = decision.target_stage
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
         check_visit_cap(pipe, current_stage_id, stage_visits, task)

@@ -5297,3 +5297,160 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: f1a474f3885647c18260ff80b56173cf -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:44:29.895Z"} -->
+
+## 2026-11-01 — A draft blocked only by refused test commands advances on the stage's ready route when the tree differs from base outside .whyline/
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-7
+
+**Because:** the tester runs the tests anyway; notes and handoffs under .whyline/ are not code, so they must not count as changes
+
+**Rejected:**
+
+- counting every dirty path — a turn that only ran whyline note would look like written code
+- using the detected test command's first word — for uv projects that is 'uv', which would make any uv command a test command; the task names the configured test_command
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: d800a3eb5d3c4993a869d15f1a5387d0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:53:18.490Z"} -->
+
+## 2026-11-01 — The built-in TEST prompt now renders {review_feedback} under 'From the previous stage', and the implement-prompt guidance replaces only IMPLEMENT's blocked paragraph
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-7
+
+**Because:** TEST had no feedback placeholder, so the moved-on line could never reach the tester; the phrase 'Use blocked for a denied test command' lives in REVIEW, whose rule the task says to keep
+
+**Rejected:**
+
+- editing REVIEW's sentence — that is the review stage's rule, which must stay
+- injecting the line via the prompt suffix — feedback is the existing channel the task names
+
+**Files:** src/whyline_relay/prompts.py, tests/golden/prompt_implement_0.2.3.txt
+
+<!-- whyline-event: 6c7458f9d94042b3afd9afcb761aaacb -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:53:20.817Z"} -->
+
+## 2026-11-01 — Pass RLY-7 test stage
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-7
+
+**Because:** The focused loop and prompt tests passed, and the full project suite completed with exit code 0, covering test-only refusal routing, unchanged-tree and non-test pauses, question pauses, tester refusal behavior, prompt feedback, and regressions.
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: f038a129a10c42f39ff551ab0105607e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:56:28.111Z"} -->
+
+## 2026-11-01 — Reject RLY-7 until resumed blocked handoffs use the refused-test ready route
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-7
+
+**Because:** The fresh-turn path implements and tests the requested behavior, but the configured-pipeline resume branch handles an already-written blocked handoff first and unconditionally pauses, so an interruption after handoff creation changes the required routing; the full test suite passes but has no regression for this path.
+
+**Rejected:**
+
+- approve based on the fresh-turn tests — the task states the routing in terms of the draft handoff, and the loop explicitly promises to re-decide a handoff written before a crash without rerunning the agent
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 84f62c7de6544c5fac247a1e3a25660a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:00:07.326Z"} -->
+
+## 2026-11-01 — On resume, re-decide a blocked draft handoff through the same test-only-refusal check, reading the saved round's draft log
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-7
+
+**Because:** state.json saves the round before the agent launches, so log_path(task, round, agent, stage) is the log of the turn that wrote the handoff; a missing log simply falls back to the pause
+
+**Rejected:**
+
+- storing the refused command in state.json — the handoff is written by the agent after the last checkpoint, so state cannot hold it
+- always pausing on resume — changes routing depending on whether an interruption happened
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 65497806aabd46bfa490308e34dbcb75 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:06:06.924Z"} -->
+
+## 2026-11-01 — Pass RLY-7 test stage after resumed-handoff fix
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-7
+
+**Because:** The focused loop and prompt tests pass, including fresh and resumed test-only refusal routing, and the full project suite passes all 1195 tests; unchanged trees, non-test refusals, questions, and tester refusals still pause.
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: d10e896eaae74f02a8419cb2cc624049 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:09:15.324Z"} -->
+
+## 2026-11-01 — Reject RLY-7 until the refusal notice preserves the full denied command
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-7
+
+**Because:** The task requires printing the refused command and feeding that line to the tester, but _test_only_refusal slices denied[0] to 80 characters; long test commands are silently altered and the tests cover only short commands.
+
+**Rejected:**
+
+- approve on the green suite — the 1195 passing tests do not exercise a denied command longer than 80 characters
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: e250725831784b71a95a8d9b67791fe3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:12:32.569Z"} -->
+
+## 2026-11-01 — Report the refused test command untruncated in the draft-to-test notice and tester feedback
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-7
+
+**Because:** The notice tells the tester exactly which command to run; slicing at 80 characters silently altered long commands, which the reviewer rejected
+
+**Rejected:**
+
+- keep an 80-char cap with an ellipsis — still hides the arguments the tester needs to reproduce the run
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 6866d575cda241b29920c0a49cfcc351 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:23:02.073Z"} -->
+
+## 2026-11-01 — Pass RLY-7 test stage after full-command refusal fix
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-7
+
+**Because:** The focused routing and prompt tests pass, including an over-80-character refused test command preserved verbatim in output and tester feedback, and the full project suite passes all 1196 tests; unchanged trees, non-test refusals, questions, and tester refusals still pause.
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 1caf01d90d3e4c91a8f0d0a50e3a4771 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:26:17.385Z"} -->
+
+## 2026-11-01 — Approve RLY-7 after round 9 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-7
+
+**Because:** The blocked draft override requires no questions, only recognized test-command denials, and code changes relative to the task base; it follows the ready route, preserves the full refused command in tester feedback, leaves tester and reviewer refusal behavior unchanged, and the plain full pytest suite passes.
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: b3e9e632383c42aab602a23bdffb6229 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:29:35.156Z"} -->

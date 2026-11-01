@@ -1078,3 +1078,232 @@ def test_overload_uses_the_backup_for_one_turn_then_the_configured_agent(
         "codex: model at capacity; using grok for this turn"
         in capsys.readouterr().out
     )
+
+
+def _claude_drafts_pipeline():
+    return dataclasses.replace(
+        make_pipeline(),
+        roles={
+            "implementer": pipeline_module.Role("implementer", agent="claude"),
+            "tester": pipeline_module.Role("tester", agent="codex"),
+            "reviewer": pipeline_module.Role("reviewer", agent="codex"),
+        },
+    )
+
+
+def _refusal_turns(turns: list[dict], prompts_seen: list[str]):
+    """Stand in for agents.run. Each turn is a dict with to_actor and status, and
+    optionally a summary, questions, a file to write, and commands Claude was
+    denied, reported the way Claude's final JSON line reports them."""
+
+    def run(cmd, prompt, *, cwd, log_path, **kwargs):
+        prompts_seen.append(prompt)
+        turn = turns.pop(0)
+        root = Path(cwd)
+        if turn.get("write"):
+            (root / turn["write"]).write_text("changed\n")
+        target = root / ".whyline" / "active-handoff.json"
+        previous = json.loads(target.read_text()) if target.exists() else {}
+        counter = int(previous.get("counter") or 0) + 1
+        target.write_text(
+            json.dumps(
+                {
+                    "id": f"event{counter}",
+                    "counter": counter,
+                    "task": "T-1",
+                    "to_actor": turn["to_actor"],
+                    "status": turn["status"],
+                    "summary": turn.get("summary", "code written"),
+                    "from_actor": "",
+                    "questions": turn.get("questions", []),
+                }
+            )
+        )
+        denials = [
+            {"tool_name": "Bash", "tool_input": {"command": command}}
+            for command in turn.get("denied", [])
+        ]
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            json.dumps({"type": "result", "permission_denials": denials}) + "\n"
+        )
+        return 0
+
+    return run
+
+
+def test_a_test_only_refusal_with_changes_moves_to_test(repo, monkeypatch, capsys):
+    settings = settings_with_pipeline(repo, _claude_drafts_pipeline())
+    (repo / ".whyline" / "relay" / "prompts" / "test.md").unlink()
+    seen: list[str] = []
+    turns = [
+        {
+            "to_actor": "claude",
+            "status": "blocked",
+            "write": "feature.py",
+            "denied": ["uv run pytest -q", "uv run pytest tests/test_x.py"],
+        },
+        {"to_actor": "codex", "status": "blocked", "summary": "stop here"},
+    ]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    with pytest.raises(loop.Paused, match="codex reported blocked: stop here"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo))
+    line = "claude could not run `uv run pytest -q`; the tester will run the tests."
+    assert line in capsys.readouterr().out
+    assert len(seen) == 2
+    assert "You are the tester" in seen[1]
+    assert f"{line}\n\ncode written" in seen[1]
+
+
+def test_a_long_refused_test_command_is_reported_in_full(repo, monkeypatch, capsys):
+    settings = settings_with_pipeline(repo, _claude_drafts_pipeline())
+    (repo / ".whyline" / "relay" / "prompts" / "test.md").unlink()
+    refused = (
+        "uv run pytest -q tests/test_loop_pipeline.py tests/test_prompts.py "
+        "tests/test_gitcheck.py -k refusal"
+    )
+    assert len(refused) > 80
+    seen: list[str] = []
+    turns = [
+        {
+            "to_actor": "claude",
+            "status": "blocked",
+            "write": "feature.py",
+            "denied": [refused],
+        },
+        {"to_actor": "codex", "status": "blocked", "summary": "stop here"},
+    ]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    with pytest.raises(loop.Paused, match="codex reported blocked: stop here"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo))
+    line = f"claude could not run `{refused}`; the tester will run the tests."
+    assert line in capsys.readouterr().out
+    assert line in seen[1]
+
+
+def test_a_configured_test_commands_first_word_counts_as_a_test_command(
+    repo, monkeypatch
+):
+    settings = settings_with_pipeline(repo, _claude_drafts_pipeline())
+    config.save_test_command(repo, "make check")
+    seen: list[str] = []
+    turns = [
+        {
+            "to_actor": "claude",
+            "status": "blocked",
+            "write": "feature.py",
+            "denied": ["make check", "npm test"],
+        },
+        {"to_actor": "codex", "status": "blocked", "summary": "stop here"},
+    ]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    with pytest.raises(loop.Paused, match="codex reported blocked: stop here"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize(
+    "turn",
+    [
+        # Nothing changed outside .whyline/ since the base.
+        {"denied": ["uv run pytest -q"]},
+        # One refused command is not a test command.
+        {"write": "feature.py", "denied": ["uv run pytest -q", "rm -rf build"]},
+        # A question for a human.
+        {
+            "write": "feature.py",
+            "denied": ["uv run pytest -q"],
+            "questions": ["Which schema?"],
+        },
+        # Blocked with nothing refused.
+        {"write": "feature.py"},
+    ],
+    ids=["no-changes", "non-test-command", "question", "no-refusal"],
+)
+def test_a_draft_block_that_is_not_test_only_still_pauses(repo, monkeypatch, turn):
+    settings = settings_with_pipeline(repo, _claude_drafts_pipeline())
+    seen: list[str] = []
+    turns = [{"to_actor": "claude", "status": "blocked", **turn}]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    reason = (
+        "claude was denied: uv run pytest -q"
+        if turn.get("denied")
+        else "claude reported blocked: code written"
+    )
+    with pytest.raises(loop.Paused, match=re.escape(reason)):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("changed", [True, False], ids=["changes", "no-changes"])
+def test_resume_re_decides_a_written_test_only_refusal(
+    repo, monkeypatch, capsys, changed
+):
+    settings = settings_with_pipeline(repo, _claude_drafts_pipeline())
+    (repo / ".whyline" / "relay" / "prompts" / "test.md").unlink()
+    # Interrupted after draft wrote its blocked handoff and its log, before the
+    # relay routed it: resume re-decides that handoff without rerunning draft.
+    if changed:
+        (repo / "feature.py").write_text("changed\n")
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        '{"id": "event1", "counter": 1, "task": "T-1", "to_actor": "claude", '
+        '"status": "blocked", "summary": "code written", "from_actor": ""}'
+    )
+    draft_log = loop.log_path(repo, "T-1", 1, "claude", "draft")
+    draft_log.parent.mkdir(parents=True, exist_ok=True)
+    draft_log.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "permission_denials": [
+                    {"tool_name": "Bash", "tool_input": {"command": "uv run pytest -q"}}
+                ],
+            }
+        )
+        + "\n"
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=1,
+            base_commit=head(repo),
+            paused_reason="crash",
+            log_path="",
+            profile="full",
+            stage="draft",
+            stage_visits={"draft": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    seen: list[str] = []
+    turns = [{"to_actor": "codex", "status": "blocked", "summary": "stop here"}]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    reason = "codex reported blocked: stop here" if changed else "reported blocked: code"
+    with pytest.raises(loop.Paused, match=reason):
+        loop.run_task(
+            repo, settings, TASK, base_commit=head(repo), echo=True, resume=True
+        )
+    line = "claude could not run `uv run pytest -q`; the tester will run the tests."
+    if changed:
+        assert line in capsys.readouterr().out
+        assert len(seen) == 1
+        assert "You are the tester" in seen[0]
+        assert f"{line}\n\ncode written" in seen[0]
+    else:
+        assert seen == []
+
+
+def test_a_tester_refused_its_test_command_still_pauses(repo, monkeypatch):
+    settings = settings_with_pipeline(repo, make_pipeline())
+    seen: list[str] = []
+    turns = [
+        {"to_actor": "claude", "status": "ready", "write": "feature.py"},
+        {"to_actor": "claude", "status": "blocked", "denied": ["uv run pytest -q"]},
+    ]
+    monkeypatch.setattr(loop.agents, "run", _refusal_turns(turns, seen))
+    with pytest.raises(loop.Paused, match="claude was denied: uv run pytest -q"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert len(seen) == 2
