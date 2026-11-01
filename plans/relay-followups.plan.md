@@ -37,7 +37,7 @@ Claude, as implementer, paused ASST-17 twice as "blocked". It ran `python -m pyt
   Add `whyline relay test-command [COMMAND]`. With no argument it prints the current value and says whether it was set or detected. With an argument it calls `save_test_command`. agentdock's console calls the same function (LSN-5).
   Tests: each detection case, a set value wins, saving keeps comments and other keys, an empty string removes the key, and the CLI prints and saves through `save_test_command`.
 
-- [ ] RLY-5: Claude is told its limits and the test command
+- [x] RLY-5: Claude is told its limits and the test command
   Edit `src/whyline_relay/adapters/claude.py` and `src/whyline_relay/config.py` (where builtin agents get `model`, about line 313), with tests in `tests/`.
   Add `CLAUDE_RULES` next to `recipes.GROK_RULES`, with the same headless rules plus one line: "Run tests only with `<test_command>`." When the test command is "", leave that line out.
   When the claude command is built, append `--append-system-prompt <rules>`. Skip this when the configured command already contains `--append-system-prompt` or `--append-system-prompt-file`, so a repository's own text wins. The prompt stays the last argument.
