@@ -31,9 +31,12 @@ def status(root: Path, settings: config.Config) -> str:
             lines.append(f"{role}: {configured}")
         else:
             verb, _ = failover.REASON_TEXT[override.reason]
+            failed = override.backup_for
+            if failed != configured:
+                failed += f" (configured is now {configured})"
             line = (
                 f"{role}: {configured}, currently {override.agent} "
-                f"({override.reason}: {configured} {verb}, since {override.since})"
+                f"({override.reason}: {failed} {verb}, since {override.since})"
             )
             if override.tried and override.tried != [override.backup_for]:
                 already = [a for a in override.tried if a != override.agent]

@@ -5055,3 +5055,50 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 007776b8e5034df3b8b03edac18bb19c -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:31:19.902Z"} -->
+
+## 2026-11-01 — roles status attributes the limit to override.backup_for, appending '(configured is now X)' only when it differs
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-2
+
+**Because:** the configured agent may have been changed after the failover; the override records who actually failed
+
+**Rejected:**
+
+- always print both names — noisy in the common case where they match
+
+**Files:** src/whyline_relay/roles.py, tests/test_roles.py
+
+<!-- whyline-event: c46fdf9dd8db49779342947fbd88af38 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:34:32.685Z"} -->
+
+## 2026-11-01 — Pass RLY-2 behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-2
+
+**Because:** The override attributes the limit to backup_for, adds the configured-agent note only when the names differ, and the full suite passes with 1140 tests
+
+**Files:** src/whyline_relay/roles.py, tests/test_roles.py
+
+<!-- whyline-event: e9f8136e59004d3a91e4f41b4805d496 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:37:24.092Z"} -->
+
+## 2026-11-01 — Approve RLY-2 status attribution fix
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-2
+
+**Because:** The status line uses override.backup_for, annotates a changed configured agent only when names differ, both branches have regression coverage, git diff --check is clean, and uv run pytest -q exits successfully
+
+**Rejected:**
+
+- Request changes — no functional, coverage, safety, or whitespace defect remains
+
+**Files:** src/whyline_relay/roles.py, tests/test_roles.py
+
+<!-- whyline-event: 7923ed40119645ac9aae5853c72dcebc -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:40:09.805Z"} -->

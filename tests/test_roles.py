@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, roles
+from whyline_relay import config, failover, roles
 
 
 def _write(root: Path, text: str) -> None:
@@ -273,3 +273,32 @@ def test_status_omits_tried_when_there_is_only_the_current_backup(tmp_path):
     )
     output = roles.status(tmp_path, settings)
     assert "tried:" not in output
+
+
+def test_status_names_the_agent_that_hit_the_limit_not_the_configured_one(
+    tmp_path,
+):
+    _write(tmp_path, '[roles]\nimplementer = "antigravity"\nreviewer = "codex"\n')
+    settings = config.load(tmp_path)
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride("claude", "grok", "rate-limit", "2026-10-21T00:00:00"),
+    )
+    output = roles.status(tmp_path, settings)
+    assert (
+        "implementer: antigravity, currently claude (rate-limit: grok "
+        "(configured is now antigravity) hit a usage or rate limit, "
+        "since 2026-10-21T00:00:00)"
+    ) in output
+
+
+def test_status_omits_the_note_when_backup_for_is_the_configured_agent(tmp_path):
+    _write(tmp_path, '[roles]\nimplementer = "grok"\nreviewer = "codex"\n')
+    settings = config.load(tmp_path)
+    failover.write_override(
+        tmp_path, "implementer",
+        failover.ActiveOverride("claude", "grok", "rate-limit", "2026-10-21T00:00:00"),
+    )
+    output = roles.status(tmp_path, settings)
+    assert "rate-limit: grok hit a usage or rate limit" in output
+    assert "configured is now" not in output
