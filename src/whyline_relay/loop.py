@@ -697,7 +697,9 @@ def _failover_no_handoff(
         tried = list(ephemeral_tried.get(role, []))
         if agent not in tried:
             tried.append(agent)
-        backup = failover.next_backup(settings.backup_chain, set(tried))
+        backup = failover.next_backup(
+            settings.backup_chain, set(tried), failover.limited_agents(root)
+        )
         if backup is None:
             last = _last_nonempty_line(text)
             raise Paused(
@@ -713,14 +715,19 @@ def _failover_no_handoff(
             )
         return True
 
+    # Recorded before the switch or either pause, so a later task -- or a
+    # later stage -- skips this agent without running it again.
+    limit = failover.record_limit(
+        root, agent, reason, text, adapter=adapter, command=command
+    )
     existing = failover.read_overrides(root).get(role)
     tried_sticky = list(existing.tried) if existing is not None else []
     if agent not in tried_sticky:
         tried_sticky.append(agent)
-    backup = failover.next_backup(settings.backup_chain, set(tried_sticky))
+    limited = failover.limited_agents(root)
+    backup = failover.next_backup(settings.backup_chain, set(tried_sticky), limited)
     if backup is not None:
         verb, _ = failover.REASON_TEXT[reason]
-        visible = grok.rate_limit_text(adapter, text, command)
         failover.write_override(
             root,
             role,
@@ -730,7 +737,7 @@ def _failover_no_handoff(
                 reason=reason,
                 since=datetime.now().astimezone().isoformat(),
                 tried=tried_sticky,
-                resets_at=failover.reset_deadline(visible) if reason == "rate-limit" else "",
+                resets_at=limit.resets_at if limit is not None else "",
             ),
         )
         if echo:
@@ -741,9 +748,12 @@ def _failover_no_handoff(
         return True
     if not settings.backup_chain:
         raise Paused(failover.pause_message(agent, role, reason, existing), target)
+    skipped = sorted(limited & set(settings.backup_chain) - set(tried_sticky))
     raise Paused(
         f"every backup in the chain is unavailable for {role} "
-        f"({', '.join(sorted(tried_sticky))} all failed)",
+        f"({', '.join(sorted(tried_sticky))} all failed"
+        + (f"; {', '.join(skipped)} still limited" if skipped else "")
+        + ")",
         target,
     )
 
@@ -977,6 +987,7 @@ def _run_task(
             )
         ephemeral.pop(role, None)
         ephemeral_tried.pop(role, None)
+        failover.clear_limit(root, agent)  # it handed off, so it is not limited
         if record.task != task.task_id:
             raise Paused(
                 f"{agent} handed off for {record.task!r}, but this run is on "
@@ -1302,6 +1313,7 @@ def _run_configured_task(
             )
         ephemeral.pop(stage.role, None)
         ephemeral_tried.pop(stage.role, None)
+        failover.clear_limit(root, agent)  # it handed off, so it is not limited
         if record.task != task.task_id:
             raise Paused(
                 f"{agent} handed off for {record.task!r}, but this run is on "

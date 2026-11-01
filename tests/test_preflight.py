@@ -436,6 +436,25 @@ def test_codex_and_claude_logins_are_checked(ready_repo: Path, monkeypatch):
     ]
 
 
+def test_a_logged_in_agent_loses_its_auth_record_but_keeps_a_rate_limit(
+    ready_repo: Path, monkeypatch
+):
+    from whyline_relay import failover
+
+    target = ready_repo / ".whyline" / "relay" / "config.toml"
+    target.write_text(
+        '[agents.codex]\ncommand = ["codex", "exec"]\n'
+        '[agents.claude]\ncommand = ["claude", "-p"]\n'
+    )
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: f"/bin/{name}")
+    failover.record_limit(ready_repo, "claude", "auth", "Please run /login")
+    failover.record_limit(ready_repo, "codex", "rate-limit", "Resets in 5h0m")
+
+    preflight.run(ready_repo, allow_dirty=True, runner=successful_runner([]))
+
+    assert set(failover.agent_limits(ready_repo)) == {"codex"}
+
+
 def test_failed_login_blocks_and_unrunnable_or_slow_login_warns(ready_repo, monkeypatch):
     target = ready_repo / ".whyline" / "relay" / "config.toml"
     target.write_text(

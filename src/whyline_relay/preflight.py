@@ -12,6 +12,7 @@ from whyline_relay import (
     adapters,
     agents,
     config,
+    failover,
     gitcheck,
     invocation,
     loop,
@@ -176,14 +177,18 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
 def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
     checks: list[Check] = []
     seen: set[str] = set()
+    logged_in: set[str] = set()
     for agent, (command, backup_for) in _agents_in_use(settings).items():
         adapter = config.adapter_for(settings, agent)
         if (
             not command
             or adapter.login_argv is None
             or Path(command[0]).name != adapter.binary
-            or adapter.binary in seen
         ):
+            continue
+        if adapter.binary in seen:
+            if adapter.binary in logged_in:
+                failover.clear_auth_limit(root, agent)
             continue
         program = adapter.binary
         seen.add(program)
@@ -213,6 +218,8 @@ def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
             continue
         if result.returncode == 0:
             checks.append(_result("ok", f"{program} is logged in"))
+            logged_in.add(program)
+            failover.clear_auth_limit(root, agent)
         else:
             message = (
                 f"{program} (backup for {backup_for}) is not logged in"

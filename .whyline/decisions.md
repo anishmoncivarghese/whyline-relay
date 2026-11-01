@@ -5454,3 +5454,68 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: b3e9e632383c42aab602a23bdffb6229 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:29:35.156Z"} -->
+
+## 2026-11-01 — A rate-limit record with no stated reset keeps resets_at empty and expires 24h after since, computed by AgentLimit.expires_at
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-8
+
+**Because:** the file then shows what the agent actually said; the 24-hour rule lives in one place
+
+**Rejected:**
+
+- write since+24h into resets_at — hides whether the agent named a reset time
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: 0dcafa43cf554cf2b37fa2dcfb5e7fbd -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:42:12.503Z"} -->
+
+## 2026-11-01 — record_limit takes optional adapter/command kwargs to run grok.rate_limit_text, and preflight's login check clears auth-only records
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-8
+
+**Because:** the spec's positional signature has no adapter, but the Grok filter needs one; preflight's _logins is where an agent is found logged in
+
+**Rejected:**
+
+- callers pre-filter text — record_limit would not use rate_limit_text as the spec requires
+- leave chat.py unchanged in scope — done, chat neither records nor excludes limits yet
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/preflight.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 0367f13e5d884138bc1765cacdde9c3b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:42:12.592Z"} -->
+
+## 2026-11-01 — Pass RLY-8 test stage
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-8
+
+**Because:** The 72 focused agent-limit and preflight tests pass, covering deadline parsing, limited-backup skipping, expiry cleanup, 402 fallback expiry, overload exclusion, successful-turn clearing, auth clearing, and the all-limited pause; the full project suite also passes.
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_agent_limits.py, tests/test_preflight.py
+
+<!-- whyline-event: 236a58ca900646b2abeb98b0d91b9b8d -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:45:28.772Z"} -->
+
+## 2026-11-01 — Approve RLY-8 agent-limit persistence
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-8
+
+**Because:** The implementation persists rate-limit and auth records, expires and rewrites them correctly, excludes limited backups before invocation, clears records after successful turns or restored auth, leaves overload transient, and the independently run full suite passes.
+
+**Rejected:**
+
+- request chat integration — RLY-8 explicitly targets loop.py's sticky pipeline failover branch and its every-backup pause, while chat has a separate override flow
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_agent_limits.py, tests/test_preflight.py
+
+<!-- whyline-event: 7adb9c553eb04c0ba07f0b0007fdc632 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:49:01.567Z"} -->

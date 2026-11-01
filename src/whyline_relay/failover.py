@@ -233,6 +233,166 @@ def reset_deadline(text: str, *, now: datetime | None = None) -> str:
     return deadline.isoformat()
 
 
+@dataclass(frozen=True)
+class AgentLimit:
+    reason: str  # "rate-limit" | "auth"
+    since: str  # ISO timestamp
+    # Absolute ISO time the limit lifts, or "" when the output named none.
+    resets_at: str = ""
+    detail: str = ""  # the output's last non-empty line, up to 160 chars
+
+    def expires_at(self) -> datetime | None:
+        """When this record stops counting, or None when it lasts until cleared.
+
+        A stated reset wins. A rate-limit with none lasts 24 hours from
+        `since`. An auth record with none lasts until preflight sees the
+        agent logged in, or a turn by it succeeds.
+        """
+        if self.resets_at:
+            return _parse_time(self.resets_at)
+        if self.reason == "rate-limit":
+            since = _parse_time(self.since)
+            return since + _UNSTATED_RATE_LIMIT if since is not None else None
+        return None
+
+
+# How long a rate-limit whose output named no reset time is remembered.
+_UNSTATED_RATE_LIMIT = timedelta(hours=24)
+_DETAIL_CHARS = 160
+
+
+def limits_path(root: Path) -> Path:
+    return path(root, "agent-limits.json")
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.astimezone()
+
+
+def _now(now: datetime | None) -> datetime:
+    moment = now if now is not None else datetime.now().astimezone()
+    return moment if moment.tzinfo is not None else moment.astimezone()
+
+
+def _read_limits(root: Path) -> dict[str, AgentLimit]:
+    try:
+        raw = json.loads(limits_path(root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, AgentLimit] = {}
+    for agent, record in raw.items():
+        if not isinstance(record, dict):
+            continue
+        fields = {f: record.get(f, "") for f in ("reason", "since", "resets_at", "detail")}
+        if not all(isinstance(v, str) for v in fields.values()):
+            continue
+        if fields["reason"] not in REASON_TEXT or not fields["since"]:
+            continue
+        result[agent] = AgentLimit(**fields)
+    return result
+
+
+def _write_limits(root: Path, limits: dict[str, AgentLimit]) -> None:
+    target = limits_path(root)
+    if not limits:
+        target.unlink(missing_ok=True)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({a: asdict(l) for a, l in limits.items()}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def record_limit(
+    root: Path,
+    agent: str,
+    reason: str,
+    text: str,
+    *,
+    now: datetime | None = None,
+    adapter: Adapter | None = None,
+    command: list[str] | None = None,
+) -> AgentLimit | None:
+    """Remember that `agent` is out for `reason` until its limit resets.
+
+    Only "rate-limit" and "auth" are remembered; anything else (overload in
+    particular, which clears in minutes) records nothing and returns None.
+    Pass `adapter` and `command` so Grok's private reasoning is not read as
+    the reset time or the detail line.
+    """
+    if reason not in REASON_TEXT:
+        return None
+    visible = (
+        grok.rate_limit_text(adapter, text, command or [])
+        if adapter is not None
+        else text
+    )
+    moment = _now(now)
+    detail = ""
+    for line in reversed(visible.splitlines()):
+        if line.strip():
+            detail = line.strip()[:_DETAIL_CHARS]
+            break
+    limit = AgentLimit(
+        reason=reason,
+        since=moment.isoformat(),
+        resets_at=reset_deadline(visible, now=moment) if reason == "rate-limit" else "",
+        detail=detail,
+    )
+    limits = _read_limits(root)
+    limits[agent] = limit
+    _write_limits(root, limits)
+    return limit
+
+
+def agent_limits(root: Path, *, now: datetime | None = None) -> dict[str, AgentLimit]:
+    """Every agent still out, by name. Records that have expired are dropped
+    from the file as well as from the result."""
+    moment = _now(now)
+    stored = _read_limits(root)
+    current = {}
+    for agent, limit in stored.items():
+        expires = limit.expires_at()
+        if expires is None and limit.resets_at:
+            continue  # an unreadable reset time: do not keep an agent out on it
+        if expires is None or expires > moment:
+            current[agent] = limit
+    if len(current) != len(stored):
+        _write_limits(root, current)
+    return current
+
+
+def limited_agents(root: Path, *, now: datetime | None = None) -> frozenset[str]:
+    """The agents next_backup must skip without running them."""
+    return frozenset(agent_limits(root, now=now))
+
+
+def clear_limit(root: Path, agent: str) -> bool:
+    """Forget `agent`'s limit. True when there was one."""
+    limits = _read_limits(root)
+    if agent not in limits:
+        return False
+    del limits[agent]
+    _write_limits(root, limits)
+    return True
+
+
+def clear_auth_limit(root: Path, agent: str) -> bool:
+    """Forget `agent`'s auth record with no reset time -- preflight found it
+    logged in again. A rate-limit record is left alone."""
+    limit = _read_limits(root).get(agent)
+    if limit is None or limit.reason != "auth" or limit.resets_at:
+        return False
+    return clear_limit(root, agent)
+
+
 def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:
     """Detect quota output without treating Grok's private reasoning as fact."""
     return agents.rate_limited(grok.rate_limit_text(adapter, text, command))
