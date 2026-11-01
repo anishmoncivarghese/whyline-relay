@@ -119,3 +119,35 @@ The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can
   - the prompts include `--issue` only when supported
   - the implementer's feedback has the numbered list
   - the echo with and without issues
+
+## Requested while running agentdock's job-search-4 plan (2026-11-01)
+
+codex hit its usage limit during JOB-26, and the reviewer was switched to antigravity. When codex's usage came back, the only way to return was `roles reset reviewer` in a terminal. The user wants to change a role's agent from the console while a relay runs, taking effect at that role's next turn and never interrupting the current one. Going back to the configured agent already works: clearing the switch is read before every stage. Switching to any other agent needs a switch the user made, which `REASON_TEXT` doesn't know, so `roles status` and `pause_message` would raise `KeyError` on it today.
+
+- [ ] RLY-13: A switch the user makes while the relay runs (`roles switch`)
+  Edit `src/whyline_relay/failover.py`, `src/whyline_relay/roles.py`, `src/whyline_relay/loop.py` and `src/whyline_relay/cli.py`, with tests in `tests/`.
+  1. `REASON_TEXT` gains `"manual": ("was switched by you", "switch it back with roles reset")`. Every reader of `ActiveOverride.reason` (`roles.status`, `pause_message`, chat) handles it. An unknown reason read from the file is shown as the raw word, never a `KeyError`.
+  2. `ActiveOverride` gains `keep: bool = False`, defaulted, so older files still read.
+  3. Add `roles.switch(root, settings, role, agent, *, keep=False) -> str`:
+     - An unknown role raises `RoleSetError`.
+     - An agent not in `settings.agents` raises `RoleSetError("<agent> is not set up for this relay")`.
+     - When `agent` is the role's configured agent, clear the override and say `<role> back to <agent> from its next turn.`
+     - Otherwise write `ActiveOverride(agent, backup_for=<configured>, reason="manual", since=now, tried=[], keep=keep)` and say `<role> → <agent> from its next turn.`
+     - Never touch `config.toml`. Never signal the running process.
+  4. CLI: `roles switch <role> <agent> [--keep]` prints the message and exits 0, or prints the error and exits 2. `roles status` shows a manual switch as `reviewer: codex, currently claude (switched by you, since …)`.
+  5. Loop:
+     - Before each stage, the loop already re-reads overrides. If an override names an agent not in the running `settings.agents`, ignore it for this turn, use the configured agent, and echo `==> relay: <role> switch to <agent> ignored; it was not set up when this run started`. This guards the hand-edited case. Don't delete the file.
+     - When a manual-switched agent hits a limit, fail over through the backup chain exactly as for the configured agent: `tried` starts with that agent and the configured one.
+     - When the plan completes, delete manual overrides with `keep` false. A pause, a stop or a resume keeps them, because it's still the same run.
+     - At run start, delete a manual override whose agent now equals the role's configured agent, because a saved Set up has caught up with it.
+  6. The echo when a manual switch first takes effect: `==> relay: <role> now <agent> (switched by you)`.
+  Tests:
+  - `switch` to another agent writes a manual override, and `effective_agent` returns it
+  - `switch` to the configured agent clears it
+  - an unknown agent or role is refused
+  - `roles status` and `pause_message` with a manual override, and with an unknown reason word
+  - a stub-run pipeline where the override is written between two stub turns: the next turn of that role uses the new agent, and the running turn is unaffected
+  - a manual-switched agent hitting a limit fails over through the chain
+  - completion deletes non-keep manual overrides and keeps `keep` ones; a pause keeps both
+  - run start drops a manual override equal to the configured agent
+  - an override naming an agent outside `settings.agents` is ignored with the echo
