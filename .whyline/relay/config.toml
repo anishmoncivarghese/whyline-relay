@@ -4,10 +4,6 @@ max_rounds = 3
 timeout_minutes = 30
 branch_prefix = "relay/"
 
-[roles]
-implementer = "antigravity"
-reviewer = "codex"
-
 [agents.codex]
 command = ["codex", "exec", "-s", "workspace-write", "--color", "never"]
 
@@ -31,3 +27,38 @@ command = [
   "--allow", "Bash(touch:*)", "--allow", "Bash(cat:*)",
   "-p"
 ]
+
+[roles]
+implementer = "claude"
+tester      = "codex"
+reviewer    = "codex"
+
+[pipeline]
+default_profile = "full"
+
+[pipeline.profiles]
+full = ["draft", "test", "review"]
+
+[pipeline.stages.draft]
+role   = "implementer"
+prompt = "implement"
+[pipeline.stages.draft.on]
+ready = "@next"
+
+[pipeline.stages.test]
+role       = "tester"
+prompt     = "test"
+max_visits = 5
+[pipeline.stages.test.on]
+passed = "@next"
+failed = "draft"
+
+[pipeline.stages.review]
+role   = "reviewer"
+prompt = "review"
+[pipeline.stages.review.on]
+approved = "@complete"
+rejected = "draft"
+
+[backup]
+chain = ["antigravity", "grok"]
