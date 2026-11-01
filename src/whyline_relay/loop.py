@@ -295,6 +295,7 @@ def run_agent(
     log_suffix: str | None = None,
     actor: str = "",
     stage: str = "",
+    visit: int = 0,
     profile: str = "",
     prompt_suffix: str = "",
     attachments: Sequence[Path] = (),
@@ -320,7 +321,9 @@ def run_agent(
             "remove it from .whyline/relay/config.toml",
             None,
         )
-    running.start_turn(root, agent, task.task_id, round_, role=role)
+    running.start_turn(
+        root, agent, task.task_id, round_, role=role, stage=stage, visit=visit
+    )
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
         prompts.load(root, template_name),
@@ -348,9 +351,10 @@ def run_agent(
     action = action_label or (
         "implementing" if role == "implementer" else "reviewing"
     )
+    revisit = f", visit {visit}" if visit > 1 else ""
     if echo:
         agents.print_status(
-            f"==> {agent}: {action} {task.task_id} "
+            f"==> {agent}: {action} {task.task_id}{revisit} "
             f"(round {round_} of {settings.max_rounds})"
         )
     # agents.run rejects 0. A configured 0 is "no watchdog", so pass None.
@@ -1267,6 +1271,7 @@ def _run_configured_task(
             log_suffix=stage.id,
             actor=agent,
             stage=current_stage_id,
+            visit=stage_visits[current_stage_id],
             profile=profile_name,
             prompt_suffix=extra_prompt + prompts.stage_footer(
                 stage, pipe, profile_name, effective_agents, agent, task.task_id

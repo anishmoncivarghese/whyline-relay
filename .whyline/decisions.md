@@ -5693,3 +5693,51 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 04d882507d944d8d98ee8551057d2bb5 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:21:43.236Z"} -->
+
+## 2026-11-01 — Legacy two-role _run_task writes stage "" and visit 0 to the marker; planner passes its stage id with visit 0
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-11
+
+**Because:** _run_task has no stage id and passes no action_label (its echo derives implementing/reviewing), so there is no existing stage id to pass; the planner already passes stage=current_stage_id, which now reaches start_turn
+
+**Rejected:**
+
+- pass the template name (implement/review) as stage in _run_task — it also feeds prompts.render(stage=...), changing legacy prompts beyond the task's scope
+- thread planner stage_visits into visit — planner.py is outside the task's named files
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: eefec3c5cda64bc7b3487c36e2ac272f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:31:25.224Z"} -->
+
+## 2026-11-01 — Pass RLY-11 test stage
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-11
+
+**Because:** The focused marker and pipeline tests pass, including compatibility, type rejection, stage visit progression 1/1/2/2, and revisit-only echo labeling; the full pytest suite also passes with no regressions
+
+**Files:** src/whyline_relay/running.py, src/whyline_relay/loop.py, tests/test_running_roles.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: fd6e79f8a3ee4a81ad2675d8594c01d9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:34:58.833Z"} -->
+
+## 2026-11-01 — Approve RLY-11 after round-3 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-11
+
+**Because:** The diff satisfies marker backward compatibility and validation, propagates stage and visit through run_agent, records configured pipeline visits as 1/1/2/2, preserves legacy defaults, and changes the echo only for revisits; the full pytest suite passes
+
+**Rejected:**
+
+- request changes for the fixed two-role path using an empty stage — that path has no stage action_label, while the planner path already supplies its stage and correctly retains visit 0
+
+**Files:** src/whyline_relay/running.py, src/whyline_relay/loop.py, tests/test_running_roles.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 0419e92a436b4854b6c13f504c023853 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:38:05.608Z"} -->

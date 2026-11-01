@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, loop, plan, pipeline as pipeline_module, state
+from whyline_relay import (
+    config,
+    loop,
+    plan,
+    pipeline as pipeline_module,
+    running,
+    state,
+)
 
 FAKE = str(Path(__file__).parent / "fake_pipeline_agent.py")
 
@@ -1307,3 +1314,65 @@ def test_a_tester_refused_its_test_command_still_pauses(repo, monkeypatch):
     with pytest.raises(loop.Paused, match="claude was denied: uv run pytest -q"):
         loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
     assert len(seen) == 2
+
+
+def _implement_review_pipeline():
+    return pipeline_module.Pipeline(
+        roles={
+            "implementer": pipeline_module.Role("implementer", agent="codex"),
+            "reviewer": pipeline_module.Role("reviewer", agent="claude"),
+        },
+        stages={
+            "draft": pipeline_module.Stage(
+                "draft", "implementer", "implement", {"ready": "@next"}, 3
+            ),
+            "review": pipeline_module.Stage(
+                "review",
+                "reviewer",
+                "review",
+                {"approved": "@complete", "rejected": "draft"},
+                3,
+            ),
+        },
+        profiles={"full": pipeline_module.Profile("full", ("draft", "review"))},
+        default_profile="full",
+    )
+
+
+def _marker_recording_run(specs: list[str], seen: list[tuple[str, int]]):
+    scripted = _scripted_run(specs)
+
+    def run(command, prompt, *, cwd, **kwargs):
+        marker = running.read(cwd)
+        seen.append((marker.stage, marker.visit))
+        return scripted(command, prompt, cwd=cwd, **kwargs)
+
+    return run
+
+
+def test_the_marker_carries_each_stage_and_its_visit(repo, monkeypatch, capsys):
+    settings = settings_with_pipeline(repo, _implement_review_pipeline())
+    seen: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _marker_recording_run(
+            ["claude:ready", "codex:rejected", "claude:ready", "claude:approved"],
+            seen,
+        ),
+    )
+    outcome = loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=True)
+
+    assert outcome.committed is True
+    assert seen == [("draft", 1), ("review", 1), ("draft", 2), ("review", 2)]
+    lines = [
+        re.sub(r"^\[\d\d:\d\d:\d\d\] ", "", line)
+        for line in capsys.readouterr().out.splitlines()
+        if re.search(r"==> (codex|claude):", line)
+    ]
+    assert lines == [
+        "==> codex: draft T-1 (round 1 of 10)",
+        "==> claude: review T-1 (round 2 of 10)",
+        "==> codex: draft T-1, visit 2 (round 3 of 10)",
+        "==> claude: review T-1, visit 2 (round 4 of 10)",
+    ]

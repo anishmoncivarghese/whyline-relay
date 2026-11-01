@@ -56,3 +56,29 @@ def test_start_turn_writes_the_role(tmp_path):
     assert marker.role == "reviewer"
     assert record["role"] == "reviewer"
 
+
+def test_a_marker_without_a_stage_or_visit_still_reads(tmp_path):
+    # The 0.2.38 shape: role, but no stage or visit.
+    write_marker(tmp_path, agent="claude", pid=os.getpid(), role="implementer")
+    marker = running.read(tmp_path)
+
+    assert (marker.stage, marker.visit) == ("", 0)
+
+
+def test_a_non_int_visit_is_rejected(tmp_path):
+    write_marker(tmp_path, agent="claude", pid=os.getpid(), stage="draft", visit="2")
+    assert running.read(tmp_path) is None
+
+
+def test_a_non_string_stage_is_rejected(tmp_path):
+    write_marker(tmp_path, agent="claude", pid=os.getpid(), stage=3, visit=1)
+    assert running.read(tmp_path) is None
+
+
+def test_start_turn_writes_the_stage_and_visit(tmp_path):
+    running.start_turn(tmp_path, "claude", "T-1", 2, stage="draft", visit=2)
+    record = json.loads(running.path(tmp_path).read_text(encoding="utf-8"))
+
+    assert (record["stage"], record["visit"]) == ("draft", 2)
+    assert running.read(tmp_path).visit == 2
+

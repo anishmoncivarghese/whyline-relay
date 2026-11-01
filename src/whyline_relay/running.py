@@ -20,6 +20,8 @@ class Running:
     started: str
     pid: int
     role: str = ""
+    stage: str = ""
+    visit: int = 0
 
 
 class AlreadyRunning(RuntimeError):
@@ -46,7 +48,9 @@ def read(root: Path) -> Running | None:
         return None
     if not isinstance(marker.started, str) or not isinstance(marker.pid, int):
         return None
-    if not isinstance(marker.role, str):
+    if not isinstance(marker.role, str) or not isinstance(marker.stage, str):
+        return None
+    if not isinstance(marker.visit, int):
         return None
     return marker
 
@@ -118,7 +122,14 @@ def _temporary(target: Path, marker: Running) -> Path:
 
 
 def start_turn(
-    root: Path, agent: str, task: str, round_: int, role: str = ""
+    root: Path,
+    agent: str,
+    task: str,
+    round_: int,
+    role: str = "",
+    *,
+    stage: str = "",
+    visit: int = 0,
 ) -> Running:
     """Atomically claim the repository, or update this process's current turn."""
     marker = Running(
@@ -128,6 +139,8 @@ def start_turn(
         started=datetime.now().astimezone().isoformat(),
         pid=os.getpid(),
         role=role,
+        stage=stage,
+        visit=visit,
     )
     target = path(root)
     temporary = _temporary(target, marker)
