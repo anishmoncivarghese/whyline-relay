@@ -89,6 +89,8 @@ class PlanState:
     # None means this record predates the field. Resume then uses config.load.
     # A stored 0 or any stored positive int is the cap for this run.
     timeout_minutes: int | None = None
+    # The structure the draft stage is asked to follow; "" asks for none.
+    template: str = ""
 
 
 def path(root: Path) -> Path:

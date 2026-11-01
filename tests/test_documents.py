@@ -110,6 +110,104 @@ def test_draft_then_revise_round_trip(repo, monkeypatch, kind, name, noun):
     assert planner.pending_description(repo) is None
 
 
+TEMPLATE = "## Goals\n\n## Risks"
+EDIT_SENTENCE = "Start from the existing draft at .whyline/relay/draft-prd.md"
+
+
+def test_template_is_in_the_draft_prompt_and_survives_revise(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    run, seen = _recording(["claude:ready", "claude:approved", "claude:ready", "claude:approved"])
+    monkeypatch.setattr(loop.agents, "run", run)
+
+    documents.draft(repo, settings, documents.PRD_KIND, "a prd", template=TEMPLATE)
+    assert f"\n\nUse this structure:\n\n{TEMPLATE}" in seen[0]
+    assert "Use this structure" not in seen[1]
+    assert state.load_plan(repo, name="prd-state.json").template == TEMPLATE
+
+    documents.revise(repo, settings, documents.PRD_KIND, "shorter")
+    assert f"\n\nUse this structure:\n\n{TEMPLATE}" in seen[2]
+    assert state.load_plan(repo, name="prd-state.json").template == TEMPLATE
+
+
+def test_an_empty_template_changes_nothing(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    run, seen = _recording(["claude:ready", "claude:approved"])
+    monkeypatch.setattr(loop.agents, "run", run)
+    documents.draft(repo, settings, documents.PRD_KIND, "a prd")
+    assert "Use this structure" not in seen[0]
+    assert state.load_plan(repo, name="prd-state.json").template == ""
+
+
+def test_revise_text_seeds_the_text_and_asks_for_an_edit(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    notes = repo / "notes.md"
+    notes.write_text("context\n")
+    run, seen = _recording(["claude:ready", "claude:approved"])
+    monkeypatch.setattr(loop.agents, "run", run)
+
+    path = documents.revise_text(
+        repo, settings, documents.PRD_KIND, "# Old PRD\n", "add a risks section",
+        description="the checkout PRD", template=TEMPLATE, attachments=[notes],
+    )
+    assert path == documents.draft_path(repo, documents.PRD_KIND)
+    assert path.read_text() == "# Old PRD\n"
+    assert len(seen) == 2
+    assert EDIT_SENTENCE in seen[0]
+    assert "do not rewrite it from nothing" in seen[0]
+    assert "add a risks section" in seen[0]
+    assert f"Use this structure:\n\n{TEMPLATE}" in seen[0]
+    assert EDIT_SENTENCE not in seen[1]
+    saved = state.load_plan(repo, name="prd-state.json")
+    assert saved is not None and saved.stage == "@complete"
+    assert saved.description == "the checkout PRD"
+    assert saved.template == TEMPLATE
+    assert saved.attachments == ["notes.md"]
+
+
+def test_revise_text_of_an_empty_text_does_not_ask_for_an_edit(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    run, seen = _recording(["claude:ready", "claude:approved"])
+    monkeypatch.setattr(loop.agents, "run", run)
+    documents.revise_text(
+        repo, settings, documents.PRD_KIND, "", "write it", description="a prd"
+    )
+    assert EDIT_SENTENCE not in seen[0]
+
+
+def test_revise_text_refuses_when_that_kind_has_a_checkpoint(repo, monkeypatch):
+    settings = settings_with_planner(repo)
+    monkeypatch.setattr(loop.agents, "run", _scripted_run(["codex:blocked#Q?"]))
+    with pytest.raises(documents.DocumentQuestions):
+        documents.draft(repo, settings, documents.PRD_KIND, "prd request")
+    path = documents.draft_path(repo, documents.PRD_KIND)
+    before = path.read_text() if path.exists() else None
+
+    with pytest.raises(planner.PlanAlreadyInProgress):
+        documents.revise_text(
+            repo, settings, documents.PRD_KIND, "new text", "x", description="other"
+        )
+    assert (path.read_text() if path.exists() else None) == before
+    assert documents.pending_description(repo, documents.PRD_KIND) == "prd request"
+
+
+def test_revise_text_of_a_plan_regenerates_its_tests(repo, monkeypatch):
+    settings = settings_with_planner(repo, test="codex")
+    run, seen = _recording(["codex:ready", "claude:ready", "claude:approved"])
+    monkeypatch.setattr(loop.agents, "run", run)
+
+    path = documents.revise_text(
+        repo, settings, documents.PLAN_KIND, "- [ ] T-1: thing\n", "split T-1",
+        description="the plan", tests_text="old tests\n",
+    )
+    assert path.read_text() == "- [ ] T-1: thing\n"
+    assert (repo / ".whyline/relay/draft-plan.tests.md").read_text() == "old tests\n"
+    assert len(seen) == 3
+    assert "Start from the existing draft at .whyline/relay/draft-plan.md" in seen[0]
+    assert "draft-plan.tests.md" in seen[1]
+    logs = sorted((repo / ".whyline" / "relay" / "logs").glob("*.log"))
+    assert [p.stem.split("-")[-1] for p in logs] == ["draft", "tests", "review"]
+
+
 def test_announcer_names_each_kind():
     for kind, noun in [
         (documents.PRD_KIND, "the PRD"),

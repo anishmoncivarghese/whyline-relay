@@ -21,10 +21,20 @@ def draft_path(root: Path, kind: DocKind) -> Path:
     return planner.draft_path(root, kind)
 
 
-def draft(root, settings, kind: DocKind, request: str, *, attachments=(), print_fn=None,
-          runner=subprocess.run) -> Path:
+def draft(root, settings, kind: DocKind, request: str, *, template: str = "", attachments=(),
+          print_fn=None, runner=subprocess.run) -> Path:
     return planner.draft(root, settings, request, attachments=attachments,
-                         print_fn=print_fn, runner=runner, kind=kind)
+                         print_fn=print_fn, runner=runner, kind=kind, template=template)
+
+
+def revise_text(root, settings, kind: DocKind, text: str, feedback: str, *, description: str,
+                template: str = "", attachments=(), tests_text: str | None = None,
+                print_fn=None, runner=subprocess.run) -> Path:
+    """Seeds `text` as the kind's draft and revises it with `feedback`."""
+    return planner.revise_text(root, settings, text, feedback, description=description,
+                               template=template, attachments=attachments,
+                               tests_text=tests_text, print_fn=print_fn, runner=runner,
+                               kind=kind)
 
 
 def revise(root, settings, kind: DocKind, feedback, *, print_fn=None, runner=subprocess.run) -> Path:

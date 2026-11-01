@@ -268,6 +268,7 @@ def _checkpoint(
     timeout_minutes: int,
     attachments: Sequence[str] = (),
     kind: _Kind = PLAN_KIND,
+    template: str = "",
 ) -> None:
     state.save_plan(
         root,
@@ -283,6 +284,7 @@ def _checkpoint(
             log_path="",
             attachments=list(attachments),
             timeout_minutes=timeout_minutes,
+            template=template,
         ),
         name=kind.state_name,
     )
@@ -303,6 +305,8 @@ def _drive_pipeline(
     runner: failover.Runner = subprocess.run,
     on_stage=None,
     kind: _Kind = PLAN_KIND,
+    template: str = "",
+    edit_existing: bool = False,
 ) -> None:
     """Drive the draft<->review loop until "@complete" is checkpointed.
 
@@ -318,6 +322,9 @@ def _drive_pipeline(
     current_stage_id -- used both for a brand-new session and for a
     human-initiated "request changes" round, which must not reuse a stale
     handoff left over from the review stage's own prior "approved".
+
+    edit_existing=True tells each draft turn to change the draft file already
+    there rather than rewrite it, whenever that file is not empty.
     """
     pipe = _pipeline_for(settings, kind=kind)
     effective_agents = {name: role.agent for name, role in pipe.roles.items()}
@@ -360,6 +367,7 @@ def _drive_pipeline(
                     timeout_minutes=settings.timeout_minutes,
                     attachments=attachments,
                     kind=kind,
+                    template=template,
                 )
                 return
             elif decision.kind == "blocked":
@@ -383,6 +391,7 @@ def _drive_pipeline(
             timeout_minutes=settings.timeout_minutes,
             attachments=attachments,
             kind=kind,
+            template=template,
         )
         if on_stage is not None:
             on_stage(stage.id, agent)
@@ -403,7 +412,8 @@ def _drive_pipeline(
             actor=agent,
             stage=current_stage_id,
             profile="default",
-            prompt_suffix=_prompt_suffix(
+            prompt_suffix=_draft_additions(root, kind, stage, template, edit_existing)
+            + _prompt_suffix(
                 settings, kind, stage, pipe, effective_agents, agent, task.task_id
             ),
             attachments=paths,
@@ -447,6 +457,7 @@ def _drive_pipeline(
                 timeout_minutes=settings.timeout_minutes,
                 attachments=attachments,
                 kind=kind,
+                template=template,
             )
             return
         feedback = record.summary
@@ -471,6 +482,8 @@ def _run_pipeline(
     runner: failover.Runner = subprocess.run,
     on_stage=None,
     kind: _Kind = PLAN_KIND,
+    template: str = "",
+    edit_existing: bool = False,
 ) -> None:
     """Run one complete planning pipeline and always release its live marker."""
     try:
@@ -488,6 +501,8 @@ def _run_pipeline(
             runner=runner,
             on_stage=on_stage,
             kind=kind,
+            template=template,
+            edit_existing=edit_existing,
         )
     finally:
         running.clear(root)
@@ -539,6 +554,7 @@ def resume(
             attachments=saved.attachments,
             echo=echo,
             runner=runner,
+            template=saved.template,
         )
     return _human_gate(
         root, settings, saved.description, confirm=confirm, echo=echo, runner=runner
@@ -611,6 +627,30 @@ def _prompt_suffix(
     return extra + footer
 
 
+def _draft_additions(
+    root: Path,
+    kind: _Kind,
+    stage: pipeline_module.Stage,
+    template: str,
+    edit_existing: bool,
+) -> str:
+    """What the draft stage's prompt gains: the template, and when editing,
+    the instruction to change the draft in place. Empty for other stages."""
+    if stage.id != "draft":
+        return ""
+    extra = ""
+    if template:
+        extra += f"\n\nUse this structure:\n\n{template}"
+    path = draft_path(root, kind=kind)
+    if edit_existing and path.is_file() and path.read_text(encoding="utf-8").strip():
+        shown = path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+        extra += (
+            f"\n\nStart from the existing draft at {shown} and change it as asked; "
+            "do not rewrite it from nothing."
+        )
+    return extra
+
+
 def _announcer(print_fn, kind: _Kind = PLAN_KIND):
     if print_fn is None:
         return None
@@ -641,10 +681,12 @@ def draft(
     print_fn=None,
     runner: failover.Runner = subprocess.run,
     kind: _Kind = PLAN_KIND,
+    template: str = "",
 ) -> Path:
     """Runs the draft<->review pipeline with no terminal gate and returns the
     draft's path. The checkpoint stays until approve(clear_checkpoint=True)
-    or discard()."""
+    or discard(). A non-empty ``template`` is the structure the draft follows;
+    the checkpoint keeps it for revise, answer and resume."""
     if state.load_plan(root, name=kind.state_name) is not None:
         raise PlanAlreadyInProgress(
             "a plan draft is already in progress; resume it or discard it first"
@@ -659,20 +701,83 @@ def draft(
             f"Write the plan from this spec: {spec_str}. Read it in full first.\n\n"
             + description
         )
-    rel_attachments = [
-        p.resolve().relative_to(root.resolve()).as_posix() for p in attachments
-    ]
     _run_pipeline(
         root,
         settings,
         description,
+        attachments=_relative(root, attachments),
+        echo=False,
+        runner=runner,
+        on_stage=_announcer(print_fn, kind=kind),
+        kind=kind,
+        template=template,
+    )
+    return draft_path(root, kind=kind)
+
+
+def _relative(root: Path, attachments: Sequence[Path]) -> list[str]:
+    return [p.resolve().relative_to(root.resolve()).as_posix() for p in attachments]
+
+
+def revise_text(
+    root: Path,
+    settings: config.Config,
+    text: str,
+    feedback: str,
+    *,
+    description: str,
+    template: str = "",
+    attachments: Sequence[Path] = (),
+    tests_text: str | None = None,
+    print_fn=None,
+    runner: failover.Runner = subprocess.run,
+    kind: _Kind = PLAN_KIND,
+) -> Path:
+    """Revises a given text rather than drafting from nothing: seeds it as the
+    draft, checkpoints it, then runs revise's pipeline with ``feedback``.
+
+    For the plan kind with a Test planner, the tests stage runs too, and a
+    given ``tests_text`` is seeded beside the draft first. The checkpoint stays
+    until the caller discards it, as with draft()."""
+    if state.load_plan(root, name=kind.state_name) is not None:
+        raise PlanAlreadyInProgress(
+            "a plan draft is already in progress; resume it or discard it first"
+        )
+    path = draft_path(root, kind=kind)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    if tests_text is not None and kind == PLAN_KIND and settings.planner.test:
+        testplan.path_for(path).write_text(tests_text, encoding="utf-8")
+    rel_attachments = _relative(root, attachments)
+    _checkpoint(
+        root,
+        description,
+        "draft",
+        1,
+        {"draft": 1},
+        feedback,
+        timeout_minutes=settings.timeout_minutes,
+        attachments=rel_attachments,
+        kind=kind,
+        template=template,
+    )
+    _run_pipeline(
+        root,
+        settings,
+        description,
+        current_stage_id="draft",
+        round_=1,
+        stage_visits={"draft": 1},
+        feedback=feedback,
         attachments=rel_attachments,
         echo=False,
         runner=runner,
         on_stage=_announcer(print_fn, kind=kind),
         kind=kind,
+        template=template,
+        edit_existing=True,
     )
-    return draft_path(root, kind=kind)
+    return path
 
 
 def revise(
@@ -701,6 +806,7 @@ def revise(
         runner=runner,
         on_stage=_announcer(print_fn, kind=kind),
         kind=kind,
+        template=saved.template,
     )
     return draft_path(root, kind=kind)
 
@@ -733,6 +839,7 @@ def resume_draft(
             runner=runner,
             on_stage=_announcer(print_fn, kind=kind),
             kind=kind,
+            template=saved.template,
         )
     return draft_path(root, kind=kind)
 
@@ -766,6 +873,7 @@ def answer(
         runner=runner,
         on_stage=_announcer(print_fn, kind=kind),
         kind=kind,
+        template=saved.template,
     )
     return draft_path(root, kind=kind)
 

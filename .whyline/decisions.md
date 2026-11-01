@@ -6024,3 +6024,69 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e666f61007d64d4ebeebb7e5f0487710 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:26:31.641Z"} -->
+
+## 2026-11-01 — Store the draft template as a new defaulted PlanState.template field in state.py, outside the task's file list
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RDOC-2
+
+**Because:** the task requires the template saved in the checkpoint so revise/answer/resume keep it, and PlanState(**record) rejects unknown keys, so no planner-only change can persist it; a defaulted field keeps old checkpoints loading
+
+**Rejected:**
+
+- fold the template into description — pending_description and the review prompt would then show it
+- sidecar file next to the checkpoint — not in the checkpoint, and a second file to clear on discard/approve
+
+**Files:** src/whyline_relay/state.py, src/whyline_relay/planner.py
+
+<!-- whyline-event: 4d00fbf64526409cb5d399fbe4e7f2da -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:32:25.106Z"} -->
+
+## 2026-11-01 — Template and edit-in-place sentence go only on the draft stage's prompt_suffix, and the edit sentence only via an edit_existing flag that revise_text sets
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RDOC-2
+
+**Because:** the task says the draft prompt gets them; a plain draft after a discard leaves the old draft file behind, so keying the sentence on a non-empty file alone would tell a fresh draft to edit stale text
+
+**Rejected:**
+
+- add the sentence whenever the draft file is non-empty — wrong for a fresh draft after discard
+- put the template in task text — it would reach the review and tests prompts too
+
+**Files:** src/whyline_relay/planner.py
+
+<!-- whyline-event: a0db6109b17d45e7adaa7e513462ee32 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:32:27.649Z"} -->
+
+## 2026-11-01 — Pass RDOC-2 behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RDOC-2
+
+**Because:** The full pytest suite completed without failures, focused document tests passed, and the exercised behavior covers template persistence, revise_text seeding and checkpoint refusal, and plan test regeneration
+
+**Files:** src/whyline_relay/documents.py, src/whyline_relay/planner.py, src/whyline_relay/state.py, tests/test_documents.py
+
+<!-- whyline-event: 3790acf482894c8b9242cc9006237abf -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:35:56.161Z"} -->
+
+## 2026-11-01 — Approve RDOC-2 template persistence and revise-text workflow
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RDOC-2
+
+**Because:** The implementation appends templates only to draft prompts, persists them through revise/answer/resume using a backward-compatible checkpoint field, seeds and edits supplied text, refuses occupied checkpoints, and reruns the plan test stage; tests cover the requested behaviors and the plain full suite passed
+
+**Rejected:**
+
+- Reject the state.py change as out of scope — checkpoint persistence cannot be implemented correctly with the existing strict PlanState schema, so the two-line defaulted field is a necessary narrow exception
+
+**Files:** src/whyline_relay/planner.py, src/whyline_relay/documents.py, src/whyline_relay/state.py, tests/test_documents.py
+
+<!-- whyline-event: 49b0adcd3a354d61b45c0a7ceb02f386 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:39:44.491Z"} -->
