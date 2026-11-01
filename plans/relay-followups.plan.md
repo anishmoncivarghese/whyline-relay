@@ -30,7 +30,7 @@ Global constraints:
 
 Claude, as implementer, paused ASST-17 twice as "blocked". It ran `python -m pytest`, which its allow list refuses and which cannot work there anyway: there is no `python`, and the system `python3` has no pytest. Grok gets `GROK_RULES` through `--rules`; Claude's command gets no equivalent, so it never learns the allowed test command. Its refusal text, "This command requires approval", is not one of `SANDBOX_MARKERS`, so the relay paused with a long "reported blocked" reason instead of naming the command. agentdock works around this today with a hand-written `--append-system-prompt` in its own `[agents.claude]`. The console side is agentdock's `plans/relay-recovery-lessons.plan.md` (LSN-1..6).
 
-- [ ] RLY-4: A `test_command` setting with one saver
+- [x] RLY-4: A `test_command` setting with one saver
   Edit `src/whyline_relay/config.py`, `src/whyline_relay/init.py` and `src/whyline_relay/cli.py`, with tests in `tests/`.
   Add an optional top-level `test_command = "..."` to config.toml. `config.test_command(root) -> str` returns it when set. Otherwise it detects one: `uv run pytest -q` for a python stack with `uv.lock`, `pytest -q` for any other python stack, `npm test` for node, and "" for base (reuse `init.detect_stack`).
   Add `config.save_test_command(root, command)`. It writes or removes the key and leaves every other line of the file unchanged. An empty string removes it.
