@@ -30,7 +30,7 @@ Global constraints:
   - the prompts resolve and a `.whyline/relay/prompts/prd-draft.md` override wins
   - draft and revise round trips with a fake runner, for PRD and design
 
-- [ ] RDOC-2: A template, and revising a given text
+- [x] RDOC-2: A template, and revising a given text
   Edit `src/whyline_relay/planner.py`, `src/whyline_relay/documents.py` and their tests only.
   1. `draft(..., template: str = "")`, on `planner.draft` and `documents.draft`, appends `\n\nUse this structure:\n\n<template>` to the draft prompt. It is saved in the checkpoint so revise, answer and resume keep it. An empty template changes nothing.
   2. Add `documents.revise_text(root, settings, kind, text, feedback, *, description, template="", attachments=(), print_fn=None, runner=subprocess.run) -> Path`:
