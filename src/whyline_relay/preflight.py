@@ -140,6 +140,45 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
     return _result("ok", "relay setup is complete"), settings
 
 
+def on_path(
+    command: list[str], which: Callable[[str], str | None] | None = None
+) -> bool:
+    """True when the agent command's program is installed on PATH."""
+    if not command:
+        return False
+    return (which or shutil.which)(command[0]) is not None
+
+
+def login_checkable(adapter: adapters.Adapter, command: list[str]) -> bool:
+    """True when the adapter has a login check that applies to this command;
+    a command that wraps the agent in another program cannot be checked."""
+    return (
+        bool(command)
+        and adapter.login_argv is not None
+        and Path(command[0]).name == adapter.binary
+    )
+
+
+def login_state(
+    root: Path, adapter: adapters.Adapter, runner: Runner
+) -> tuple[bool | None, str]:
+    """Run the adapter's login check: (True, "") logged in, (False, "") not,
+    or (None, why) when the check itself could not run or timed out."""
+    try:
+        result = runner(
+            list(adapter.login_argv or ()),
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timed out after 20 seconds"
+    except (FileNotFoundError, OSError) as error:
+        return None, str(error)
+    return result.returncode == 0, ""
+
+
 def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
     if settings is None:
         return [], []
@@ -159,7 +198,7 @@ def _programs(settings: config.Config | None) -> tuple[list[Check], list[str]]:
         if program in programs:
             continue
         programs.append(program)
-        if shutil.which(program) is None:
+        if not on_path(command):
             checks.append(
                 _result(
                     "FAIL",
@@ -180,11 +219,7 @@ def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
     logged_in: set[str] = set()
     for agent, (command, backup_for) in _agents_in_use(settings).items():
         adapter = config.adapter_for(settings, agent)
-        if (
-            not command
-            or adapter.login_argv is None
-            or Path(command[0]).name != adapter.binary
-        ):
+        if not login_checkable(adapter, command):
             continue
         if adapter.binary in seen:
             if adapter.binary in logged_in:
@@ -192,31 +227,14 @@ def _logins(root: Path, settings: config.Config, runner: Runner) -> list[Check]:
             continue
         program = adapter.binary
         seen.add(program)
-        argv = list(adapter.login_argv)
         fix = adapter.login_fix
-        try:
-            result = runner(
-                argv,
-                cwd=str(root),
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-        except subprocess.TimeoutExpired:
+        logged_in_now, problem = login_state(root, adapter, runner)
+        if logged_in_now is None:
             checks.append(
-                _result(
-                    "warn",
-                    f"could not check {program} login: timed out after 20 seconds",
-                    fix,
-                )
+                _result("warn", f"could not check {program} login: {problem}", fix)
             )
             continue
-        except (FileNotFoundError, OSError) as error:
-            checks.append(
-                _result("warn", f"could not check {program} login: {error}", fix)
-            )
-            continue
-        if result.returncode == 0:
+        if logged_in_now:
             checks.append(_result("ok", f"{program} is logged in"))
             logged_in.add(program)
             failover.clear_auth_limit(root, agent)

@@ -5519,3 +5519,81 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 7adb9c553eb04c0ba07f0b0007fdc632 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:49:01.567Z"} -->
+
+## 2026-11-01 — ready_agents reuses preflight via new public helpers on_path/login_checkable/login_state, imported inside the function
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-9
+
+**Because:** preflight already imports failover, so a module-level import would be circular; _programs/_logins now call the same helpers so the checks cannot drift
+
+**Rejected:**
+
+- move the checks into failover — preflight owns PATH/login checks and the task says reuse them there
+- copy the checks into failover — two copies would drift
+
+**Files:** src/whyline_relay/failover.py, src/whyline_relay/preflight.py
+
+<!-- whyline-event: ebe594cbf9fc47b0a93954c4726beb81 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:54:57.645Z"} -->
+
+## 2026-11-01 — ready_agents treats an inconclusive login check as logged in, clears a stale auth record when the check passes, and reports an unstated reset as 'reset time unknown' even though the record expires after 24h
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-9
+
+**Because:** matches preflight (never guess 'no' from a timeout; clear_auth_limit on a passing check); the 24h expiry is a guess, not a reset time worth printing
+
+**Rejected:**
+
+- print the 24h guess as 'until' — it would state a reset time the agent never gave
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: 2e6432009f9144b8a2cf089a41387d8f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:54:59.734Z"} -->
+
+## 2026-11-01 — roles status prints readiness as 'agent <name>: ready' / 'agent <name>: not ready, <why>' via roles.readiness, called from cli rather than inside roles.status
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-9
+
+**Because:** a pipeline role can be named after an agent, so the 'agent' prefix keeps rows distinguishable; keeping roles.status pure leaves its callers and exact-output tests free of PATH/login checks
+
+**Rejected:**
+
+- append inside roles.status — every caller would run login checks
+
+**Files:** src/whyline_relay/roles.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: bf9643fda20a402d9c38e8a04568222c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:55:01.836Z"} -->
+
+## 2026-11-01 — RLY-9 passes functional testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-9
+
+**Because:** Focused readiness, roles CLI, and preflight tests passed, and the complete pytest suite exited 0; required reason cases, config order, quota precedence, and roles status rows behaved correctly
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: f7ca8c23d6d7401e8ba061eaa1bf9961 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T14:58:25.569Z"} -->
+
+## 2026-11-01 — Approve RLY-9 readiness reporting
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-9
+
+**Because:** The implementation returns ordered readiness rows with the specified reasons, reuses preflight PATH and login checks without running agent turns, gives active limits precedence, prints roles status rows, and uv run pytest -q passed
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: 0bd1069099b3410b977205d839fde167 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:01:22.154Z"} -->

@@ -46,6 +46,17 @@ def status(root: Path, settings: config.Config) -> str:
     return "\n".join(lines)
 
 
+def readiness(root: Path, settings: config.Config, **checks) -> str:
+    """One line per agent from failover.ready_agents; `checks` passes its
+    which/runner/now through. Prefixed "agent" because a pipeline role may be
+    named after an agent."""
+    lines = []
+    for row in failover.ready_agents(root, settings, **checks):
+        state = "ready" if row.ready else f"not ready, {row.why}"
+        lines.append(f"agent {row.agent}: {state}")
+    return "\n".join(lines)
+
+
 def reset(root: Path, role: str | None) -> str:
     removed = failover.clear_overrides(root, role)
     if removed == 0:

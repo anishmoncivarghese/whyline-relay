@@ -637,6 +637,8 @@ def cmd_roles(args: argparse.Namespace) -> int:
     settings = config.load(root)
     if args.roles_command == "status":
         print(roles.status(root, settings))
+        if readiness := roles.readiness(root, settings):
+            print(readiness)
         return EXIT_OK
     if args.roles_command == "set":
         try:

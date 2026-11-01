@@ -1,6 +1,14 @@
 from pathlib import Path
 
+import pytest
+
 from whyline_relay import cli, failover
+
+
+@pytest.fixture(autouse=True)
+def no_real_agent_checks(monkeypatch):
+    """`roles status` checks PATH and logins; keep these tests off the real ones."""
+    monkeypatch.setattr(failover, "ready_agents", lambda root, settings: [])
 
 
 def make_repo(tmp_path: Path) -> Path:

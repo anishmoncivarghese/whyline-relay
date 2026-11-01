@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -391,6 +392,64 @@ def clear_auth_limit(root: Path, agent: str) -> bool:
     if limit is None or limit.reason != "auth" or limit.resets_at:
         return False
     return clear_limit(root, agent)
+
+
+@dataclass(frozen=True)
+class AgentReadiness:
+    agent: str
+    ready: bool
+    why: str  # "" when ready
+
+
+def ready_agents(
+    root: Path,
+    settings: config.Config,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    runner: Runner = subprocess.run,
+    now: datetime | None = None,
+) -> list[AgentReadiness]:
+    """Every configured or built-in agent, in config order, and why it cannot
+    take a turn now. Uses preflight's PATH and login checks; never runs an agent.
+
+    An inconclusive login check (a timeout, an error) does not mark the agent
+    out, the same as preflight. A login check that passes clears a stale auth
+    record, again as preflight does.
+    """
+    # Imported here: preflight imports this module.
+    from whyline_relay import preflight
+
+    moment = _now(now)
+    logins: dict[str, bool | None] = {}
+    rows: list[AgentReadiness] = []
+    for agent, command in settings.agents.items():
+        if not preflight.on_path(command, which):
+            rows.append(AgentReadiness(agent, False, "not installed"))
+            continue
+        adapter = config.adapter_for(settings, agent)
+        logged_in: bool | None = None
+        if preflight.login_checkable(adapter, command):
+            if adapter.binary not in logins:
+                logins[adapter.binary], _ = preflight.login_state(root, adapter, runner)
+            logged_in = logins[adapter.binary]
+        if logged_in is False:
+            rows.append(AgentReadiness(agent, False, "not logged in"))
+            continue
+        if logged_in:
+            clear_auth_limit(root, agent)
+        limit = agent_limits(root, now=moment).get(agent)
+        if limit is None:
+            rows.append(AgentReadiness(agent, True, ""))
+        elif limit.reason == "auth":
+            rows.append(AgentReadiness(agent, False, "not logged in"))
+        elif limit.resets_at and (expires := limit.expires_at()) is not None:
+            until = expires.astimezone(moment.tzinfo).strftime("%Y-%m-%d %H:%M")
+            rows.append(AgentReadiness(agent, False, f"out of quota until {until}"))
+        else:
+            rows.append(
+                AgentReadiness(agent, False, "out of quota (reset time unknown)")
+            )
+    return rows
 
 
 def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:
