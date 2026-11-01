@@ -1,6 +1,6 @@
 # whyline-relay configuration. Every key is optional.
 plan = "plans/relay-followups.plan.md"
-max_rounds = 3
+max_rounds = 24
 timeout_minutes = 30
 branch_prefix = "relay/"
 
