@@ -830,8 +830,17 @@ def _commit_and_approve(
     if slid != base_commit and remember is not None:
         remember(slid)
     base_commit = slid
-    if not gitcheck.commit_all(repo, commit_message(task, summary)) and empty_if_clean:
-        gitcheck.commit_empty(repo, commit_message(task, ""))
+    # A failed commit pauses rather than crashes. The approved handoff and the
+    # caller's checkpoint stay, so resume comes back here without a stage.
+    try:
+        if not gitcheck.commit_all(repo, commit_message(task, summary)) and empty_if_clean:
+            gitcheck.commit_empty(repo, commit_message(task, ""))
+    except gitcheck.GitError as error:
+        raise Paused(
+            f"{task.task_id}: approved, but the commit failed: {error}. "
+            "Resume commits it.",
+            log,
+        ) from error
     return _approved(root, task, base_commit, round_, log)
 
 
@@ -1494,6 +1503,8 @@ def _save_pause(
 
 
 DECISION_LOG = Path(".whyline") / "decisions.md"
+# The saved stage of a task whose commit landed but whose tick commit failed.
+TICKING = "@ticking"
 
 
 def _verify_test_plan(plan_path: Path, task: plan.Task) -> Path | None:
@@ -1598,7 +1609,18 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
     test_plan = _verify_test_plan(plan_path, task)
     if test_plan is not None:
         paths.append(test_plan)
-    gitcheck.commit_paths(root, paths, f"chore: tick {task.task_id} in the plan")
+    try:
+        gitcheck.commit_paths(root, paths, f"chore: tick {task.task_id} in the plan")
+    except gitcheck.GitError:
+        # Put the box back, so the plan still shows the task and resume's
+        # clean-tree check passes. Resume then ticks it again. The add may
+        # have staged the tick before the commit failed; unstage it if git can.
+        plan_path.write_text(current, encoding="utf-8")
+        try:
+            gitcheck._git(root, "reset", "-q", "--", str(plan_path.resolve()))
+        except gitcheck.GitError:
+            pass
+        raise
 
 
 def _paused_release(root: Path, task_id: str) -> state.RelayState:
@@ -1870,6 +1892,17 @@ def _run_plan(
         )
         start_round = (resuming.round or 1) if mid_task else 1
         progress = {"round": start_round, "last": None}
+        if mid_task and resuming.stage:
+            # Keep the saved stage until the task checkpoints again, so a pause
+            # before its first turn (a retried commit failing again) still
+            # resumes where it was.
+            progress["stage_state"] = {
+                "profile": resuming.profile,
+                "stage": resuming.stage,
+                "stage_visits": dict(resuming.stage_visits),
+                "pipeline_fingerprint": resuming.pipeline_fingerprint,
+            }
+        only_tick = mid_task and resuming.stage == TICKING
         try:
             repo = task_repo(root, task)
             if repo != root.resolve():
@@ -1892,21 +1925,25 @@ def _run_plan(
             progress["stage_state"] = stage_state
 
         try:
-            outcome = run_task(
-                root,
-                task_settings,
-                task,
-                base_commit=base_commit,
-                echo=echo,
-                resume=mid_task,
-                start_round=start_round,
-                on_turn=on_turn,
-                _clear_running=False,
-                runner=runner,
-                extra_prompt=_verify_prompt(root, plan_path, task),
-                base_holder=base_holder,
-                plan_path=plan_path,
-            )
+            if only_tick:
+                # Approved and committed before the tick commit failed.
+                outcome = _approved(root, task, base_commit, start_round, None)
+            else:
+                outcome = run_task(
+                    root,
+                    task_settings,
+                    task,
+                    base_commit=base_commit,
+                    echo=echo,
+                    resume=mid_task,
+                    start_round=start_round,
+                    on_turn=on_turn,
+                    _clear_running=False,
+                    runner=runner,
+                    extra_prompt=_verify_prompt(root, plan_path, task),
+                    base_holder=base_holder,
+                    plan_path=plan_path,
+                )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
         except state.DiskFull as error:
@@ -1926,7 +1963,23 @@ def _run_plan(
             )
             raise
 
-        _tick_and_commit(root, plan_path, task)
+        try:
+            _tick_and_commit(root, plan_path, task)
+        except gitcheck.GitError as error:
+            reason = (
+                f"{task.task_id}: approved and committed, but the plan tick commit "
+                f"failed: {error}. Resume ticks it."
+            )
+            progress["stage_state"] = {
+                **(progress.get("stage_state") or {}),
+                "stage": TICKING,
+            }
+            _save_pause(
+                root, plan_path, branch, task, base_holder[0],
+                reason, None, only, progress,
+                timeout_minutes=settings.timeout_minutes,
+            )
+            raise Paused(reason) from error
         if echo:
             agents.print_status(f"==> relay: ticked {task.task_id} in the plan")
         outcomes.append(outcome)

@@ -5597,3 +5597,99 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 0bd1069099b3410b977205d839fde167 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:01:22.154Z"} -->
+
+## 2026-11-01 — A failed tick commit restores the unticked plan and saves stage @ticking; resume skips run_task and only ticks
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-10
+
+**Because:** a plan left ticked but uncommitted would make next_unchecked skip the task and fail resume's clean-tree preflight; the saved stage field already carries resume position, so no new state field is needed
+
+**Rejected:**
+
+- leave the plan file ticked and dirty — resume's preflight refuses a dirty tree and the plan would skip the task
+- add a tick_pending field to RelayState — the existing stage field already says where to resume
+- detect a pending tick from commit_verified alone — it would also skip the _require_clean leftovers pause
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 1381df21b33a4685acf521bcf98bfdc4 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:15:10.170Z"} -->
+
+## 2026-11-01 — Resume seeds progress stage_state from the saved state, so a retried @complete commit that fails again still saves @complete
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-10
+
+**Because:** the @complete resume path calls _commit_and_approve before any on_turn checkpoint; without seeding, a second failure saved an empty stage and the next resume would rerun the pipeline from its first stage
+
+**Rejected:**
+
+- call on_turn from the @complete branch — that puts _run_plan's progress bookkeeping inside the task driver
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: fd878b4ccae94972abe358cb43757e21 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:15:10.259Z"} -->
+
+## 2026-11-01 — Commit-failure resume stays on the configured pipeline's @complete path; the legacy two-role resume of an approved task without a commit still pauses
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-10
+
+**Because:** tests/test_loop_single.py::test_resume_of_approved_task_without_a_commit_pauses pins that legacy contract, and the task names the existing approved-handoff path
+
+**Rejected:**
+
+- make legacy resume retry _commit_and_approve — it breaks that pinned contract and widens the scope
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 8cefac58ecb54e7e8e1cefadb333f1b1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:15:10.348Z"} -->
+
+## 2026-11-01 — Lock-retry sleep defaults to time.sleep looked up per call, with an optional sleep= keyword on _git
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-10
+
+**Because:** commit_all and the other callers go through _git, which has no way to pass sleep down; looking it up per call lets tests monkeypatch gitcheck.time.sleep, and direct callers can inject one
+
+**Rejected:**
+
+- thread a sleep parameter through every gitcheck helper — touches every signature for a test-only need
+
+**Files:** src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: f9272b2ac63d4c9c80467659f609577f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:15:10.437Z"} -->
+
+## 2026-11-01 — Pass RLY-10 test stage
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-10
+
+**Because:** All 7 focused lock and commit-resume tests pass, and the full project pytest suite exits successfully with no regressions
+
+**Files:** src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, tests/test_git_lock.py
+
+<!-- whyline-event: 1ccbdab809bf41c5b448838bb6b06794 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:18:29.561Z"} -->
+
+## 2026-11-01 — Approve RLY-10 after round-3 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-10
+
+**Because:** The diff implements the specified retry schedule and lock detection, disables optional locks for every named read-only git command, preserves approved task state across commit failures, and resumes tick failures without rerunning stages; the focused tests exercise each behavior and the full pytest suite passes
+
+**Files:** src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, tests/test_git_lock.py
+
+<!-- whyline-event: 04d882507d944d8d98ee8551057d2bb5 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:21:43.236Z"} -->

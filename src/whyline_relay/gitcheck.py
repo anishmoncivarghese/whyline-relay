@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import time
 from pathlib import Path
+from typing import Callable
 
 RELAY_IGNORE = (
     ".whyline/relay/logs/",
@@ -30,16 +33,52 @@ class GitError(RuntimeError):
     """A git command failed or git is unavailable."""
 
 
-def _git(root: Path, *args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args], cwd=str(root), capture_output=True, text=True
-        )
-    except FileNotFoundError as error:
-        raise GitError("git is not installed or not on PATH") from error
-    if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+# Waits between tries when another git program holds the index lock: about
+# 8 s in all, long enough for an editor's background `git status` to finish.
+LOCK_WAITS = (0.25, 0.5, 1, 2, 2, 2)
+# Commands that only read. They run with GIT_OPTIONAL_LOCKS=0, so the relay's
+# own status check never takes the index lock to refresh the stat cache.
+READ_ONLY = frozenset({"status", "diff", "rev-parse", "log", "show"})
+
+
+def _index_locked(stderr: str) -> bool:
+    return "index.lock': File exists" in stderr or (
+        "Unable to create" in stderr and "index.lock" in stderr
+    )
+
+
+def _git(
+    root: Path, *args: str, sleep: Callable[[float], None] | None = None
+) -> str:
+    """Run git in `root` and return its stripped stdout.
+
+    A failure because another program holds the index lock is retried after
+    each of LOCK_WAITS; any other failure raises at once. `sleep` defaults to
+    `time.sleep`, looked up per call so tests can replace it.
+    """
+    env = None
+    if args and args[0] in READ_ONLY:
+        env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    waits = iter(LOCK_WAITS)
+    while True:
+        try:
+            result = subprocess.run(
+                ["git", *args], cwd=str(root), capture_output=True, text=True, env=env
+            )
+        except FileNotFoundError as error:
+            raise GitError("git is not installed or not on PATH") from error
+        if result.returncode == 0:
+            return result.stdout.strip()
+        message = f"git {' '.join(args)} failed: {result.stderr.strip()}"
+        if not _index_locked(result.stderr):
+            raise GitError(message)
+        wait = next(waits, None)
+        if wait is None:
+            raise GitError(
+                f"{message} (another git program held the index lock for "
+                f"{round(sum(LOCK_WAITS))} s; close it, then resume)"
+            )
+        (sleep or time.sleep)(wait)
 
 
 def current_branch(root: Path) -> str:
