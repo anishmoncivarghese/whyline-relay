@@ -21,7 +21,7 @@ Global constraints:
   Use `override.backup_for` in that clause. When it differs from the configured agent, add "(configured is now <configured>)".
   Tests: an override whose backup_for differs from the configured agent names backup_for, with the note.
 
-- [ ] RLY-3: Let generic agents take a model
+- [x] RLY-3: Let generic agents take a model
   Edit `src/whyline_relay/config.py` and `src/whyline_relay/adapters/generic.py`, with tests in `tests/`. The generic adapter has `model_flag=None`, so `[agents.grok] model = "..."` is a ConfigError, though grok and agy both accept `--model`. agentdock's console currently writes `--model` into `command` instead (AGS-4).
   Allow `[agents.<name>] model_flag = ["--model"]` for generic agents. When it is set, `model` works as it does for claude and codex. Without it, keep today's error, and add to its message that `model_flag` can be set.
   Tests: grok with model_flag and model gets both appended; without model_flag the error mentions it; claude and codex are unchanged.
