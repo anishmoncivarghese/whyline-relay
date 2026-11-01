@@ -16,7 +16,7 @@ Global constraints:
   Also accept a commit that touches only the plan file (and `.whyline/decisions.md`, where the planning note goes), when parsing the plan before and after shows that the current task's text and checkbox are unchanged, every earlier task is unchanged, and the only difference is unchecked tasks added or edited after the current one. Print it like a settings commit: "Plan changed during <task> (<sha> <subject>); continuing from <head>." Anything else keeps today's pause.
   Tests: adding a task after the current one is accepted and the base advances; editing the current task's text is refused; ticking or unticking any task is refused; a plan-plus-code commit is refused; a decisions.md-only commit alongside it is accepted.
 
-- [ ] RLY-2: `roles status` names the agent that actually hit the limit
+- [x] RLY-2: `roles status` names the agent that actually hit the limit
   Edit `src/whyline_relay/roles.py` (the status line, about line 35). It prints `{configured} {verb}` ("antigravity hit a usage or rate limit") when the agent that failed was `override.backup_for` (grok on 2026-10-21, after the user had changed the configured implementer).
   Use `override.backup_for` in that clause. When it differs from the configured agent, add "(configured is now <configured>)".
   Tests: an override whose backup_for differs from the configured agent names backup_for, with the note.
