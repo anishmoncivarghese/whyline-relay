@@ -46,6 +46,6 @@ Global constraints:
   - the refusal when a checkpoint exists
   - the plan kind regenerating tests
 
-- [ ] RDOC-3: Publish whyline-relay with RDOC-1..2
+- [x] RDOC-3: Publish whyline-relay with RDOC-1..2
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version (0.2.41 if RLY-14 released 0.2.40). Write `docs/releases/v<version>.md` from every task since the previous release, in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark SDLC-1 done when that plan reaches it.
