@@ -449,3 +449,54 @@ def test_verify_task_addendum_with_nothing_in_range_names_no_scenario():
     assert "### " not in text
     assert "no automatic scenarios in this range" in text
     assert "tests/acceptance/" in text
+
+
+def test_test_and_review_ask_for_issues_only_when_supported(tmp_path: Path):
+    for name in ("test", "review"):
+        assert "--issue" not in prompts.load(tmp_path, name)
+        assert "--issue" not in prompts.load(tmp_path, name, issues=False)
+        assert prompts.ISSUE_RULE in prompts.load(tmp_path, name, issues=True)
+
+
+def test_the_plain_templates_are_what_load_returns_without_support(tmp_path: Path):
+    assert prompts.load(tmp_path, "implement") == prompts.IMPLEMENT
+    assert prompts.load(tmp_path, "review") == prompts.REVIEW
+    assert prompts.load(tmp_path, "test") == prompts.TEST
+
+
+def test_review_asks_for_issues_in_its_changes_outcome_only():
+    review = prompts.ISSUE_TEMPLATES["review"]
+    approve, changes = review.split("Request changes:")[0], review.split(
+        "Request changes:"
+    )[1].split("Blocked:")[0]
+    assert "--issue" not in approve.split("## How to finish")[1]
+    assert prompts.ISSUE_RULE in changes
+    assert "--status changes-requested" in changes
+    assert '--issue "<the first problem>"' in changes
+
+
+def test_test_template_keeps_issue_off_the_passing_outcome():
+    text = prompts.ISSUE_TEMPLATES["test"]
+    assert prompts.ISSUE_RULE in text
+    assert "A passing outcome takes no `--issue`." in text
+
+
+def test_implement_asks_which_issue_numbers_were_fixed_only_when_supported(tmp_path):
+    asked = "which\nnumbers you fixed"
+    assert asked not in prompts.load(tmp_path, "implement")
+    assert asked in prompts.load(tmp_path, "implement", issues=True)
+
+
+def test_a_user_template_is_never_swapped_for_the_issue_variant(tmp_path: Path):
+    target = prompts.prompts_dir(tmp_path)
+    target.mkdir(parents=True)
+    (target / "review.md").write_text("MINE {task_id}")
+    assert prompts.load(tmp_path, "review", issues=True) == "MINE {task_id}"
+
+
+def test_issue_templates_use_only_known_placeholders():
+    import re
+
+    for template in prompts.ISSUE_TEMPLATES.values():
+        for found in re.findall(r"\{([a-z_]+)\}", template):
+            assert found in prompts.PLACEHOLDERS, found

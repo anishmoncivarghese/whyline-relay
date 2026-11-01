@@ -78,3 +78,28 @@ def test_note_raises_when_whyline_fails(tmp_path: Path):
             role="resume",
             runner=FakeRun(returncode=2),
         )
+
+
+def test_supports_issues_reads_handoff_help_once_per_process(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(whylinecmd, "_issue_support", None)
+    fake = FakeRun(stdout="usage: whyline handoff [--risk RISKS] [--issue TEXT]")
+    assert whylinecmd.supports_issues(tmp_path, runner=fake) is True
+    assert whylinecmd.supports_issues(tmp_path, runner=fake) is True
+    assert [argv for argv, _ in fake.calls] == [["whyline", "handoff", "--help"]]
+
+
+def test_an_older_whyline_does_not_support_issues(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(whylinecmd, "_issue_support", None)
+    fake = FakeRun(stdout="usage: whyline handoff [--risk RISKS] [--question QUESTIONS]")
+    assert whylinecmd.supports_issues(tmp_path, runner=fake) is False
+
+
+def test_a_failing_or_missing_whyline_does_not_support_issues(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(whylinecmd, "_issue_support", None)
+    assert whylinecmd.supports_issues(tmp_path, runner=FakeRun("--issue", 2)) is False
+
+    def missing(argv, **kwargs):
+        raise FileNotFoundError("whyline")
+
+    monkeypatch.setattr(whylinecmd, "_issue_support", None)
+    assert whylinecmd.supports_issues(tmp_path, runner=missing) is False

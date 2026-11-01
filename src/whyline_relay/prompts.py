@@ -422,6 +422,45 @@ anything you can reasonably decide yourself.
 Exactly one of the outcomes listed below.
 """
 
+# Asked for only when `whyline handoff --help` lists `--issue` (agentdock
+# RST-5): an older whyline refuses the flag, so the plain templates above stay
+# exactly as they were and these variants are derived from them.
+ISSUE_RULE = (
+    'Pass one `--issue "<one concrete problem, with file and line when known>"` '
+    "per problem, in priority order, as well as `--summary`."
+)
+
+
+def _with_issues(template: str, anchor: str, addition: str) -> str:
+    if template.count(anchor) != 1:
+        raise AssertionError(f"issue anchor {anchor!r} is not unique in its template")
+    return template.replace(anchor, anchor + addition)
+
+
+ISSUE_TEMPLATES = {
+    "implement": _with_issues(
+        IMPLEMENT,
+        "{review_feedback}\n",
+        "\nIf the feedback lists numbered issues, say in your handoff summary which\n"
+        "numbers you fixed, and why for any you did not.\n",
+    ),
+    "review": _with_issues(
+        REVIEW,
+        "Request changes: do not commit. Hand back with concrete, actionable feedback.\n",
+        ISSUE_RULE + " Approving takes no `--issue`.\n",
+    ).replace(
+        '--summary "<what must change, specifically>"\n',
+        '--summary "<what must change, specifically>" \\\n'
+        '      --issue "<the first problem>" --issue "<the next problem>"\n',
+    ),
+    "test": _with_issues(
+        TEST,
+        "Exactly one of the outcomes listed below.\n",
+        "\nWhen the task fails, hand off with the failing outcome. " + ISSUE_RULE
+        + " A passing outcome takes no `--issue`.\n",
+    ),
+}
+
 TEMPLATES = {
     "implement": IMPLEMENT,
     "review": REVIEW,
@@ -508,8 +547,11 @@ def prompts_dir(root: Path) -> Path:
     return root / ".whyline" / "relay" / "prompts"
 
 
-def load(root: Path, name: str) -> str:
+def load(root: Path, name: str, *, issues: bool = False) -> str:
     """Return the user's template for `name`, falling back to the built-in one.
+
+    With `issues`, a built-in template that has an `--issue` variant returns
+    that instead. A user's own template is returned as written either way.
 
     Raises PromptError, not KeyError, when neither exists: a configured
     pipeline's stage can name any prompt, not only "implement"/"review".
@@ -519,6 +561,8 @@ def load(root: Path, name: str) -> str:
         return candidate.read_text(encoding="utf-8")
     except OSError:
         pass
+    if issues and name in ISSUE_TEMPLATES:
+        return ISSUE_TEMPLATES[name]
     try:
         return TEMPLATES[name]
     except KeyError:

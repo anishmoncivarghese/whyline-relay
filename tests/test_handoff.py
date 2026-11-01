@@ -71,3 +71,23 @@ def test_missing_fields_become_empty_strings(tmp_path: Path):
     write_handoff(tmp_path, summary=None)
     assert handoff.read(tmp_path).summary == ""
     assert handoff.read(tmp_path).questions == ()
+
+
+def test_read_returns_issues_in_order(tmp_path: Path):
+    write_handoff(tmp_path, issues=["cache.py:12 key ignores case", "no test for eviction"])
+    assert handoff.read(tmp_path).issues == (
+        "cache.py:12 key ignores case",
+        "no test for eviction",
+    )
+
+
+def test_an_old_record_without_issues_reads_as_empty(tmp_path: Path):
+    write_handoff(tmp_path)
+    assert handoff.read(tmp_path).issues == ()
+
+
+def test_issues_that_are_not_a_list_of_strings_are_dropped(tmp_path: Path):
+    write_handoff(tmp_path, issues="one problem")
+    assert handoff.read(tmp_path).issues == ()
+    write_handoff(tmp_path, issues=["kept", 3, None])
+    assert handoff.read(tmp_path).issues == ("kept",)

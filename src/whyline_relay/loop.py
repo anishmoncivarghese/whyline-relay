@@ -217,6 +217,28 @@ def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
     return reason
 
 
+def _send_back_feedback(record: handoff.Handoff) -> str:
+    """What the implementer is told when work comes back: the summary, then
+    the record's issues as a numbered list it can refer to by number."""
+    if not record.issues:
+        return record.summary
+    listed = "\n".join(
+        f"{number}. {issue}" for number, issue in enumerate(record.issues, 1)
+    )
+    return "\n\n".join(
+        part for part in (record.summary, f"Issues to fix:\n{listed}") if part
+    )
+
+
+def _send_back_status(stage: str, task_id: str, record: handoff.Handoff) -> str:
+    count = len(record.issues)
+    if count:
+        detail = f"with {count} issue{'' if count == 1 else 's'}"
+    else:
+        detail = "with its summary"
+    return f"==> relay: {stage} sent {task_id} back {detail}"
+
+
 def check_visit_cap(
     pipe: pipeline.Pipeline,
     stage_id: str,
@@ -326,7 +348,9 @@ def run_agent(
     )
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
-        prompts.load(root, template_name),
+        prompts.load(
+            root, template_name, issues=whylinecmd.supports_issues(root)
+        ),
         task_id=task.task_id,
         task_text=task.text,
         sync_packet=packet,
@@ -908,7 +932,7 @@ def _run_task(
                 resumed == routing.IMPLEMENT
                 and current.status == settings.status_map["changes"]
             ):
-                feedback = current.summary
+                feedback = _send_back_feedback(current)
 
     while True:
         implementer = failover.effective_agent(root, settings, "implementer")
@@ -1031,7 +1055,11 @@ def _run_task(
                 echo=echo, remember=remember, plan_path=plan_path,
             )
         if move == routing.IMPLEMENT:
-            feedback = record.summary
+            feedback = _send_back_feedback(record)
+            if echo:
+                agents.print_status(
+                    _send_back_status("review", task.task_id, record)
+                )
             round_ += 1
             if round_ > settings.max_rounds:
                 raise Paused(
@@ -1196,8 +1224,17 @@ def _run_configured_task(
                     stage_visits.get(current_stage_id, 0) + 1
                 )
                 check_visit_cap(pipe, current_stage_id, stage_visits, task)
+                sent_back = (
+                    pipe.stages[current_stage_id].role == "implementer"
+                    and resumed_stage.role != "implementer"
+                )
                 feedback = "\n\n".join(
-                    part for part in (moved_on, current.summary) if part
+                    part
+                    for part in (
+                        moved_on,
+                        _send_back_feedback(current) if sent_back else current.summary,
+                    )
+                    if part
                 )
             elif resumed.kind == "complete":
                 return _commit_and_approve(
@@ -1393,7 +1430,20 @@ def _run_configured_task(
             record.summary,
         ):
             raise Paused(_sandbox_pause_reason(agent, record.summary), target)
-        feedback = "\n\n".join(part for part in (moved_on, record.summary) if part)
+        sent_back = (
+            pipe.stages[decision.target_stage].role == "implementer"
+            and stage.role != "implementer"
+        )
+        if sent_back:
+            feedback = _send_back_feedback(record)
+            if echo:
+                agents.print_status(
+                    _send_back_status(current_stage_id, task.task_id, record)
+                )
+        else:
+            feedback = "\n\n".join(
+                part for part in (moved_on, record.summary) if part
+            )
         current_stage_id = decision.target_stage
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
         check_visit_cap(pipe, current_stage_id, stage_visits, task)

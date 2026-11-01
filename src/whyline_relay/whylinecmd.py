@@ -1,4 +1,4 @@
-"""The two whyline commands the relay issues on its own behalf."""
+"""The whyline commands the relay issues on its own behalf."""
 
 from __future__ import annotations
 
@@ -16,6 +16,30 @@ def _run(runner, argv: list[str], root: Path) -> subprocess.CompletedProcess:
         return run(argv, cwd=str(root), capture_output=True, text=True)
     except FileNotFoundError as error:
         raise WhylineUnavailable("whyline is not installed or not on PATH") from error
+
+
+# Whether `whyline handoff` accepts `--issue`; None until first asked.
+_issue_support: bool | None = None
+
+
+def supports_issues(root: Path, runner=None) -> bool:
+    """True when this whyline's `handoff` takes `--issue` (agentdock RST-5).
+
+    An older whyline refuses the flag, so prompts only ask for it when
+    `whyline handoff --help` lists it. Asked once per process: the installed
+    whyline does not change under a running relay.
+    """
+    global _issue_support
+    if _issue_support is None:
+        try:
+            result = _run(runner, ["whyline", "handoff", "--help"], root)
+        except WhylineUnavailable:
+            _issue_support = False
+        else:
+            _issue_support = result.returncode == 0 and "--issue" in (
+                result.stdout or ""
+            )
+    return _issue_support
 
 
 def sync(root: Path, task: str, runner=None) -> str:

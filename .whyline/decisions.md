@@ -5741,3 +5741,78 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 0419e92a436b4854b6c13f504c023853 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:38:05.608Z"} -->
+
+## 2026-11-01 — Keep IMPLEMENT/REVIEW/TEST constants byte-identical and derive --issue variants that prompts.load returns only when whylinecmd.supports_issues() is true
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-12
+
+**Because:** an older whyline refuses --issue, and the 0.2.x goldens pin today's text; a user's own template is never swapped
+
+**Rejected:**
+
+- a new {issues} placeholder in the templates — user templates written by init would show it literally and the goldens would change
+- adding --issue to stage_footer — the task scopes it to the built-in TEST/REVIEW templates and footers apply to user templates too
+
+**Files:** src/whyline_relay/prompts.py, src/whyline_relay/whylinecmd.py
+
+<!-- whyline-event: 0f5ccb22fecf4d1ba7bfae17af982357 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:55:05.256Z"} -->
+
+## 2026-11-01 — A send-back is a move whose target stage has the implementer role from a stage that does not; only then are issues numbered into feedback and the 'sent back' line echoed
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-12
+
+**Because:** the task scopes the numbered list to work returning to the implementer; forward moves (draft->test) keep today's feedback
+
+**Rejected:**
+
+- numbering issues on every move — passing outcomes carry none and the echo would fire on forward moves
+- echoing 'with 1 issues' — pluralised to '1 issue' for readability
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: b7b3851df4d340ca9621775dda1f4b8c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:55:08.027Z"} -->
+
+## 2026-11-01 — Autouse conftest fixture pins whylinecmd._issue_support to False
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-12
+
+**Because:** supports_issues shells out to the installed whyline; without the pin prompt tests would depend on the machine's whyline version
+
+**Files:** tests/conftest.py
+
+<!-- whyline-event: 3b6823d2dea941d8935a59ce4215ffca -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:55:09.242Z"} -->
+
+## 2026-11-01 — Pass RLY-12 test stage
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-12
+
+**Because:** The focused issue-support and send-back tests pass, and the full 1251-test suite passes with compatibility, prompt gating, numbered feedback, resume, configured-pipeline, and echo behavior verified
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 952a4092c65e4f788a0bbe1727f5dff0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T15:58:56.604Z"} -->
+
+## 2026-11-01 — Approve RLY-12 issue-aware send-backs
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-12
+
+**Because:** The diff satisfies the requested capability gating, ordered issue parsing, numbered implementer feedback, and send-back echoes; the plain full test suite passed
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 9c95ac69d46441de928f475d984c54be -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:02:11.902Z"} -->

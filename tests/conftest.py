@@ -6,7 +6,17 @@ import types
 
 import pytest
 
-from whyline_relay import cli, preflight
+from whyline_relay import cli, preflight, whylinecmd
+
+
+@pytest.fixture(autouse=True)
+def whyline_without_issue_support(monkeypatch):
+    """Prompts must not depend on the whyline installed on this machine.
+
+    Pretend the cached `whyline handoff --help` check already said no; a test
+    that wants `--issue` support sets this to True, or None to ask again.
+    """
+    monkeypatch.setattr(whylinecmd, "_issue_support", False)
 
 
 @pytest.fixture(autouse=True)

@@ -50,21 +50,20 @@ def main() -> int:
     existing = target / "active-handoff.json"
     previous = json.loads(existing.read_text()) if existing.exists() else {}
     counter = int(previous.get("counter", 0)) + 1
-    existing.write_text(
-        json.dumps(
-            {
-                "v": 1,
-                "id": f"event{counter}",
-                "counter": counter,
-                "type": "Handoff",
-                "task": "OTHER-1" if mode == "wrongtask" else task_id,
-                "from_actor": os.environ.get("FAKE_ACTOR", ""),
-                "to_actor": to_actor,
-                "status": status,
-                "summary": f"fake {mode}",
-            }
-        )
-    )
+    record = {
+        "v": 1,
+        "id": f"event{counter}",
+        "counter": counter,
+        "type": "Handoff",
+        "task": "OTHER-1" if mode == "wrongtask" else task_id,
+        "from_actor": os.environ.get("FAKE_ACTOR", ""),
+        "to_actor": to_actor,
+        "status": status,
+        "summary": f"fake {mode}",
+    }
+    if mode == "changes" and os.environ.get("FAKE_ISSUES"):
+        record["issues"] = json.loads(os.environ["FAKE_ISSUES"])
+    existing.write_text(json.dumps(record))
     return 0
 
 

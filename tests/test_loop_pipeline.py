@@ -1376,3 +1376,66 @@ def test_the_marker_carries_each_stage_and_its_visit(repo, monkeypatch, capsys):
         "==> codex: draft T-1, visit 2 (round 3 of 10)",
         "==> claude: review T-1, visit 2 (round 4 of 10)",
     ]
+
+
+def _issue_turns(turns: list[tuple[str, str, list[str]]], prompts_seen: list[str]):
+    """Stand in for agents.run. Each turn is (to_actor, status, issues)."""
+
+    def run(command, prompt, *, cwd, log_path, timeout_seconds, **kwargs):
+        prompts_seen.append(prompt)
+        to_actor, status, issues = turns.pop(0)
+        target = Path(cwd) / ".whyline" / "active-handoff.json"
+        previous = json.loads(target.read_text()) if target.exists() else {}
+        counter = int(previous.get("counter") or 0) + 1
+        target.write_text(
+            json.dumps(
+                {
+                    "id": f"event{counter}",
+                    "counter": counter,
+                    "task": "T-1",
+                    "to_actor": to_actor,
+                    "status": status,
+                    "summary": f"{status} summary",
+                    "from_actor": "",
+                    "issues": issues,
+                }
+            )
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(status)
+        return 0
+
+    return run
+
+
+def test_a_failed_test_stage_hands_the_implementer_numbered_issues(
+    repo, monkeypatch, capsys
+):
+    settings = settings_with_pipeline(repo, make_pipeline())
+    seen: list[str] = []
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _issue_turns(
+            [
+                ("claude", "ready", []),
+                ("codex", "failed", ["a.py:3 off by one", "missing test"]),
+                ("claude", "ready", []),
+                ("codex", "failed", []),
+                ("claude", "ready", []),
+                ("claude", "passed", []),
+                ("claude", "approved", []),
+            ],
+            seen,
+        ),
+    )
+    loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=True)
+    assert (
+        "failed summary\n\nIssues to fix:\n1. a.py:3 off by one\n2. missing test"
+    ) in seen[2]
+    assert "Issues to fix:" not in seen[4]
+    out = capsys.readouterr().out
+    assert "==> relay: test sent T-1 back with 2 issues" in out
+    assert "==> relay: test sent T-1 back with its summary" in out
+    # Moving forward is not a send-back.
+    assert "draft sent T-1 back" not in out

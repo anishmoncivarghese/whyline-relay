@@ -747,3 +747,92 @@ def test_stop_file_after_a_finished_task_does_not_start_the_next(
         "STOP file present; not starting another task."
         in capsys.readouterr().out
     )
+
+
+def implementer_prompts(monkeypatch) -> list[str]:
+    """Record the prompts of codex's turns (the fake run in "review" mode)."""
+    seen: list[str] = []
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        if "review" in command:
+            seen.append(prompt)
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    return seen
+
+
+def test_a_send_back_hands_the_implementer_numbered_issues(
+    repo: Path, monkeypatch, capsys
+):
+    monkeypatch.setenv(
+        "FAKE_ISSUES", json.dumps(["cache.py:12 key ignores case", "no eviction test"])
+    )
+    seen = implementer_prompts(monkeypatch)
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused):
+        loop.run_task(
+            repo, settings_using("review", "changes", repo), TASK,
+            base_commit=base, echo=True,
+        )
+    second_implement = seen[1]
+    assert (
+        "fake changes\n\nIssues to fix:\n"
+        "1. cache.py:12 key ignores case\n2. no eviction test"
+    ) in second_implement
+    assert "==> relay: review sent WL-1 back with 2 issues" in capsys.readouterr().out
+
+
+def test_a_send_back_without_issues_echoes_its_summary(repo: Path, monkeypatch, capsys):
+    seen = implementer_prompts(monkeypatch)
+    base = loop.gitcheck.head_commit(repo)
+    with pytest.raises(loop.Paused):
+        loop.run_task(
+            repo, settings_using("review", "changes", repo), TASK,
+            base_commit=base, echo=True,
+        )
+    second_implement = seen[1]
+    assert "fake changes" in second_implement
+    assert "Issues to fix:" not in second_implement
+    out = capsys.readouterr().out
+    assert "==> relay: review sent WL-1 back with its summary" in out
+    assert "issues" not in out
+
+
+def test_resume_after_changes_requested_carries_the_numbered_issues(
+    repo: Path, monkeypatch
+):
+    write_handoff(repo, "WL-1", "codex", "changes-requested", "fix the cache key")
+    path = repo / ".whyline" / "active-handoff.json"
+    record = json.loads(path.read_text())
+    record["issues"] = ["cache.py:12 key ignores case"]
+    path.write_text(json.dumps(record))
+    seen = watch_agents(monkeypatch, repo, commit_on_approve=True)
+    base = loop.gitcheck.head_commit(repo)
+    loop.run_task(
+        repo, settings_using("review", "approve", repo), TASK,
+        base_commit=base, echo=False, resume=True, start_round=2,
+    )
+    assert (
+        "fix the cache key\n\nIssues to fix:\n1. cache.py:12 key ignores case"
+        in seen[0][1]
+    )
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_prompts_ask_for_issues_only_when_whyline_supports_them(
+    repo: Path, monkeypatch, supported
+):
+    monkeypatch.setattr(loop.whylinecmd, "_issue_support", supported)
+    seen = watch_agents(monkeypatch, repo, commit_on_approve=True)
+    base = loop.gitcheck.head_commit(repo)
+    loop.run_task(
+        repo, settings_using("review", "approve", repo), TASK,
+        base_commit=base, echo=False,
+    )
+    implement, review = seen[0][1], seen[1][1]
+    assert (loop.prompts.ISSUE_RULE in review) is supported
+    assert ("which\nnumbers you fixed" in implement) is supported
+    if not supported:
+        assert all("--issue" not in prompt for _, prompt in seen)
