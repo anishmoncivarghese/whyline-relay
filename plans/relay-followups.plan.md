@@ -1,3 +1,4 @@
+<!-- whyline-plan v1 | source: hand | drafted-by: claude | created: 2026-11-01T17:30:00+05:30 -->
 # whyline-relay follow-ups found while running the Idea Inbox plan (2026-10-21..22)
 
 Found in agentdock while the relay ran `plans/idea-inbox.plan.md`. The
