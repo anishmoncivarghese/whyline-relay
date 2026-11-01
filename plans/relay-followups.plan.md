@@ -48,7 +48,7 @@ Claude, as implementer, paused ASST-17 twice as "blocked". It ran `python -m pyt
   Add "requires approval" to `SANDBOX_MARKERS`. When Claude's output has `permission_denials`, the pause reason is `claude was denied: <first command, up to 80 chars>. Allowed test command: <test_command>.`, using `_sandbox_pause_reason` instead of `_blocked_reason`. Other agents and other pauses are unchanged.
   Tests: Claude output with a denial gives the new reason, "requires approval" in a summary counts as a refusal, and a blocked handoff with no denial keeps today's reason.
 
-- [ ] RLY-7: An implementer stopped only by a refused test command moves on to test
+- [x] RLY-7: An implementer stopped only by a refused test command moves on to test
   Edit `src/whyline_relay/loop.py` and `src/whyline_relay/prompts.py`, with tests in `tests/`.
   When the draft stage's handoff is `blocked`, it asks no question, every refused command is a test command (it contains `pytest`, `npm test`, or the configured `test_command`'s first word), and the working tree differs from the task base, follow the stage's `ready` route instead of pausing. Print "<agent> could not run `<command>`; the tester will run the tests." The next stage's prompt gets that line in its review feedback.
   The test and review stages keep today's rule: a refused test command is never a pass.
