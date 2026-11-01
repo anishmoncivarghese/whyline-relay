@@ -43,7 +43,7 @@ Claude, as implementer, paused ASST-17 twice as "blocked". It ran `python -m pyt
   When the claude command is built, append `--append-system-prompt <rules>`. Skip this when the configured command already contains `--append-system-prompt` or `--append-system-prompt-file`, so a repository's own text wins. The prompt stays the last argument.
   Tests: the flag is added with the detected and the configured test command, a configured flag is not doubled, the prompt is still last, and codex and generic agents are unchanged.
 
-- [ ] RLY-6: A refused command is named in the pause reason
+- [x] RLY-6: A refused command is named in the pause reason
   Edit `src/whyline_relay/loop.py` and `src/whyline_relay/adapters/claude.py`, with tests in `tests/`.
   Add "requires approval" to `SANDBOX_MARKERS`. When Claude's output has `permission_denials`, the pause reason is `claude was denied: <first command, up to 80 chars>. Allowed test command: <test_command>.`, using `_sandbox_pause_reason` instead of `_blocked_reason`. Other agents and other pauses are unchanged.
   Tests: Claude output with a denial gives the new reason, "requires approval" in a summary counts as a refusal, and a blocked handoff with no denial keeps today's reason.
