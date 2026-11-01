@@ -20,6 +20,8 @@ ADAPTER = Adapter(
     permission_files=lambda stack: {},
     diagnose=last_line_detail,
     manages=Manages(False, False, False),
+    # A generic agent opts in per agent with [agents.<name>] model_flag;
+    # config.load applies it there, so this shared adapter stays None.
     model_flag=None,
     dir_flag=None,
     extract_response=extract_response,

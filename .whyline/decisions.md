@@ -5102,3 +5102,47 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 7923ed40119645ac9aae5853c72dcebc -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:40:09.805Z"} -->
+
+## 2026-11-01 — Generic agents opt into model via a per-agent [agents.<name>] model_flag list, applied in config.load; built-in adapters may not override theirs
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-3
+
+**Because:** GENERIC is one shared adapter, so the flag must stay per agent (same pattern as dir_flag); claude/codex already declare --model so overriding would be confusing
+
+**Rejected:**
+
+- set model_flag=('--model',) on the GENERIC adapter — not every generic CLI accepts --model, and it would silently change behaviour for all generic agents
+- accept a string model_flag — a list matches command and allows multi-token flags like ['-c', 'model=']
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/generic.py
+
+<!-- whyline-event: f1d7177ef4f84febb04a08b6b14429c3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:48:13.004Z"} -->
+
+## 2026-11-01 — Pass RLY-3 model_flag behavior in tester Round 2
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-3
+
+**Because:** Targeted model and generic-agent tests passed, and the full project suite passed 1149 tests; generic agents append the configured model flag and model, missing flags retain a helpful ConfigError, and Claude/Codex behavior remains green
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/generic.py, tests/test_config.py
+
+<!-- whyline-event: 97217cc1dae64918a53e1ece2db722e0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:51:14.476Z"} -->
+
+## 2026-11-01 — Approve RLY-3 generic model_flag implementation in reviewer Round 3
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-3
+
+**Because:** The loader validates a per-agent non-empty string-list model_flag, appends it and model only for opted-in generic agents, preserves the helpful missing-flag error and built-in Claude/Codex behavior, and the plain full test suite passed
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/adapters/generic.py, tests/test_config.py
+
+<!-- whyline-event: 11c7e37a0ae2436cbe1109b9eb86a931 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:54:04.695Z"} -->

@@ -301,16 +301,35 @@ def load(root: Path) -> Config:
             agents[name] = list(command)
         elif name not in agents:
             agents[name] = list(resolved_adapter.default_command)
+        model_flag = resolved_adapter.model_flag
+        if "model_flag" in table:
+            value = table["model_flag"]
+            if (
+                not isinstance(value, list)
+                or not value
+                or not all(isinstance(part, str) and part for part in value)
+            ):
+                raise ConfigError(
+                    f"[agents.{name}] model_flag must be a non-empty list of "
+                    'non-empty strings, such as ["--model"]'
+                )
+            if model_flag is not None:
+                raise ConfigError(
+                    f"[agents.{name}] cannot set model_flag: the "
+                    f"{resolved_adapter.name} adapter already declares one"
+                )
+            model_flag = tuple(value)
         model = table.get("model")
         if model is not None:
             if not isinstance(model, str) or not model:
                 raise ConfigError(f"[agents.{name}] model must be a non-empty string")
-            if resolved_adapter.model_flag is None:
+            if model_flag is None:
                 raise ConfigError(
                     f"[agents.{name}] cannot set model: the {resolved_adapter.name} "
-                    "adapter has no way to apply it"
+                    "adapter has no way to apply it; set model_flag, such as "
+                    '["--model"], under this agent'
                 )
-            agents[name] = [*agents[name], *resolved_adapter.model_flag, model]
+            agents[name] = [*agents[name], *model_flag, model]
         if "dir_flag" in table:
             value = table["dir_flag"]
             if not isinstance(value, str) or not value:

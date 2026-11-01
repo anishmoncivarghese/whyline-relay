@@ -388,7 +388,58 @@ def test_model_on_a_generic_agent_is_refused(tmp_path: Path):
     )
     with pytest.raises(
         config.ConfigError, match="cannot set model: the generic adapter"
-    ):
+    ) as raised:
+        config.load(tmp_path)
+    assert "set model_flag" in str(raised.value)
+
+
+def test_a_generic_agent_with_a_model_flag_takes_a_model(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.grok]\nadapter = "generic"\n'
+        'command = ["grok", "--output-format", "json"]\n'
+        'model_flag = ["--model"]\nmodel = "grok-4"\n',
+    )
+    loaded = config.load(tmp_path)
+    assert loaded.agents["grok"] == [
+        "grok", "--output-format", "json", "--model", "grok-4",
+    ]
+
+
+def test_a_model_flag_alone_leaves_the_command_unchanged(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok"]\n'
+        'model_flag = ["--model"]\n',
+    )
+    assert config.load(tmp_path).agents["grok"] == ["grok"]
+
+
+def test_a_model_flag_does_not_leak_to_other_generic_agents(tmp_path: Path):
+    write(
+        tmp_path,
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok"]\n'
+        'model_flag = ["--model"]\nmodel = "grok-4"\n'
+        '[agents.aider]\nadapter = "generic"\ncommand = ["aider"]\nmodel = "x"\n',
+    )
+    with pytest.raises(config.ConfigError, match=r"\[agents.aider\] cannot set model"):
+        config.load(tmp_path)
+
+
+@pytest.mark.parametrize("value", ['"--model"', "[]", '[""]', "[3]"])
+def test_a_malformed_model_flag_is_refused(tmp_path: Path, value: str):
+    write(
+        tmp_path,
+        f'[agents.grok]\nadapter = "generic"\ncommand = ["grok"]\nmodel_flag = {value}\n',
+    )
+    with pytest.raises(config.ConfigError, match="model_flag must be a non-empty list"):
+        config.load(tmp_path)
+
+
+@pytest.mark.parametrize("table", ["[agents.claude]\n", '[agents.cx]\nadapter = "codex"\n'])
+def test_a_built_in_adapter_cannot_set_a_model_flag(tmp_path: Path, table: str):
+    write(tmp_path, f'{table}model_flag = ["-m"]\nmodel = "x"\n')
+    with pytest.raises(config.ConfigError, match="cannot set model_flag"):
         config.load(tmp_path)
 
 
