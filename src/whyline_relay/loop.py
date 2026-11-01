@@ -364,11 +364,86 @@ def _short_sha(commit: str) -> str:
     return commit[:7]
 
 
-def _settings_commits(repo: Path, base: str) -> list[tuple[str, str]] | None:
-    """Commits in `base..HEAD` when every one touches only the relay config.
+_DECISIONS_LOG = ".whyline/decisions.md"
+_SETTINGS = "settings"
+_PLAN = "plan"
 
-    None when any of those commits touches another path, or the range cannot
-    be read. An empty list means HEAD is still `base`.
+
+def _plan_relpath(repo: Path, plan_path: Path | None) -> str | None:
+    """The plan's path inside `repo`, or None when it lives elsewhere."""
+    if plan_path is None:
+        return None
+    try:
+        return plan_path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _plan_at(repo: Path, commit: str, relpath: str) -> list[plan.Task] | None:
+    try:
+        return plan.parse(gitcheck._git(repo, "show", f"{commit}:{relpath}"))
+    except (gitcheck.GitError, plan.PlanError):
+        return None
+
+
+def _same_task(left: plan.Task, right: plan.Task) -> bool:
+    return (left.task_id, left.text, left.checked) == (
+        right.task_id,
+        right.text,
+        right.checked,
+    )
+
+
+def _only_later_tasks_changed(
+    before: list[plan.Task], after: list[plan.Task], task_id: str
+) -> bool:
+    """True when the current task and every earlier one are unchanged.
+
+    Tasks after the current one may be added or edited only while unchecked;
+    none may be removed, and none may be ticked or unticked.
+    """
+    split_before = next(
+        (i for i, task in enumerate(before) if task.task_id == task_id), None
+    )
+    split_after = next(
+        (i for i, task in enumerate(after) if task.task_id == task_id), None
+    )
+    if split_before is None or split_before != split_after:
+        return False
+    head_before = before[: split_before + 1]
+    head_after = after[: split_after + 1]
+    if not all(_same_task(old, new) for old, new in zip(head_before, head_after)):
+        return False
+    later_before = {task.task_id: task for task in before[split_before + 1 :]}
+    later_after = {task.task_id: task for task in after[split_after + 1 :]}
+    if not later_before.keys() <= later_after.keys():
+        return False
+    # Order controls execution, so existing later tasks keep their sequence.
+    kept_order = [tid for tid in later_after if tid in later_before]
+    if kept_order != list(later_before):
+        return False
+    for task_id_after, new in later_after.items():
+        old = later_before.get(task_id_after)
+        if old is not None and _same_task(old, new):
+            continue
+        if new.checked or (old is not None and old.checked):
+            return False
+    return True
+
+
+def _settings_commits(
+    repo: Path, base: str, task: plan.Task, plan_path: Path | None = None
+) -> list[tuple[str, str, str]] | None:
+    """Commits in `base..HEAD` when every one is a settings or a plan commit.
+
+    A settings commit touches only the relay config. A plan commit touches
+    only the plan (and the decision log), adding or editing unchecked tasks
+    after `task` and nothing else. A decision-log-only commit counts as a plan
+    commit when the range also holds a real one. Each entry is
+    (sha, subject, kind).
+
+    None when any of those commits is something else, or the range cannot be
+    read. An empty list means HEAD is still `base`.
     """
     head = gitcheck.head_commit(repo)
     if head == base:
@@ -377,7 +452,8 @@ def _settings_commits(repo: Path, base: str) -> list[tuple[str, str]] | None:
         listing = gitcheck._git(repo, "rev-list", "--reverse", f"{base}..{head}")
     except gitcheck.GitError:
         return None
-    found: list[tuple[str, str]] = []
+    plan_rel = _plan_relpath(repo, plan_path)
+    found: list[tuple[str, str, str]] = []
     for commit in listing.splitlines():
         if not commit:
             continue
@@ -392,24 +468,53 @@ def _settings_commits(repo: Path, base: str) -> list[tuple[str, str]] | None:
             )
         except gitcheck.GitError:
             return None
-        files = [line.strip() for line in names.splitlines() if line.strip()]
-        if files != [_CONFIG_ONLY]:
+        files = {line.strip() for line in names.splitlines() if line.strip()}
+        if files == {_CONFIG_ONLY}:
+            kind = _SETTINGS
+        elif plan_rel is not None and files == {_DECISIONS_LOG}:
+            kind = _DECISIONS_LOG
+        elif plan_rel is not None and plan_rel in files and files <= {
+            plan_rel,
+            _DECISIONS_LOG,
+        }:
+            before = _plan_at(repo, f"{commit}^", plan_rel)
+            after = _plan_at(repo, commit, plan_rel)
+            if before is None or after is None:
+                return None
+            if not _only_later_tasks_changed(before, after, task.task_id):
+                return None
+            kind = _PLAN
+        else:
             return None
         message = gitcheck.commit_message(repo, commit).splitlines()
         subject = message[0].strip() if message else ""
-        found.append((commit, subject))
+        found.append((commit, subject, kind))
+    kinds = {kind for _, _, kind in found}
+    if _DECISIONS_LOG in kinds:
+        # The planning note rides with a plan change, never on its own.
+        if _PLAN not in kinds:
+            return None
+        found = [
+            (commit, subject, _PLAN if kind == _DECISIONS_LOG else kind)
+            for commit, subject, kind in found
+        ]
     return found
 
 
 def _advance_base_past_settings(
-    repo: Path, task: plan.Task, base_commit: str, *, echo: bool
+    repo: Path,
+    task: plan.Task,
+    base_commit: str,
+    *,
+    echo: bool,
+    plan_path: Path | None = None,
 ) -> str | None:
-    """Return HEAD when `base_commit..HEAD` is config.toml only.
+    """Return HEAD when `base_commit..HEAD` holds only settings or plan commits.
 
-    None means some commit touches another path, and the caller keeps today's
-    pause. The progress line names each settings commit and the new base.
+    None means some commit is anything else, and the caller keeps today's
+    pause. The progress line names each such commit and the new base.
     """
-    described = _settings_commits(repo, base_commit)
+    described = _settings_commits(repo, base_commit, task, plan_path)
     if described is None:
         return None
     if not described:
@@ -417,9 +522,10 @@ def _advance_base_past_settings(
     head = gitcheck.head_commit(repo)
     if echo:
         short_head = _short_sha(head)
-        for commit, subject in described:
+        for commit, subject, kind in described:
+            what = "Plan" if kind == _PLAN else "Settings"
             agents.print_status(
-                f"Settings changed during {task.task_id} "
+                f"{what} changed during {task.task_id} "
                 f"({_short_sha(commit)} {subject}); continuing from {short_head}."
             )
     return head
@@ -591,6 +697,7 @@ def _commit_and_approve(
     empty_if_clean: bool = False,
     echo: bool = False,
     remember: Callable[[str], None] | None = None,
+    plan_path: Path | None = None,
 ) -> Outcome:
     """The relay itself makes a configured pipeline's one finishing commit (spec 5.6).
 
@@ -607,7 +714,9 @@ def _commit_and_approve(
     and an approval with no such commit still pauses.
     """
     repo = task_repo(root, task)
-    slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+    slid = _advance_base_past_settings(
+        repo, task, base_commit, echo=echo, plan_path=plan_path
+    )
     if slid is None or gitcheck.head_commit(repo) != slid:
         raise Paused(
             f"{task.task_id}: HEAD moved before the relay could make its own commit; "
@@ -636,6 +745,7 @@ def _run_task(
     runner: failover.Runner = subprocess.run,
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
+    plan_path: Path | None = None,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -726,7 +836,9 @@ def _run_task(
             # codex-cli 0.155.1); only the prompt says not to, so check.
             # A commit that only edits the relay config is Set up or the
             # console bar saving, not the implementer's work.
-            slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+            slid = _advance_base_past_settings(
+                repo, task, base_commit, echo=echo, plan_path=plan_path
+            )
             if slid is None:
                 raise Paused(
                     f"{agent} made a commit, which the relay forbids (only the reviewer "
@@ -797,7 +909,7 @@ def _run_task(
                 return _approved(root, task, base_commit, round_, target)  # an older review.md committed
             return _commit_and_approve(
                 root, task, base_commit, round_, target, record.summary,
-                echo=echo, remember=remember,
+                echo=echo, remember=remember, plan_path=plan_path,
             )
         if move == routing.IMPLEMENT:
             feedback = record.summary
@@ -836,6 +948,7 @@ def _run_configured_task(
     runner: failover.Runner = subprocess.run,
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
+    plan_path: Path | None = None,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
@@ -904,6 +1017,7 @@ def _run_configured_task(
             return _commit_and_approve(
                 root, task, base_commit, round_, None, current.summary,
                 empty_if_clean=True, echo=echo, remember=remember,
+                plan_path=plan_path,
             )
         profile_name = saved.profile
         current_stage_id = saved.stage
@@ -944,6 +1058,7 @@ def _run_configured_task(
                 return _commit_and_approve(
                     root, task, base_commit, round_, None, current.summary,
                     empty_if_clean=True, echo=echo, remember=remember,
+                    plan_path=plan_path,
                 )
             elif resumed.kind == "blocked":
                 raise Paused(
@@ -1018,7 +1133,9 @@ def _run_configured_task(
             runner=runner,
         )
         if gitcheck.head_commit(repo) != head_before:
-            slid = _advance_base_past_settings(repo, task, base_commit, echo=echo)
+            slid = _advance_base_past_settings(
+                repo, task, base_commit, echo=echo, plan_path=plan_path
+            )
             if slid is None:
                 raise Paused(
                     f"{agent} made a commit in stage {current_stage_id!r}, which the relay "
@@ -1104,6 +1221,7 @@ def _run_configured_task(
             return _commit_and_approve(
                 root, task, base_commit, round_, target, record.summary,
                 empty_if_clean=True, echo=echo, remember=remember,
+                plan_path=plan_path,
             )
         if _sandbox_backroute(
             pipe,
@@ -1140,6 +1258,7 @@ def run_task(
     runner: failover.Runner = subprocess.run,
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
+    plan_path: Path | None = None,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
@@ -1156,6 +1275,7 @@ def run_task(
             runner=runner,
             extra_prompt=extra_prompt,
             base_holder=base_holder,
+            plan_path=plan_path,
         )
     finally:
         if _clear_running:
@@ -1637,6 +1757,7 @@ def _run_plan(
                 runner=runner,
                 extra_prompt=_verify_prompt(root, plan_path, task),
                 base_holder=base_holder,
+                plan_path=plan_path,
             )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)

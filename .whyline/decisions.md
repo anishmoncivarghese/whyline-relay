@@ -4962,3 +4962,96 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 12ca473f142e4ccbac809feec3807ad3 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-10-22T04:08:16.933Z"} -->
+
+## 2026-11-01 — A mid-task plan commit slides the base only when parsed tasks up to and including the current one are identical and later tasks are only added or edited while unchecked
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-1
+
+**Because:** tasks inserted for later (AGS-1..5, AWK-1) must not pause a running task, but any change to the current or earlier tasks, any tick or untick, or any later-task removal could change what the running task or its verification means
+
+**Rejected:**
+
+- raw-text prefix equality up to the current task — stricter than the spec's parse-based rule and would refuse harmless prose edits above it
+- accept a decisions.md-only commit on its own — the spec only allows the planning note to ride with a plan change, so it is accepted only when the range also holds a real plan commit
+- find the plan via state.json — state is saved only at pauses, so plan_path is threaded explicitly from _run_plan through run_task
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: eecc451496364d9db6d4e7eb711f24e8 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:06:46.015Z"} -->
+
+## 2026-11-01 — RLY-1 passes focused and full-suite behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-1
+
+**Because:** All 21 plan-commit tests passed, including later-task additions and edits, checkbox and current-task refusals, code-mixed refusal, decisions-note acceptance, and runtime base advancement; the complete 1136-test suite also passed
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: fc1cd2ef584d4ae7bb07e4a7d84da3cf -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:09:45.478Z"} -->
+
+## 2026-11-01 — Reject RLY-1 until later-task reordering is refused
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-1
+
+**Because:** The later-task comparison uses dictionaries and accepts reordering existing tasks; ordering controls execution and the task allows only unchecked tasks to be added or edited after the current task, with anything else pausing. The plain full suite passed, but a focused reproduction returned True for swapping T-2 and T-3.
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: 43e8dd96c1d74122b7f48c6f7d04b9b7 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:12:41.455Z"} -->
+
+## 2026-11-01 — Later tasks that survive a mid-task plan commit must keep their relative order
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-1
+
+**Because:** plan order controls execution order, so swapping two unchecked later tasks changes what runs next and must pause like any other non-additive change; inserting new tasks anywhere after the current one still passes
+
+**Rejected:**
+
+- compare later tasks by id only (the round-2 dicts) — accepted a T-2/T-3 swap, which the reviewer reproduced
+- require existing later tasks to stay at the same indexes — would refuse inserting a new task between two later ones, which the spec allows
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: e9967cfeba574b1eb40c8db11c997fee -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:25:15.087Z"} -->
+
+## 2026-11-01 — RLY-1 Round 4 passes behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-1
+
+**Because:** All 23 focused plan-commit tests passed, including refusal of later-task reordering and acceptance of insertion without disturbing surviving order; the complete 1138-test suite also passed
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: d5c981177ae04b4e8c3791c57d6c5095 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:28:19.204Z"} -->
+
+## 2026-11-01 — Approve RLY-1 plan-only base advancement
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-1
+
+**Because:** The implementation accepts only path-restricted plan changes that preserve the current and earlier tasks, all checkbox state, and surviving later-task order; focused tests pass and the plain full suite passes
+
+**Rejected:**
+
+- request changes — no behavioral, safety, or coverage defect found
+
+**Files:** src/whyline_relay/loop.py, tests/test_loop_plan_commits.py
+
+<!-- whyline-event: 007776b8e5034df3b8b03edac18bb19c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:31:19.902Z"} -->
