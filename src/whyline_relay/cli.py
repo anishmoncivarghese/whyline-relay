@@ -41,6 +41,8 @@ from whyline_relay import (
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PAUSED = 2
+# The same code argparse uses for a refused command line.
+EXIT_USAGE = 2
 
 _WATCHDOG_DISABLED = "Watchdog disabled: a hung agent runs until you stop it."
 
@@ -326,6 +328,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional model, for a built-in agent name (codex or claude)",
     )
     roles_set.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    roles_switch = roles_sub.add_parser(
+        "switch", help="Point a role at another agent from its next turn"
+    )
+    roles_switch.add_argument("role", help="The role to switch")
+    roles_switch.add_argument("agent", help="The agent to switch it to")
+    roles_switch.add_argument(
+        "--keep",
+        action="store_true",
+        help="Keep the switch after the plan completes.",
+    )
+    roles_switch.add_argument(
         "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
 
@@ -650,6 +665,13 @@ def cmd_roles(args: argparse.Namespace) -> int:
         except roles.RoleSetError as error:
             print(f"Error: {error}", file=sys.stderr)
             return EXIT_ERROR
+        return EXIT_OK
+    if args.roles_command == "switch":
+        try:
+            print(roles.switch(root, settings, args.role, args.agent, keep=args.keep))
+        except roles.RoleSetError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return EXIT_USAGE
         return EXIT_OK
     if args.role is not None and args.role not in roles.current_roles(settings):
         valid = ", ".join(sorted(roles.current_roles(settings)))

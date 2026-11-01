@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from whyline_relay import adapters, config, failover, whyline_model
@@ -29,10 +30,17 @@ def status(root: Path, settings: config.Config) -> str:
         override = overrides.get(role)
         if override is None:
             lines.append(f"{role}: {configured}")
+        elif override.reason == failover.MANUAL:
+            lines.append(
+                f"{role}: {configured}, currently {override.agent} "
+                f"(switched by you, since {override.since})"
+            )
         else:
-            verb, _ = failover.REASON_TEXT[override.reason]
+            verb = failover.reason_verb(override.reason)
             failed = override.backup_for
-            if failed != configured:
+            # A switch away from a manual one tried the configured agent too,
+            # so it is not stale.
+            if failed != configured and configured not in override.tried:
                 failed += f" (configured is now {configured})"
             line = (
                 f"{role}: {configured}, currently {override.agent} "
@@ -64,6 +72,43 @@ def reset(root: Path, role: str | None) -> str:
     if role is None:
         return f"Reset {removed} role(s) to their configured agent."
     return f"{role} reset to its configured agent."
+
+
+def switch(
+    root: Path,
+    settings: config.Config,
+    role: str,
+    agent: str,
+    *,
+    keep: bool = False,
+) -> str:
+    """Point `role` at `agent` from its next turn, for this run only (or past
+    it, with `keep`). Writes only the override file: config.toml is never
+    touched and the running process is never signalled, since the loop
+    re-reads overrides before every stage."""
+    current = current_roles(settings)
+    if role not in current:
+        configured = ", ".join(sorted(current))
+        raise RoleSetError(f"{role!r} is not a configured role ({configured})")
+    if agent not in settings.agents:
+        raise RoleSetError(f"{agent} is not set up for this relay")
+    configured_agent = current[role]
+    if agent == configured_agent:
+        failover.clear_overrides(root, role)
+        return f"{role} back to {agent} from its next turn."
+    failover.write_override(
+        root,
+        role,
+        failover.ActiveOverride(
+            agent=agent,
+            backup_for=configured_agent,
+            reason=failover.MANUAL,
+            since=datetime.now().astimezone().isoformat(),
+            tried=[],
+            keep=keep,
+        ),
+    )
+    return f"{role} → {agent} from its next turn."
 
 
 def _upsert_role(text: str, role: str, agent: str) -> str:

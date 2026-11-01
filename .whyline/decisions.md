@@ -5816,3 +5816,167 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 9c95ac69d46441de928f475d984c54be -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:02:11.902Z"} -->
+
+## 2026-11-01 — roles switch exits 2 through a new EXIT_USAGE constant, not EXIT_PAUSED or EXIT_ERROR
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** the spec asks for 2, and EXIT_PAUSED (also 2) means a paused run; EXIT_USAGE matches argparse's refused-command-line code
+
+**Rejected:**
+
+- return EXIT_ERROR (1) like roles set — contradicts the spec's exit code
+- return EXIT_PAUSED — right number, wrong meaning
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: a6f79bb501a6400db2fc6985ec266e0c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:18:46.853Z"} -->
+
+## 2026-11-01 — When a manually switched agent hits a limit, the backup override records backup_for=<the manual agent> and tried=[manual, configured]
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** the existing failover writes backup_for=<the agent that failed>; adding the configured agent to tried keeps the chain from falling back to the agent the user switched away from. roles status now drops the '(configured is now X)' note when the configured agent is in tried
+
+**Rejected:**
+
+- backup_for=<configured> — pause_message and roles status would name an agent that never failed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/roles.py
+
+<!-- whyline-event: 8a6bbde1eb444c6ca9b1901a920b8dd5 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:18:46.943Z"} -->
+
+## 2026-11-01 — record_limit and _read_limits accept only rate-limit and auth, not every REASON_TEXT key
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** adding 'manual' to REASON_TEXT would otherwise let a manual switch be stored as an agent being out
+
+**Rejected:**
+
+- keep the REASON_TEXT membership check — it would accept 'manual'
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: 061cef9e7d6b4dbe8673383bac2750b7 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:18:47.031Z"} -->
+
+## 2026-11-01 — Each switch's echo (now X / ignored) prints once per run, keyed on (role, agent, since), only for the role about to run
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** the loop re-reads overrides before every stage, so echoing each time would repeat the line every turn; the announced set goes from run_plan through run_task to the drivers
+
+**Rejected:**
+
+- echo whenever the turn's agent changes — misses a switch made before the first turn
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 83ebb2569d2a4e3789099e38152b4ea5 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:18:47.119Z"} -->
+
+## 2026-11-01 — Manual switches are cleared on plan completion only when run_plan has no --only
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** a single-task run finishing is not the plan completing; spec ties the deletion to the plan completing
+
+**Rejected:**
+
+- also clear after an --only task — would end a switch the user meant for the rest of the plan
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 0fd645e796ca4134acc7939b433c952a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:18:47.209Z"} -->
+
+## 2026-11-01 — RLY-13 passes behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-13
+
+**Because:** All 22 focused roles-switch tests and the complete 1273-test project suite passed, covering live switch timing, fallback, persistence, cleanup, compatibility, CLI errors, and ignored agents
+
+**Files:** tests/test_roles_switch.py
+
+<!-- whyline-event: e928b8ace75d443c9fa64f6f93bdde16 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:22:09.528Z"} -->
+
+## 2026-11-01 — Reject RLY-13 until live switches supersede queued failover state
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-13
+
+**Because:** Both loop drivers reread the manual override but still prefer an existing ephemeral overload fallback, and limit handling for the already-running old agent can overwrite a manual switch written during that turn; this violates the next-turn guarantee despite the full suite passing
+
+**Rejected:**
+
+- approve current implementation — the core live-switch promise fails when the running turn ends in overload or another failover reason, and the tests do not cover that race
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: ced24a68742649a9b7f7743f3d6f01a9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:25:25.694Z"} -->
+
+## 2026-11-01 — A manual switch written during a turn, or after an overload fallback was queued, wins over that turn's failover
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-13
+
+**Because:** the loop snapshots the role's override before _turn_agents; if roles switch changed it since (new manual override, or a manual one cleared), the failover handler records the limit but writes no override and queues no fallback, and a queued overload fallback whose snapshot no longer matches is dropped at the next turn start
+
+**Rejected:**
+
+- compare only the override's agent to the running agent — a switch to the agent already running would be missed, and a sticky backup would still overwrite a switch-back
+- snapshot after _turn_agents — a switch landing between the two reads would look pre-existing and be overwritten
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 90cdce557668480cacb6384126ddaf03 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:31:12.663Z"} -->
+
+## 2026-11-01 — RLY-13 passes Round 5 behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-13
+
+**Because:** All 31 focused roles-switch tests and the complete 1282-test project suite passed, including the live-switch race coverage added after the prior review rejection
+
+**Files:** tests/test_roles_switch.py
+
+<!-- whyline-event: 0357ebdab3f145b8bb97fcca175122d6 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:34:30.575Z"} -->
+
+## 2026-11-01 — Approve RLY-13 after Round 6 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-13
+
+**Because:** The working-tree diff implements manual role switches across CLI, status, pause/chat-safe reason handling, both loop drivers, failover chains, completion cleanup and run-start cleanup; all 31 focused tests and the full 1282-test suite pass independently, and git diff --check is clean
+
+**Rejected:**
+
+- request more changes — no task violation, unsafe behavior, or missing required coverage remained after the live-switch failover race fix
+
+**Files:** src/whyline_relay/loop.py, tests/test_roles_switch.py
+
+<!-- whyline-event: c5d3a1fc0b954103824af6f53ac01da3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:38:30.710Z"} -->

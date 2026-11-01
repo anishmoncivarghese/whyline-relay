@@ -27,6 +27,7 @@ from whyline_relay import (
     pipeline,
     plan,
     prompts,
+    roles,
     routing,
     running,
     state,
@@ -697,6 +698,76 @@ def _die_disk_full(error: state.DiskFull) -> None:
     raise SystemExit(3)
 
 
+def _turn_agents(
+    root: Path,
+    settings: config.Config,
+    role: str | None = None,
+    *,
+    echo: bool = False,
+    announced: set[tuple[str, str, str]] | None = None,
+) -> dict[str, str]:
+    """Every role's agent for the next turn, from the overrides as they are now.
+
+    An override naming an agent that is not in this run's settings.agents (a
+    hand-edited file) is ignored for the turn and left on disk. `role` is the
+    one about to run: only its echoes print, once per switch per run.
+    """
+    overrides = failover.read_overrides(root)
+    result: dict[str, str] = {}
+    for name, configured in roles.current_roles(settings).items():
+        override = overrides.get(name)
+        if override is None:
+            result[name] = configured
+            continue
+        usable = override.agent in settings.agents
+        result[name] = override.agent if usable else configured
+        if not echo or name != role:
+            continue
+        key = (name, override.agent, override.since)
+        if announced is not None and key in announced:
+            continue
+        if not usable:
+            message = (
+                f"==> relay: {name} switch to {override.agent} ignored; "
+                "it was not set up when this run started"
+            )
+        elif override.reason == failover.MANUAL:
+            message = f"==> relay: {name} now {override.agent} (switched by you)"
+        else:
+            continue
+        if announced is not None:
+            announced.add(key)
+        agents.print_status(message)
+    return result
+
+
+def _switched_since(
+    before: failover.ActiveOverride | None, now: failover.ActiveOverride | None
+) -> bool:
+    """Whether `roles switch` changed the role between two reads: a new manual
+    switch, or a manual one cleared by switching back to the configured agent."""
+    if now == before:
+        return False
+    if now is not None:
+        return now.reason == failover.MANUAL
+    return before is not None and before.reason == failover.MANUAL
+
+
+def _drop_superseded_ephemeral(
+    role: str,
+    turn_override: failover.ActiveOverride | None,
+    ephemeral: dict[str, str],
+    ephemeral_tried: dict[str, list[str]],
+    ephemeral_basis: dict[str, failover.ActiveOverride | None],
+) -> None:
+    """Forget a queued overload fallback for `role` once a manual switch has
+    landed since it was queued: the switch decides the role's next turn."""
+    if role in ephemeral and _switched_since(ephemeral_basis.get(role), turn_override):
+        ephemeral.pop(role, None)
+        ephemeral_tried.pop(role, None)
+        ephemeral_basis.pop(role, None)
+
+
 def _failover_no_handoff(
     root: Path,
     settings: config.Config,
@@ -709,18 +780,43 @@ def _failover_no_handoff(
     echo: bool,
     ephemeral: dict[str, str],
     ephemeral_tried: dict[str, list[str]],
+    ephemeral_basis: dict[str, failover.ActiveOverride | None],
+    turn_override: failover.ActiveOverride | None,
 ) -> bool:
     """Handle a turn that produced no handoff.
 
     True means retry this stage on another agent. False means the text is not
     a failover reason. A Paused stop is raised when nothing usable remains.
     Overload retries for this turn only and writes no sticky override.
+    `turn_override` is the role's override as read before the turn started: a
+    manual switch written since then wins over this turn's failover.
     """
     adapter = config.adapter_for(settings, agent)
     command = settings.agents.get(agent, [])
     reason = failover.classify(adapter, text, command, runner=runner)
     if reason is None:
         return False
+    if _switched_since(turn_override, failover.read_overrides(root).get(role)):
+        # You switched the role while this turn ran. Remember the agent is out,
+        # but write no override and queue no fallback: the next turn follows
+        # your switch, as `roles switch` promised.
+        if reason != "overload":
+            failover.record_limit(
+                root, agent, reason, text, adapter=adapter, command=command
+            )
+        ephemeral.pop(role, None)
+        ephemeral_tried.pop(role, None)
+        ephemeral_basis.pop(role, None)
+        if echo:
+            verb = (
+                "was at capacity" if reason == "overload"
+                else failover.reason_verb(reason)
+            )
+            agents.print_status(
+                f"==> relay: {agent} {verb}; {role} follows your switch "
+                "from its next turn"
+            )
+        return True
     if reason == "overload":
         tried = list(ephemeral_tried.get(role, []))
         if agent not in tried:
@@ -737,6 +833,7 @@ def _failover_no_handoff(
             )
         ephemeral[role] = backup
         ephemeral_tried[role] = tried
+        ephemeral_basis.setdefault(role, turn_override)
         if echo:
             agents.print_status(
                 f"{agent}: model at capacity; using {backup} for this turn"
@@ -749,7 +846,17 @@ def _failover_no_handoff(
         root, agent, reason, text, adapter=adapter, command=command
     )
     existing = failover.read_overrides(root).get(role)
-    tried_sticky = list(existing.tried) if existing is not None else []
+    if (
+        existing is not None
+        and existing.reason == failover.MANUAL
+        and existing.agent == agent
+    ):
+        # The switched-in agent is out: walk the chain as the configured agent
+        # would, without falling back to the one you switched away from.
+        configured = roles.current_roles(settings).get(role, existing.backup_for)
+        tried_sticky = [agent] + ([configured] if configured != agent else [])
+    else:
+        tried_sticky = list(existing.tried) if existing is not None else []
     if agent not in tried_sticky:
         tried_sticky.append(agent)
     limited = failover.limited_agents(root)
@@ -886,6 +993,7 @@ def _run_task(
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
+    announced: set[tuple[str, str, str]] | None = None,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -904,6 +1012,7 @@ def _run_task(
     next_move = routing.IMPLEMENT
     ephemeral: dict[str, str] = {}
     ephemeral_tried: dict[str, list[str]] = {}
+    ephemeral_basis: dict[str, failover.ActiveOverride | None] = {}
 
     def remember(commit: str) -> None:
         nonlocal base_commit
@@ -911,8 +1020,11 @@ def _run_task(
         if base_holder is not None:
             base_holder[0] = commit
 
-    implementer = failover.effective_agent(root, settings, "implementer")
-    reviewer = failover.effective_agent(root, settings, "reviewer")
+    if announced is None:
+        announced = set()
+    start = _turn_agents(root, settings)
+    implementer = start["implementer"]
+    reviewer = start["reviewer"]
     gitcheck.ensure_relay_ignored(root)
     repo = task_repo(root, task)
     whylinecmd.claim(root, task.task_id, implementer, "implementer")
@@ -935,11 +1047,18 @@ def _run_task(
                 feedback = _send_back_feedback(current)
 
     while True:
-        implementer = failover.effective_agent(root, settings, "implementer")
-        reviewer = failover.effective_agent(root, settings, "reviewer")
         if next_move == routing.APPROVED:
             return _approved(root, task, base_commit, round_, None)
         role = "implementer" if next_move == routing.IMPLEMENT else "reviewer"
+        # Read before _turn_agents, so a switch landing between the two reads
+        # counts as written during this turn rather than being overwritten.
+        turn_override = failover.read_overrides(root).get(role)
+        _drop_superseded_ephemeral(
+            role, turn_override, ephemeral, ephemeral_tried, ephemeral_basis
+        )
+        turn = _turn_agents(root, settings, role, echo=echo, announced=announced)
+        implementer = turn["implementer"]
+        reviewer = turn["reviewer"]
         agent = implementer if role == "implementer" else reviewer
         if role in ephemeral:
             agent = ephemeral[role]
@@ -949,6 +1068,7 @@ def _run_task(
                 reviewer = agent
         else:
             ephemeral_tried.pop(role, None)
+            ephemeral_basis.pop(role, None)
         template = "implement" if role == "implementer" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
@@ -1013,6 +1133,8 @@ def _run_task(
                 echo=echo,
                 ephemeral=ephemeral,
                 ephemeral_tried=ephemeral_tried,
+                ephemeral_basis=ephemeral_basis,
+                turn_override=turn_override,
             ):
                 continue
             adapter = config.adapter_for(settings, agent)
@@ -1024,6 +1146,7 @@ def _run_task(
             )
         ephemeral.pop(role, None)
         ephemeral_tried.pop(role, None)
+        ephemeral_basis.pop(role, None)
         failover.clear_limit(root, agent)  # it handed off, so it is not limited
         if record.task != task.task_id:
             raise Paused(
@@ -1096,6 +1219,7 @@ def _run_configured_task(
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
+    announced: set[tuple[str, str, str]] | None = None,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
@@ -1122,11 +1246,11 @@ def _run_configured_task(
 
     ephemeral: dict[str, str] = {}
     ephemeral_tried: dict[str, list[str]] = {}
+    ephemeral_basis: dict[str, failover.ActiveOverride | None] = {}
     pipe = settings.pipeline
-    effective_agents = {
-        name: failover.pipeline_effective_agent(root, settings, name)
-        for name in pipe.roles
-    }
+    if announced is None:
+        announced = set()
+    effective_agents = _turn_agents(root, settings)
     round_ = start_round
     feedback = ""
     gitcheck.ensure_relay_ignored(root)
@@ -1252,27 +1376,26 @@ def _run_configured_task(
         current_stage_id = start_stage_id
         stage_visits = {current_stage_id: 1}
 
-    implementer_agent = (
-        failover.pipeline_effective_agent(root, settings, "implementer")
-        if "implementer" in pipe.roles
-        else ""
-    )
-    reviewer_agent = (
-        failover.pipeline_effective_agent(root, settings, "reviewer")
-        if "reviewer" in pipe.roles
-        else ""
-    )
+    start_agents = _turn_agents(root, settings)
+    implementer_agent = start_agents.get("implementer", "")
+    reviewer_agent = start_agents.get("reviewer", "")
     while True:
-        effective_agents = {
-            name: failover.pipeline_effective_agent(root, settings, name)
-            for name in pipe.roles
-        }
         stage = pipe.stages[current_stage_id]
+        # Read before _turn_agents, so a switch landing between the two reads
+        # counts as written during this turn rather than being overwritten.
+        turn_override = failover.read_overrides(root).get(stage.role)
+        _drop_superseded_ephemeral(
+            stage.role, turn_override, ephemeral, ephemeral_tried, ephemeral_basis
+        )
+        effective_agents = _turn_agents(
+            root, settings, stage.role, echo=echo, announced=announced
+        )
         if stage.role in ephemeral:
             agent = ephemeral[stage.role]
         else:
             agent = effective_agents[stage.role]
             ephemeral_tried.pop(stage.role, None)
+            ephemeral_basis.pop(stage.role, None)
         turn_implementer = (
             agent if stage.role == "implementer"
             else effective_agents.get("implementer", implementer_agent)
@@ -1353,6 +1476,8 @@ def _run_configured_task(
                 echo=echo,
                 ephemeral=ephemeral,
                 ephemeral_tried=ephemeral_tried,
+                ephemeral_basis=ephemeral_basis,
+                turn_override=turn_override,
             ):
                 continue
             adapter = config.adapter_for(settings, agent)
@@ -1364,6 +1489,7 @@ def _run_configured_task(
             )
         ephemeral.pop(stage.role, None)
         ephemeral_tried.pop(stage.role, None)
+        ephemeral_basis.pop(stage.role, None)
         failover.clear_limit(root, agent)  # it handed off, so it is not limited
         if record.task != task.task_id:
             raise Paused(
@@ -1471,6 +1597,7 @@ def run_task(
     extra_prompt: str = "",
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
+    announced: set[tuple[str, str, str]] | None = None,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
@@ -1488,6 +1615,7 @@ def run_task(
             extra_prompt=extra_prompt,
             base_holder=base_holder,
             plan_path=plan_path,
+            announced=announced,
         )
     finally:
         if _clear_running:
@@ -1877,6 +2005,9 @@ def _run_plan(
     and `run_task` picks the next agent from the handoff record.
     """
     gitcheck.ensure_relay_ignored(root)
+    # A saved Set up may have caught up with a manual switch since it was made.
+    failover.clear_caught_up(root, roles.current_roles(settings))
+    announced: set[tuple[str, str, str]] = set()
     outcomes: list[Outcome] = []
     resuming = state.load(root) if resume else None
     while True:
@@ -1893,6 +2024,10 @@ def _run_plan(
             task = plan.next_unchecked(tasks, skip=skipped_ids)
         if task is None or task.checked or task.task_id in skipped_ids:
             state.clear(root)
+            if only is None:
+                # The plan is done, so the run's manual switches end with it.
+                # A pause, a STOP or a resume never reaches here.
+                failover.clear_manual(root)
             return outcomes
 
         # Manual checks gate every release, whoever runs it, before it
@@ -1998,6 +2133,7 @@ def _run_plan(
                     extra_prompt=_verify_prompt(root, plan_path, task),
                     base_holder=base_holder,
                     plan_path=plan_path,
+                    announced=announced,
                 )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)

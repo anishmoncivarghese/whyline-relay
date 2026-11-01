@@ -22,19 +22,33 @@ Runner = Callable[..., subprocess.CompletedProcess]
 REASON_TEXT: dict[str, tuple[str, str]] = {
     "rate-limit": ("hit a usage or rate limit", "try again when it resets"),
     "auth": ("is no longer logged in", "try again once you've signed back in"),
+    "manual": ("was switched by you", "switch it back with roles reset"),
 }
+
+# The reason only `roles switch` writes. A manual switch is not an agent being
+# out, so record_limit never remembers it.
+MANUAL = "manual"
+
+
+def reason_verb(reason: str) -> str:
+    """REASON_TEXT's verb for `reason`, or the raw word for one this version
+    does not know (a hand-edited file, or one a newer relay wrote)."""
+    return REASON_TEXT.get(reason, (reason, ""))[0]
 
 
 @dataclass(frozen=True)
 class ActiveOverride:
     agent: str
     backup_for: str
-    reason: str  # "rate-limit" | "auth"
+    reason: str  # "rate-limit" | "auth" | "manual"
     since: str  # ISO timestamp
     tried: list[str] = field(default_factory=list)
     # Absolute ISO time the usage limit lifts, or "" when the text gave none
     # or the override was written before this field.
     resets_at: str = ""
+    # A manual switch that outlives the plan completing. Defaulted, so a file
+    # written before this field still reads.
+    keep: bool = False
 
 
 # "Resets in 158h14m22s" or "Resets in 158h14m". Seconds are optional.
@@ -76,10 +90,12 @@ def read_overrides(
         resets_at = record.get("resets_at", "")
         if not isinstance(resets_at, str):
             resets_at = ""
+        keep = record.get("keep", False)
         result[role] = ActiveOverride(
             **{f: record[f] for f in required},
             tried=list(tried),
             resets_at=resets_at,
+            keep=keep if isinstance(keep, bool) else False,
         )
     return result
 
@@ -125,6 +141,34 @@ def clear_overrides(
     else:
         removed = 0
     _write_all(root, overrides, storage_path)
+    return removed
+
+
+def clear_manual(root: Path) -> list[str]:
+    """Remove manual switches not marked `keep`. Backup switches stay.
+    Returns the roles removed."""
+    overrides = read_overrides(root)
+    removed = [
+        role
+        for role, override in overrides.items()
+        if override.reason == MANUAL and not override.keep
+    ]
+    if removed:
+        _write_all(root, {r: o for r, o in overrides.items() if r not in removed})
+    return removed
+
+
+def clear_caught_up(root: Path, configured: dict[str, str]) -> list[str]:
+    """Remove manual switches whose agent is now the role's configured agent,
+    because a saved Set up has caught up with them. Returns the roles removed."""
+    overrides = read_overrides(root)
+    removed = [
+        role
+        for role, override in overrides.items()
+        if override.reason == MANUAL and configured.get(role) == override.agent
+    ]
+    if removed:
+        _write_all(root, {r: o for r, o in overrides.items() if r not in removed})
     return removed
 
 
@@ -259,6 +303,8 @@ class AgentLimit:
 
 # How long a rate-limit whose output named no reset time is remembered.
 _UNSTATED_RATE_LIMIT = timedelta(hours=24)
+# The reasons an agent can be out for. "manual" is in REASON_TEXT but is not one.
+_LIMIT_REASONS = ("rate-limit", "auth")
 _DETAIL_CHARS = 160
 
 
@@ -293,7 +339,7 @@ def _read_limits(root: Path) -> dict[str, AgentLimit]:
         fields = {f: record.get(f, "") for f in ("reason", "since", "resets_at", "detail")}
         if not all(isinstance(v, str) for v in fields.values()):
             continue
-        if fields["reason"] not in REASON_TEXT or not fields["since"]:
+        if fields["reason"] not in _LIMIT_REASONS or not fields["since"]:
             continue
         result[agent] = AgentLimit(**fields)
     return result
@@ -328,7 +374,7 @@ def record_limit(
     Pass `adapter` and `command` so Grok's private reasoning is not read as
     the reset time or the detail line.
     """
-    if reason not in REASON_TEXT:
+    if reason not in _LIMIT_REASONS:
         return None
     visible = (
         grok.rate_limit_text(adapter, text, command or [])
@@ -475,9 +521,14 @@ def pause_message(
     reason: str,
     override: ActiveOverride | None,
 ) -> str:
-    verb, suffix = REASON_TEXT[reason]
+    verb, suffix = REASON_TEXT.get(reason, (reason, "try again later"))
     if override is not None and override.agent == agent:
-        other_verb, _ = REASON_TEXT[override.reason]
+        if override.reason == MANUAL:
+            return (
+                f"{agent} (switched in by you for {role}, in place of "
+                f"{override.backup_for}) {verb}; {suffix}"
+            )
+        other_verb = reason_verb(override.reason)
         return (
             f"{agent} (backup for {role}; {override.backup_for} was already out: "
             f"it {other_verb}) also {verb}; {suffix}"
