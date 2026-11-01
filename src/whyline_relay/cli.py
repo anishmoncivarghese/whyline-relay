@@ -329,6 +329,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
 
+    test_command_parser = subparsers.add_parser(
+        "test-command", help="Show or set the command that runs this repo's tests"
+    )
+    # args.command already holds the subcommand name, so the value needs its
+    # own dest.
+    test_command_parser.add_argument(
+        "test_command",
+        metavar="COMMAND",
+        nargs="?",
+        default=None,
+        help='The test command to save (an empty string "" removes it).',
+    )
+    test_command_parser.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+
     plan_format = subparsers.add_parser(
         "plan-format", help="Print how to write a plan"
     )
@@ -641,6 +657,30 @@ def cmd_roles(args: argparse.Namespace) -> int:
         )
         return EXIT_ERROR
     print(roles.reset(root, args.role))
+    return EXIT_OK
+
+
+def cmd_test_command(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    try:
+        if args.test_command is not None:
+            config.save_test_command(root, args.test_command)
+            if args.test_command:
+                print(f"test_command set to: {args.test_command}")
+            else:
+                print("test_command removed; it will be detected.")
+            return EXIT_OK
+        configured = config.configured_test_command(root)
+        current = config.test_command(root)
+    except config.ConfigError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    if configured is not None:
+        print(f"{current} (set in config.toml)")
+    elif current:
+        print(f"{current} (detected)")
+    else:
+        print("No test command (none set or detected)")
     return EXIT_OK
 
 
@@ -1066,6 +1106,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "init": cmd_init,
             "remove": cmd_remove,
             "roles": cmd_roles,
+            "test-command": cmd_test_command,
             "doctor": cmd_doctor,
             "plan-format": cmd_plan_format,
             "plan": cmd_plan,

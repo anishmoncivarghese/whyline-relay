@@ -5146,3 +5146,48 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 11c7e37a0ae2436cbe1109b9eb86a931 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T12:54:04.695Z"} -->
+
+## 2026-11-01 — test_command is a top-level key edited line-by-line (insert after the last top-level key, remove only before the first table header); init.py left unchanged
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-4
+
+**Because:** A key placed after a table header would be read as part of that table, and a TOML serializer rewrite would drop comments; init.detect_stack already sufficed, so config imports it lazily to avoid the init/config circular import
+
+**Rejected:**
+
+- tomlkit round-trip — new dependency for one key
+- insert at line 0 — lands above the file's leading comment block
+- move detect_stack into config — churns init for no gain
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: c479256939f946a493825ab25a5e100b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:02:57.637Z"} -->
+
+## 2026-11-01 — Pass RLY-4 test_command behavior in tester Round 2
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-4
+
+**Because:** The 19 focused tests and all 1168 project tests passed; configured values override stack detection, uv/python/node/base detection is correct, save and removal preserve other config lines, and the CLI prints and delegates saving as required
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/cli.py, tests/test_test_command.py
+
+<!-- whyline-event: 41ce86e530ef4630be3d82ecf3263fcb -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:05:59.957Z"} -->
+
+## 2026-11-01 — Approve RLY-4 test_command implementation in reviewer Round 3
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-4
+
+**Because:** The implementation reuses init.detect_stack for the four required detection outcomes, preserves unrelated config lines while adding, replacing, or removing the top-level key, routes CLI writes through save_test_command, and the plain full test suite passed
+
+**Files:** src/whyline_relay/config.py, src/whyline_relay/cli.py, tests/test_test_command.py
+
+<!-- whyline-event: fccaea1ffbf1421ca81c5c2a1e0be276 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:09:01.592Z"} -->

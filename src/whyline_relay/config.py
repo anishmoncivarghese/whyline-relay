@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -239,6 +240,93 @@ def relay_dir(root: Path) -> Path:
 
 def config_path(root: Path) -> Path:
     return relay_dir(root) / "config.toml"
+
+
+_TEST_COMMAND_KEY = re.compile(r"^test_command\s*=")
+
+
+def configured_test_command(root: Path) -> str | None:
+    """The top-level `test_command` from config.toml, or None if it is unset."""
+    path = config_path(root)
+    if not path.exists():
+        return None
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError) as error:
+        raise ConfigError(f"could not read {path.name} ({path}): {error}") from error
+    if "test_command" not in raw:
+        return None
+    value = raw["test_command"]
+    if not isinstance(value, str):
+        raise ConfigError("test_command must be a string")
+    return value or None
+
+
+def detect_test_command(root: Path) -> str:
+    """The test command this repo's stack implies, or "" when there is none."""
+    # init imports this module, so importing it at the top would be circular.
+    from whyline_relay import init
+
+    stack = init.detect_stack(root)
+    if stack == "python":
+        return "uv run pytest -q" if (root / "uv.lock").exists() else "pytest -q"
+    if stack == "node":
+        return "npm test"
+    return ""
+
+
+def test_command(root: Path) -> str:
+    """The configured test_command when set, otherwise the detected one."""
+    configured = configured_test_command(root)
+    return configured if configured is not None else detect_test_command(root)
+
+
+def save_test_command(root: Path, command: str) -> None:
+    """Write `test_command = "..."` at the top level of config.toml, or remove
+    it when `command` is empty. Every other line is left exactly as it was.
+    """
+    path = config_path(root)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines(keepends=True)
+    # A top-level key has to come before the first [table] header.
+    top_end = next(
+        (index for index, line in enumerate(lines) if line.strip().startswith("[")),
+        len(lines),
+    )
+    existing = [
+        index for index in range(top_end) if _TEST_COMMAND_KEY.match(lines[index].strip())
+    ]
+
+    if not command:
+        if not existing:
+            return
+        for index in reversed(existing):
+            del lines[index]
+        path.write_text("".join(lines), encoding="utf-8")
+        return
+
+    # json.dumps produces a valid TOML basic string, escapes included.
+    entry = f"test_command = {json.dumps(command, ensure_ascii=False)}\n"
+    if existing:
+        lines[existing[0]] = entry
+        for index in reversed(existing[1:]):
+            del lines[index]
+    else:
+        # After the last existing top-level key, so the new line joins them
+        # rather than landing above a leading comment block.
+        keys = [
+            index
+            for index in range(top_end)
+            if lines[index].strip() and not lines[index].lstrip().startswith("#")
+        ]
+        insert_at = keys[-1] + 1 if keys else 0
+        if insert_at and not lines[insert_at - 1].endswith(("\n", "\r")):
+            lines[insert_at - 1] += "\n"
+        if insert_at == 0 and top_end < len(lines):
+            entry += "\n"
+        lines.insert(insert_at, entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(lines), encoding="utf-8")
 
 
 def _timeout_minutes(value: object) -> int:
