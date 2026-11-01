@@ -11,7 +11,7 @@ Global constraints:
 - Keep every existing behaviour not named here.
 - Run the focused tests and the complete suite after each task.
 
-- [ ] RLY-1: Accept commits that only add tasks after the current one
+- [x] RLY-1: Accept commits that only add tasks after the current one
   Edit `src/whyline_relay/loop.py` (`_settings_commits`, `_advance_base_past_settings`), with tests in `tests/`. Today a running or paused task accepts only config.toml-only commits in `base..HEAD`. A plan commit that adds tasks for later (agentdock added AGS-1..5 and AWK-1 this way) makes the task pause at approval with "HEAD moved", so every insertion had to wait for a pause and a fresh `start`.
   Also accept a commit that touches only the plan file (and `.whyline/decisions.md`, where the planning note goes), when parsing the plan before and after shows that the current task's text and checkbox are unchanged, every earlier task is unchanged, and the only difference is unchecked tasks added or edited after the current one. Print it like a settings commit: "Plan changed during <task> (<sha> <subject>); continuing from <head>." Anything else keeps today's pause.
   Tests: adding a task after the current one is accepted and the base advances; editing the current task's text is refused; ticking or unticking any task is refused; a plan-plus-code commit is refused; a decisions.md-only commit alongside it is accepted.
