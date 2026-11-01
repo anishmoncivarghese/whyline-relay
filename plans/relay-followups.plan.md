@@ -125,7 +125,7 @@ The console's status line shows only `relay: JOB-24, claude… 5945s`. Users can
 
 codex hit its usage limit during JOB-26, and the reviewer was switched to antigravity. When codex's usage came back, the only way to return was `roles reset reviewer` in a terminal. The user wants to change a role's agent from the console while a relay runs, taking effect at that role's next turn and never interrupting the current one. Going back to the configured agent already works: clearing the switch is read before every stage. Switching to any other agent needs a switch the user made, which `REASON_TEXT` doesn't know, so `roles status` and `pause_message` would raise `KeyError` on it today.
 
-- [ ] RLY-13: A switch the user makes while the relay runs (`roles switch`)
+- [x] RLY-13: A switch the user makes while the relay runs (`roles switch`)
   Edit `src/whyline_relay/failover.py`, `src/whyline_relay/roles.py`, `src/whyline_relay/loop.py` and `src/whyline_relay/cli.py`, with tests in `tests/`.
   1. `REASON_TEXT` gains `"manual": ("was switched by you", "switch it back with roles reset")`. Every reader of `ActiveOverride.reason` (`roles.status`, `pause_message`, chat) handles it. An unknown reason read from the file is shown as the raw word, never a `KeyError`.
   2. `ActiveOverride` gains `keep: bool = False`, defaulted, so older files still read.
