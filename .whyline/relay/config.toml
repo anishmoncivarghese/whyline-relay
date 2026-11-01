@@ -32,6 +32,7 @@ command = [
 implementer = "claude"
 tester      = "codex"
 reviewer    = "codex"
+release = "human"
 
 [pipeline]
 default_profile = "full"
