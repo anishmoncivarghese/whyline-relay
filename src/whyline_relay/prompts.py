@@ -422,6 +422,267 @@ anything you can reasonably decide yourself.
 Exactly one of the outcomes listed below.
 """
 
+PRD_DRAFT = """{sync_packet}
+
+You are drafting a product requirements document. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to draft
+
+Write a product requirements document at `.whyline/relay/draft-prd.md` with these
+sections:
+- `# <title>`
+- `## Problem`
+- `## Users`
+- `## Goals`
+- `## Non-goals`
+- `## Requirements`
+- `## Success measures`
+
+A PRD says what to build and why, never how. Number every requirement `R1`,
+`R2`, ... in order, one per line, and make each one testable: someone must be
+able to say whether a finished product meets it. Leave out architecture,
+components, data models, libraries and other implementation choices; those
+belong in the design. Base it on the description named in the task and on any
+attachments listed. Do not write placeholder text like "TBD", "TODO", or
+"fill in" anywhere -- every section must be concrete and specific.
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --file .whyline/relay/draft-prd.md --actor {actor} --role {role} --task {task_id}
+
+If a product decision the description and reference documents don't settle
+blocks the PRD, hand off blocked with one --question per decision, and put the
+choices in the question itself, e.g. "Who is it for? (a) admins (b) every
+user". Don't ask about anything you can reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+PRD_REVIEW = """{sync_packet}
+
+You are checking a drafted product requirements document. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+{review_feedback}
+
+## What to check
+
+Read `.whyline/relay/draft-prd.md`. Check that every required section exists:
+`# <title>`, `## Problem`, `## Users`, `## Goals`, `## Non-goals`,
+`## Requirements`, and `## Success measures`. Check that requirements are
+numbered `R1`, `R2`, ... with no gaps or repeats, and that every requirement is
+testable: a vague one ("fast", "easy to use") with no measure is a problem.
+Check that nothing in it is architecture or implementation -- components, data
+models, libraries, APIs -- since a PRD says what and why, not how. Confirm that
+nothing contradicts anything else and there is no placeholder text ("TBD",
+"TODO", "fill in"). Don't judge whether it is the right product -- that
+judgment belongs to a human, not you.
+
+If everything checks out, hand off with status `approved`. If something is
+genuinely missing, untestable, or describes the how, hand off with status
+`revise` with concrete, specific feedback naming each requirement to fix. If a
+human decision is needed to proceed, hand off with status `blocked`.
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file .whyline/relay/draft-prd.md --actor {actor} --role {role} --task {task_id}
+
+If a product decision the description and reference documents don't settle
+blocks the PRD, hand off blocked with one --question per decision, and put the
+choices in the question itself. Don't ask about anything you can reasonably
+decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+DESIGN_DRAFT = """{sync_packet}
+
+You are drafting a design document for an architect. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to draft
+
+Write a design document at `.whyline/relay/draft-design.md` with these sections:
+- `# <title>`
+- `## Context`
+- `## Decisions` (one `###` decision record each)
+- `## Design`
+- `## Risks`
+- `## Migration`
+- `## Rollback`
+
+Each decision record states the decision, the options considered, why the
+chosen one wins, and what it costs. List only options someone would genuinely
+weigh, each with a real reason it lost; a strawman is not an option. Base it
+on the description named in the task and on any attachments listed, such as a
+PRD: when one is attached, say which of its requirements each part of the
+design meets. Cover how existing data and users move to the new design and how
+to undo it if it fails. Do not write placeholder text like "TBD", "TODO", or
+"fill in" anywhere -- every section must be concrete and specific.
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --rejected "<option>: <why not>" \\
+      --file .whyline/relay/draft-design.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+design, hand off blocked with one --question per decision, and put the choices
+in the question itself, e.g. "Which queue? (a) SQS (b) Redis streams". Don't ask
+about anything you can reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+DESIGN_REVIEW = """{sync_packet}
+
+You are checking a drafted design document. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+{review_feedback}
+
+## What to check
+
+Read `.whyline/relay/draft-design.md`. Check that every required section
+exists: `# <title>`, `## Context`, `## Decisions`, `## Design`, `## Risks`,
+`## Migration`, and `## Rollback`. Check that every decision record lists the
+options considered and that the alternatives are real: each is something a
+competent architect would weigh, with a specific reason it lost, not a
+strawman. Check that the risks are named with what limits each, that the
+migration says how existing data and users move, and that the rollback says
+how to undo it. When a PRD is attached, check that the design meets each of its
+requirements. Confirm that nothing contradicts anything else and there is no
+placeholder text ("TBD", "TODO", "fill in").
+
+If everything checks out, hand off with status `approved`. If something is
+genuinely missing, a strawman, or uncovered, hand off with status `revise`
+with concrete, specific feedback about exactly what to fix. If a human decision
+is needed to proceed, hand off with status `blocked`.
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file .whyline/relay/draft-design.md --actor {actor} --role {role} --task {task_id}
+
+If a decision the description and reference documents don't settle blocks the
+design, hand off blocked with one --question per decision, and put the choices
+in the question itself. Don't ask about anything you can reasonably decide
+yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+BUILD_RECORD_DRAFT = """{sync_packet}
+
+You are drafting a build record. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+## Feedback from the previous round
+
+{review_feedback}
+
+## How to draft
+
+Write a record of what was built at `.whyline/relay/draft-build-record.md`,
+measured against the approved documents attached, with these sections:
+- `# <title>`
+- `## Inputs` (every attachment you read)
+- `## What was built`
+- `## Against the requirements` (each requirement: met, partly met, or not met)
+- `## Deviations`
+- `## Open items`
+
+Write it only from the attached inputs -- the approved documents, decisions,
+commits and test results listed in the task. Never invent a fact, a feature, a
+test result or a reason. Cite the attachment behind every claim. When the
+inputs don't say something, write that they don't say, rather than filling the
+gap. Do not write placeholder text like "TBD", "TODO", or "fill in".
+
+Record any genuine decision a future reader would wonder about:
+
+    whyline note "<one-line decision>" --because "<why>" \\
+      --file .whyline/relay/draft-build-record.md --actor {actor} --role {role} --task {task_id}
+
+If the attachments are missing something the record cannot be written without,
+hand off blocked with one --question per gap. Don't ask about anything you can
+reasonably decide yourself.
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
+BUILD_RECORD_REVIEW = """{sync_packet}
+
+You are checking a drafted build record against its inputs. Round {round}.
+
+## Task {task_id}
+
+{task_text}
+
+{review_feedback}
+
+## What to check
+
+Read `.whyline/relay/draft-build-record.md` and every attachment listed in the
+task. Check that every required section exists: `# <title>`, `## Inputs`,
+`## What was built`, `## Against the requirements`, `## Deviations`, and
+`## Open items`. Check every claim against the attachments: each one must be
+supported by an attachment it cites. A claim no attachment supports is
+invented, and is a problem even if it is probably true. Check that every
+requirement in the approved documents appears under `## Against the
+requirements`, and that each deviation from them is listed. Confirm there is no
+placeholder text ("TBD", "TODO", "fill in").
+
+If everything checks out, hand off with status `approved`. If a claim is
+unsupported, a requirement is missing, or a deviation is unlisted, hand off
+with status `revise` with concrete, specific feedback naming each claim to fix.
+If a human decision is needed to proceed, hand off with status `blocked`.
+
+Record your judgment -- this is a decision a future reader would wonder about:
+
+    whyline note "<one-line judgment>" --because "<why>" \\
+      --file .whyline/relay/draft-build-record.md --actor {actor} --role {role} --task {task_id}
+
+## How to finish
+
+Exactly one of the outcomes listed below.
+"""
+
 # Asked for only when `whyline handoff --help` lists `--issue` (agentdock
 # RST-5): an older whyline refuses the flag, so the plain templates above stay
 # exactly as they were and these variants are derived from them.
@@ -471,6 +732,12 @@ TEMPLATES = {
     "plan-tests": PLAN_TESTS,
     "spec-draft": SPEC_DRAFT,
     "spec-review": SPEC_REVIEW,
+    "prd-draft": PRD_DRAFT,
+    "prd-review": PRD_REVIEW,
+    "design-draft": DESIGN_DRAFT,
+    "design-review": DESIGN_REVIEW,
+    "build-record-draft": BUILD_RECORD_DRAFT,
+    "build-record-review": BUILD_RECORD_REVIEW,
 }
 
 

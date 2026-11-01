@@ -5980,3 +5980,47 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: c5d3a1fc0b954103824af6f53ac01da3 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T16:38:30.710Z"} -->
+
+## 2026-11-01 — documents.py takes kind as a required positional argument, and _announcer names kinds through a _NOUNS table with a fallback derived from task_id
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RDOC-1
+
+**Because:** a required kind stops a caller from drafting a plan by accident, and the table handles 'PRD' capitalisation while still naming any future DocKind.named kind
+
+**Rejected:**
+
+- a noun field on DocKind — it would change the five-field constructor the task specifies
+- rewriting specs.py to delegate to documents — specs.py is outside this task's allowed files
+
+**Files:** src/whyline_relay/documents.py, src/whyline_relay/planner.py
+
+<!-- whyline-event: c63d7e5a25f14220819b194d14b1d439 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:19:20.254Z"} -->
+
+## 2026-11-01 — RDOC-1 passes behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RDOC-1
+
+**Because:** The document-kind tests, adjacent planner/spec/prompt regressions, and the complete project suite all pass; independent checkpoints, prompt overrides, round trips, and announcer names behave as required
+
+**Files:** src/whyline_relay/documents.py
+
+<!-- whyline-event: 088db7461f2f43dbb225627885cfa413 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:23:14.118Z"} -->
+
+## 2026-11-01 — Approve RDOC-1 public document kinds and documents API
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RDOC-1
+
+**Because:** The diff matches the requested API and prompt behavior, the tests genuinely cover independent checkpoints, prompt overrides, announcer names, and PRD/design round trips, and the plain full test suite passes
+
+**Files:** src/whyline_relay/documents.py
+
+<!-- whyline-event: e666f61007d64d4ebeebb7e5f0487710 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:26:31.641Z"} -->

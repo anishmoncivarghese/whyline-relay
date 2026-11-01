@@ -31,16 +31,43 @@ PLAN_TASK_ID = "__plan__"
 
 
 @dataclass(frozen=True)
-class _Kind:
+class DocKind:
+    """One kind of drafted document: its task id, draft file, checkpoint and
+    prompts. Each kind has its own draft and checkpoint, so several can be in
+    progress at once."""
+
     task_id: str
     draft_name: str
     state_name: str
     draft_prompt: str
     review_prompt: str
 
+    @classmethod
+    def named(cls, name: str) -> "DocKind":
+        return cls(
+            f"__{name}__",
+            f"draft-{name}.md",
+            f"{name}-state.json",
+            f"{name}-draft",
+            f"{name}-review",
+        )
 
-PLAN_KIND = _Kind(PLAN_TASK_ID, "draft-plan.md", "plan-state.json", "plan-draft", "plan-review")
-SPEC_KIND = _Kind("__spec__", "draft-spec.md", "spec-state.json", "spec-draft", "spec-review")
+
+_Kind = DocKind
+
+PLAN_KIND = DocKind(PLAN_TASK_ID, "draft-plan.md", "plan-state.json", "plan-draft", "plan-review")
+SPEC_KIND = DocKind.named("spec")
+PRD_KIND = DocKind.named("prd")
+DESIGN_KIND = DocKind.named("design")
+BUILD_RECORD_KIND = DocKind.named("build-record")
+
+_NOUNS = {
+    PLAN_KIND: "the plan",
+    SPEC_KIND: "the spec",
+    PRD_KIND: "the PRD",
+    DESIGN_KIND: "the design",
+    BUILD_RECORD_KIND: "the build record",
+}
 
 
 class PlanAlreadyInProgress(RuntimeError):
@@ -587,7 +614,7 @@ def _prompt_suffix(
 def _announcer(print_fn, kind: _Kind = PLAN_KIND):
     if print_fn is None:
         return None
-    noun = "the spec" if kind == SPEC_KIND else "the plan"
+    noun = _NOUNS.get(kind) or "the " + kind.task_id.strip("_").replace("-", " ")
     words = {
         "draft": f"drafting {noun}",
         "review": "reviewing the draft",
