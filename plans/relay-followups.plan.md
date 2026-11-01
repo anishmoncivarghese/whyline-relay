@@ -78,7 +78,7 @@ At JOB-8, grok was out of credit ("402 Payment Required: Grok Build usage balanc
 
 At WF-13, every stage approved, then the relay's own commit failed with `git add -A failed: fatal: Unable to create '/Users/anish/agentdock/.git/index.lock': File exists.` The lock belonged to whyline console's `git status` poll, which runs several times a second; the lock was gone a second later. The relay treated the failure as fatal and cleared its state, so the approved work sat uncommitted with `task: (none)`, and Resolve recommended stashing it. agentdock now sets `GIT_OPTIONAL_LOCKS=0` so its own polls stop taking the lock, but any other tool can still hold it briefly (an editor, a git GUI, another agent).
 
-- [ ] RLY-10: Wait out a brief git index lock, and never lose an approved task to a commit failure
+- [x] RLY-10: Wait out a brief git index lock, and never lose an approved task to a commit failure
   Edit `src/whyline_relay/gitcheck.py` and `src/whyline_relay/loop.py`, with tests in `tests/`.
   1. `gitcheck._git` retries a command whose stderr contains `index.lock': File exists` (or `Unable to create` and `index.lock`), waiting 0.25 s, 0.5 s, 1 s, 2 s, 2 s, 2 s (about 8 s in all). It does not retry any other failure. The wait uses an injectable `sleep`, so tests never sleep. After the last try it raises `GitError` with the original message plus `(another git program held the index lock for 8 s; close it, then resume)`.
   2. The relay's read-only git calls (`status`, `diff`, `rev-parse`, `log`, `show`) run with `GIT_OPTIONAL_LOCKS=0` in their environment, so the relay never holds the lock for a status check either.
