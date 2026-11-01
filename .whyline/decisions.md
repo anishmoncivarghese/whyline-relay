@@ -5252,3 +5252,48 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e7286b726a90471ab82b5a0dfdabfcbb -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:29:17.151Z"} -->
+
+## 2026-11-01 — A Claude denial overrides the blocked reason only on blocked handoffs with a log, keyed on the claude adapter, not the agent name
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-6
+
+**Because:** The task scopes the change to blocked pauses; adapter_for catches renamed claude variants, and the resume path has no turn log to read
+
+**Rejected:**
+
+- Check agent == 'claude' — misses configured claude-adapter variants
+- Also rewrite the resume-time blocked pause — no log target exists there
+- Print an empty test command as 'Allowed test command — .': unreadable, so 'none' is shown instead
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/adapters/claude.py
+
+<!-- whyline-event: 4f7a439177254dd9a011d2afba977fb0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:38:20.707Z"} -->
+
+## 2026-11-01 — Pass RLY-6 denial pause behavior
+
+**Actor:** codex
+**Role:** tester
+**Task:** RLY-6
+
+**Because:** Focused adapter and pipeline tests plus the full 1184-test suite passed; Claude denials name the first command capped at 80 characters and include the allowed test command, requires approval is treated as a refusal, while non-Claude and no-denial blocked pauses retain their existing reasons
+
+**Files:** src/whyline_relay/adapters/claude.py, src/whyline_relay/loop.py, tests/test_adapters.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: 548ea72184ef41bfa4631df9f79a1566 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:41:31.945Z"} -->
+
+## 2026-11-01 — Approve RLY-6 refused-command pause reason
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RLY-6
+
+**Because:** The diff reads Claude permission_denials from the blocked turn log, names only the first command capped at 80 characters, includes the resolved allowed test command, recognizes requires approval as a refusal, preserves non-Claude and no-denial pause reasons, and uv run pytest -q passed all 1184 tests
+
+**Files:** src/whyline_relay/adapters/claude.py, src/whyline_relay/loop.py, tests/test_adapters.py, tests/test_loop_pipeline.py
+
+<!-- whyline-event: f1a474f3885647c18260ff80b56173cf -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-01T13:44:29.895Z"} -->

@@ -473,6 +473,73 @@ def test_blocked_from_draft_test_and_review_pauses(repo, monkeypatch, scripts, a
         loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
 
 
+def _with_claude_denial(run, command: str):
+    """`run`, but every turn ends with a Claude-style JSON result denying `command`."""
+
+    def wrapped(cmd, prompt, *, log_path, **kwargs):
+        code = run(cmd, prompt, log_path=log_path, **kwargs)
+        denial = {
+            "type": "result",
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": command}}
+            ],
+        }
+        with log_path.open("a") as log:
+            log.write("\n" + json.dumps(denial) + "\n")
+        return code
+
+    return wrapped
+
+
+def test_a_claude_denial_names_the_refused_command_in_the_pause(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    config.save_test_command(repo, "uv run pytest -q")
+    refused = "cd /elsewhere && " + "x" * 100
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _with_claude_denial(_scripted_run(["claude:ready", "codex:blocked"]), refused),
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert raised.value.args[0] == (
+        f"claude was denied: {refused[:80]}. Allowed test command: uv run pytest -q."
+    )
+
+
+def test_a_codex_block_ignores_denial_shaped_output(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _with_claude_denial(_scripted_run(["codex:blocked"]), "rm -rf /"),
+    )
+    with pytest.raises(loop.Paused, match="codex reported blocked: fake codex:blocked"):
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+
+
+def test_a_claude_block_without_a_denial_keeps_the_blocked_reason(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents, "run", _scripted_run(["claude:ready", "codex:blocked"])
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert raised.value.args[0] == "claude reported blocked: fake codex:blocked"
+
+
+def test_requires_approval_in_a_summary_counts_as_a_refusal():
+    pipe = make_pipeline()
+    assert "requires approval" in loop.SANDBOX_MARKERS
+    assert loop._summary_reports_sandbox_refusal("this command requires approval")
+    assert loop._sandbox_backroute(
+        pipe, "full", "test", "draft", "Bash(uv run pytest) Requires Approval"
+    )
+
+
 def test_a_rejected_verification_denial_pauses_without_counting_a_draft_visit(
     repo, monkeypatch
 ):

@@ -27,6 +27,22 @@ def test_claude_diagnose_names_denied_commands_and_settings_file():
     assert "claude-settings.json" in detail
 
 
+def test_claude_first_denial_is_the_first_command_cut_to_80_characters():
+    long = "uv run pytest " + "y" * 100
+    denied = json.dumps(
+        {
+            "type": "result",
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": long}},
+                {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+            ],
+        }
+    )
+    assert claude.first_denial("progress\n" + denied) == long[:80]
+    assert claude.first_denial(json.dumps({"type": "result", "result": "ok"})) is None
+    assert claude.first_denial("not json") is None
+
+
 def test_codex_diagnose_uses_the_last_non_blank_line():
     assert codex.ADAPTER.diagnose("a\nb\n") == '; its last output was: "b"'
 

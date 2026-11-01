@@ -55,24 +55,38 @@ def permission_files(stack: str) -> dict[str, str]:
     return {"claude-settings.json": json.dumps(allowlist(stack), indent=2) + "\n"}
 
 
-def diagnose(text: str) -> str:
+def denied_commands(text: str) -> list[str]:
+    """Each command in the `permission_denials` of Claude's final JSON line."""
     lines = [line for line in text.splitlines() if line.strip()]
-    if lines and lines[-1].startswith("{"):
-        try:
-            result = json.loads(lines[-1])
-        except ValueError:
-            result = None
-        denials = result.get("permission_denials", []) if isinstance(result, dict) else []
-        commands = [
-            str(d.get("tool_input", {}).get("command", d.get("tool_name", "?")))[:60]
-            for d in denials
-            if isinstance(d, dict)
-        ]
-        if commands:
-            return (
-                f"; it was denied permission to run: {', '.join(commands)}. "
-                "Check .whyline/relay/claude-settings.json"
-            )
+    if not lines or not lines[-1].startswith("{"):
+        return []
+    try:
+        result = json.loads(lines[-1])
+    except ValueError:
+        return []
+    denials = result.get("permission_denials", []) if isinstance(result, dict) else []
+    if not isinstance(denials, list):
+        return []
+    return [
+        str(d.get("tool_input", {}).get("command", d.get("tool_name", "?")))
+        for d in denials
+        if isinstance(d, dict)
+    ]
+
+
+def first_denial(text: str) -> str | None:
+    """The first denied command, cut to 80 characters, or None if none was."""
+    commands = denied_commands(text)
+    return commands[0][:80] if commands else None
+
+
+def diagnose(text: str) -> str:
+    commands = [command[:60] for command in denied_commands(text)]
+    if commands:
+        return (
+            f"; it was denied permission to run: {', '.join(commands)}. "
+            "Check .whyline/relay/claude-settings.json"
+        )
     return last_line_detail(text)
 
 

@@ -34,6 +34,7 @@ from whyline_relay import (
     whylinecmd,
 )
 from whyline_relay.adapters import bypass, grok
+from whyline_relay.adapters import claude as claude_adapter
 
 RELEASE_PREFIX = "release task for you: "
 GROK_RESUMES = grok.RESUMES
@@ -86,6 +87,7 @@ SANDBOX_MARKERS = (
     "sandbox",
     "was denied",
     "not permitted",
+    "requires approval",
 )
 
 
@@ -111,8 +113,41 @@ def _sandbox_backroute(
         return False
 
 
-def _sandbox_pause_reason(agent: str, summary: str) -> str:
+def _sandbox_pause_reason(
+    agent: str, summary: str, *, denied: str | None = None, test_command: str = ""
+) -> str:
+    if denied is not None:
+        return (
+            f"{agent} was denied: {denied}. "
+            f"Allowed test command: {test_command or 'none'}."
+        )
     return f"{agent} could not run a required command: {summary}"
+
+
+def _blocked_pause_reason(
+    root: Path,
+    settings: config.Config,
+    agent: str,
+    record: handoff.Handoff,
+    target: Path,
+) -> str:
+    """Name the refused command when Claude's output reports one; otherwise
+    the usual blocked reason. Other adapters never report denials this way."""
+    if config.adapter_for(settings, agent).name == "claude":
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        denied = claude_adapter.first_denial(text)
+        if denied is not None:
+            try:
+                allowed = config.test_command(root)
+            except config.ConfigError:
+                allowed = ""
+            return _sandbox_pause_reason(
+                agent, record.summary, denied=denied, test_command=allowed
+            )
+    return _blocked_reason(agent, record)
 
 
 def _blocked_reason(agent: str, record: handoff.Handoff) -> str:
@@ -898,7 +933,9 @@ def _run_task(
                 target,
             )
         if move == routing.BLOCKED:
-            raise Paused(_blocked_reason(agent, record), target)
+            raise Paused(
+                _blocked_pause_reason(root, settings, agent, record, target), target
+            )
         if move == routing.UNKNOWN:
             raise Paused(
                 f"unrecognised handoff status {record.status!r}; the relay will not guess",
@@ -1196,7 +1233,9 @@ def _run_configured_task(
                 target,
             )
         if decision.kind == "blocked":
-            raise Paused(_blocked_reason(agent, record), target)
+            raise Paused(
+                _blocked_pause_reason(root, settings, agent, record, target), target
+            )
         if decision.kind == "unknown":
             raise Paused(
                 f"unrecognised outcome {record.status!r} for stage "
