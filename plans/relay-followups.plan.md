@@ -59,7 +59,7 @@ Claude, as implementer, paused ASST-17 twice as "blocked". It ran `python -m pyt
 
 At JOB-8, grok was out of credit ("402 Payment Required: Grok Build usage balance exhausted") and antigravity was out of quota ("RESOURCE_EXHAUSTED (code 429) … Resets in 159h57m31s"). The relay paused with "every backup in the chain is unavailable for implementer (antigravity, grok all failed)". Nothing remembered either limit. The user picked antigravity again in Set up, it failed again 13 s later, and Resolve said grok "is logged in again" and offered "Switch back to grok anyway". `ActiveOverride.resets_at` keeps the reset only for the agent a switch stands in for, and only while that switch exists. The console side is agentdock's `plans/agent-switch-at-pause.plan.md` (SWP-1..7). It needs RLY-8 and RLY-9 released first.
 
-- [ ] RLY-8: Remember each agent's usage limit until it resets
+- [x] RLY-8: Remember each agent's usage limit until it resets
   Edit `src/whyline_relay/failover.py` and `src/whyline_relay/loop.py` (the sticky branch that writes `ActiveOverride` and raises "every backup in the chain is unavailable"), with tests in `tests/`.
   Add `.whyline/relay/agent-limits.json`, holding one record per agent: `{"reason": "rate-limit"|"auth", "since": iso, "resets_at": iso or "", "detail": the last non-empty line, up to 160 chars}`.
   Add `failover.AgentLimit` (frozen dataclass), `failover.record_limit(root, agent, reason, text, *, now=None)` (uses `reset_deadline` and `grok.rate_limit_text`), `failover.agent_limits(root, *, now=None) -> dict[str, AgentLimit]` (drops and rewrites away records whose `resets_at` is in the past), and `failover.clear_limit(root, agent)`.
