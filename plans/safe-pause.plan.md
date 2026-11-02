@@ -87,6 +87,18 @@ Global constraints:
   - the printed line and note name every stage given back
   - a non-cap pause is still refused
 
-- [ ] RPZ-5: Publish whyline-relay with RPZ-1..4 and RPZ-6
+- [ ] RPZ-7: A rejection that mentions "sandbox" is not a refused command, and a misread pause can be sent back
+  Edit `src/whyline_relay/loop.py`, `src/whyline_relay/cli.py` and their tests only.
+  Why: on 2026-11-02, agentdock's FIX-2 reviewer rejected with "Strip Codex attached short config overrides such as -c=sandbox_workspace_write.network_access=true and add a regression test". `_summary_reports_sandbox_refusal` matched the bare word "sandbox" in `SANDBOX_MARKERS`, so the relay paused with "codex could not run a required command" instead of sending the task back to Claude. Resume rechecks the same summary (the `resumed.kind == "advance"` path), so every Resume paused again: a deadlock no console button could clear.
+  1. Drop the bare `"sandbox"` and `"not permitted"` from `SANDBOX_MARKERS`. Match refusal phrases only: "permission denied", "operation not permitted", "was denied", "requires approval", "blocked by the sandbox", "sandbox denied", "sandbox refused".
+  2. Treat a summary as a refusal only when the handoff isn't a normal rejection carrying issues. A `rejected` handoff with at least one `--issue` line, or a summary that asks for a code change ("add a regression test", "fix", "strip"), is routed as a normal send-back.
+  3. Add `whyline-relay resume --as-rejection`. On a paused refused-command pause, it routes the saved handoff as a normal rejection to the earlier stage and records a `whyline note` saying so. It refuses on any other pause.
+  Tests:
+  - the exact FIX-2 summary above routes back to draft and doesn't pause
+  - "codex: permission denied running uv" still pauses
+  - `--as-rejection` clears a refused-command pause and runs the earlier stage
+  - `--as-rejection` refuses on a limit pause
+
+- [ ] RPZ-5: Publish whyline-relay with RPZ-1..4, RPZ-6 and RPZ-7
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release, in user terms. Document `pause` in the README. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline --upgrade-package whyline-relay` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark PZ-1 done when that plan reaches it.
