@@ -271,12 +271,11 @@ def _role_checks(root: Path, settings: config.Config) -> list[Check]:
             checks.append(
                 _result(
                     "warn",
-                    "antigravity is a generic agent and needs agy 1.4.12 or later; "
-                    "older versions hang in headless mode on any permission prompt "
-                    "(github.com/google-antigravity/antigravity-cli#548, fixed). A "
-                    "refused tool call still exits 0 and names only the tool type, "
-                    "and the relay does not manage its login -- see README, 'Using "
-                    "Antigravity today'",
+                    "antigravity is a generic agent and needs agy 1.4.12 or later "
+                    "(github.com/google-antigravity/antigravity-cli#548). The relay "
+                    "gives it a per-run allow list; a refused tool call is reported "
+                    "but agy does not name the command, and the relay does not "
+                    "manage its login -- see README, 'Using Antigravity today'",
                 )
             )
         elif adapter.name == "generic" and agent == "grok":

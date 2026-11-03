@@ -4,6 +4,8 @@ adapter. They are the README's verified recipes ("Using Antigravity today",
 hand-written config. A repository's own [agents.<name>] always wins."""
 from __future__ import annotations
 
+import json
+
 # Headless grok ends its whole turn as "cancelled" on any command outside its
 # allow list (measured on grok 1.0.41), instead of refusing that one command,
 # so it is told the limits up front. The relay also resumes a cancelled turn.
@@ -22,12 +24,30 @@ GROK_RULES = (
 CLAUDE_RULES = GROK_RULES
 CLAUDE_TEST_RULE = "Run tests only with `{test_command}`."
 
+# agy 1.4.12's `--settings` applies to that run only, and its permissions.allow
+# replaces the global file's list. Command rules match by prefix, and a chained
+# command is refused unless each part is allowed. The commands are exactly the
+# ones grok's recipe allows below: no `command(*)`, no pushing, no rm.
+ANTIGRAVITY_ALLOW = (
+    "read_file(*)", "write_file(*)", "edit_file(*)",
+    "command(git add)", "command(git commit)", "command(git diff)",
+    "command(git status)", "command(git log)", "command(git show)",
+    "command(git rev-parse)", "command(whyline)", "command(python3)",
+    "command(uv run)", "command(uv)", "command(mkdir)", "command(ls)",
+    "command(find)", "command(touch)", "command(cat)", "command(grep)",
+    "command(head)", "command(tail)", "command(wc)", "command(diff)",
+    "command(pwd)", "command(pytest)", "command(.venv/bin/pytest)",
+    "command(.venv/bin/python)",
+)
+
 # `-p` must stay last: the relay appends the prompt as the final argument,
 # and both CLIs' `-p` swallows whatever token follows it.
 RECIPES: dict[str, tuple[str, ...]] = {
     "antigravity": (
         "agy", "--output-format", "json", "--mode", "accept-edits",
-        "--add-dir", ".", "--new-project", "-p",
+        "--add-dir", ".", "--new-project",
+        "--settings", json.dumps({"permissions": {"allow": list(ANTIGRAVITY_ALLOW)}}),
+        "-p",
     ),
     "grok": (
         "grok", "--output-format", "json", "--permission-mode", "dontAsk",

@@ -1,0 +1,14 @@
+{
+  "codex": {
+    "reason": "rate-limit",
+    "since": "2026-11-03T12:16:36.606211+05:30",
+    "resets_at": "",
+    "detail": "17,958"
+  },
+  "antigravity": {
+    "reason": "rate-limit",
+    "since": "2026-11-03T12:16:48.176689+05:30",
+    "resets_at": "2026-11-05T10:31:01.176689+05:30",
+    "detail": "{\"conversation_id\":\"1f5bb349-b48a-4d7a-9534-6f18892abf6e\",\"status\":\"ERROR\",\"response\":\"\",\"error\":\"Individual quota reached. Please upgrade your subscription to "
+  }
+}

@@ -34,7 +34,7 @@ from whyline_relay import (
     testplan,
     whylinecmd,
 )
-from whyline_relay.adapters import bypass, grok
+from whyline_relay.adapters import antigravity, bypass, grok
 from whyline_relay.adapters import claude as claude_adapter
 
 RELEASE_PREFIX = "release task for you: "
@@ -550,6 +550,9 @@ def _no_handoff_detail(
     structured = grok.cancellation_detail(adapter, text, command)
     if structured:
         return structured
+    denied = antigravity.denied_detail(adapter, text, command)
+    if denied:
+        return f"; {denied.rstrip('.')}"
     return adapter.diagnose(text)
 
 

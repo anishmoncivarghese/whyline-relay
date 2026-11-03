@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from whyline_relay import chat, config, recipes
@@ -53,6 +54,64 @@ def test_grok_recipe_tells_grok_to_stay_inside_its_allow_list():
     assert "ends your whole turn" in rules
     assert "if, for, while" in rules
     assert command.index("--rules") < command.index("-p")
+
+
+ANTIGRAVITY_EXPECTED = [
+    "read_file(*)", "write_file(*)", "edit_file(*)",
+    *(f"command({prefix})" for prefix in (
+        "git add", "git commit", "git diff", "git status", "git log", "git show",
+        "git rev-parse", "whyline", "python3", "uv run", "uv", "mkdir", "ls",
+        "find", "touch", "cat", "grep", "head", "tail", "wc", "diff", "pwd",
+        "pytest", ".venv/bin/pytest", ".venv/bin/python",
+    )),
+]
+
+
+def _antigravity_allow() -> list[str]:
+    command = list(recipes.RECIPES["antigravity"])
+    settings = command[command.index("--settings") + 1]
+    return json.loads(settings)["permissions"]["allow"]
+
+
+def test_antigravity_recipe_passes_settings_right_before_the_prompt_flag():
+    command = list(recipes.RECIPES["antigravity"])
+    assert command[-1] == "-p"
+    assert command[-3] == "--settings"
+    assert json.loads(command[-2]) == {"permissions": {"allow": ANTIGRAVITY_EXPECTED}}
+
+
+def test_antigravity_allow_list_is_exactly_grok_commands_plus_file_tools():
+    assert _antigravity_allow() == ANTIGRAVITY_EXPECTED
+    assert list(recipes.ANTIGRAVITY_ALLOW) == ANTIGRAVITY_EXPECTED
+    grok = list(recipes.RECIPES["grok"])
+    grok_bash = {
+        grok[i + 1][len("Bash("):-len(":*)")]
+        for i, arg in enumerate(grok[:-1])
+        if arg == "--allow" and grok[i + 1].startswith("Bash(")
+    }
+    agy_commands = {
+        rule[len("command("):-1] for rule in _antigravity_allow()
+        if rule.startswith("command(")
+    }
+    assert agy_commands == grok_bash
+
+
+def test_antigravity_allow_list_has_no_wildcard_push_or_rm():
+    allow = _antigravity_allow()
+    assert "command(*)" not in allow
+    for rule in allow:
+        assert "push" not in rule
+        assert not rule.startswith("command(rm")
+
+
+def test_a_repos_own_antigravity_table_is_used_unchanged(tmp_path):
+    _write(
+        tmp_path,
+        '[agents.antigravity]\nadapter = "generic"\ncommand = ["agy", "--mode", "x", "-p"]\n',
+    )
+    settings = config.load(tmp_path)
+    assert settings.agents["antigravity"] == ["agy", "--mode", "x", "-p"]
+    assert chat.resolve_command(settings, "antigravity") == ["agy", "--mode", "x", "-p"]
 
 
 def test_grok_recipe_allows_the_read_only_commands_agents_reach_for():

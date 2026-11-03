@@ -563,7 +563,8 @@ def test_antigravity_as_a_generic_agent_gets_a_specific_warning(
     checks = preflight.run(ready_repo, allow_dirty=True, runner=successful_runner())
     matches = [c for c in checks if "antigravity" in c.message and c.status == "warn"]
     assert len(matches) == 1
-    assert "548" in matches[0].message or "headless" in matches[0].message
+    assert "548" in matches[0].message
+    assert "per-run allow list" in matches[0].message
 
 
 def test_grok_as_a_generic_agent_gets_a_specific_warning(ready_repo: Path, monkeypatch):

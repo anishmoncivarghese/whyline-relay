@@ -396,7 +396,7 @@ Since 0.2.28 the relay uses the recipe below automatically when the repository's
 
 Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path. A refused call also still exits 0 with `"status": "SUCCESS"`; the refusal shows only in the JSON's `denied_actions` list. Those gaps would make a "built-in" label dishonest about what the relay actually manages for it.
 
-Use `agy` 1.4.12 or later. Older versions ignored `permissions.allow` in headless mode and hung forever on any tool call that needed approval ([google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548), fixed upstream on 2026-11-03). Checked on 1.4.12 on macOS: an allowed `command(touch)` ran, an unlisted command and a write outside the repository were each refused within seconds, and an allow rule for `touch` did not let `rm` through. Configure it like this:
+Use `agy` 1.4.12 or later. Older versions ignored `permissions.allow` in headless mode and hung forever on any tool call that needed approval ([google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548), fixed upstream on 2026-11-03). The recipe the relay uses looks like this (allow list shortened here; the full one is `ANTIGRAVITY_ALLOW` in `src/whyline_relay/recipes.py`):
 
 ```toml
 [roles]
@@ -405,21 +405,23 @@ reviewer    = "claude"
 
 [agents.antigravity]
 adapter = "generic"
-command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-project", "--add-dir", ".", "-p"]
+command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--add-dir", ".", "--new-project",
+           "--settings", '{"permissions": {"allow": ["read_file(*)", "write_file(*)", "edit_file(*)", "command(git add)", "command(git commit)", "command(git status)", "command(whyline)", "command(uv run)", "command(pytest)"]}}',
+           "-p"]
 ```
+
+A repository's own `[agents.antigravity]` table replaces the recipe whole, `--settings` included, so copy the full list if you write your own.
 
 **`-p` must be the last item in the command.** The relay always appends the prompt as the command's final argument. `agy -p` greedily consumes whatever token comes right after it, so `-p` anywhere earlier makes it swallow the next flag instead of the real prompt, and the turn silently does nothing.
 
-**It denies everything by default, including reads**, unless the repository is in `trustedWorkspaces` and the tool is in `permissions.allow`, both in `~/.gemini/antigravity-cli/settings.json`, a file global to the machine. Since 1.4.x, `agy --settings '<json>'` also takes settings for one run only, never saved, so an allow list can be put in the relay command itself instead. A working setup needs something like:
+**The relay gives it a per-run allow list.** `agy --settings '<json>'` applies settings to that run only, never saved, and its `permissions.allow` *replaces* the list in `~/.gemini/antigravity-cli/settings.json` (the file global to the machine) rather than adding to it. The recipe allows reading, writing and editing files, and `command(...)` for exactly the commands Grok's recipe allows: `git add`, `git commit`, `git diff`, `git status`, `git log`, `git show`, `git rev-parse`, `whyline`, `python3`, `uv run`, `uv`, `mkdir`, `ls`, `find`, `touch`, `cat`, `grep`, `head`, `tail`, `wc`, `diff`, `pwd`, `pytest`, `.venv/bin/pytest` and `.venv/bin/python`. There is no `command(*)`, no `git push` and no `rm`. Checked on agy 1.4.12 on macOS (2026-11-03):
 
-```json
-{
-  "trustedWorkspaces": ["/path/to/your/repository"],
-  "permissions": {"allow": ["read_file(*)", "write_file(*)", "edit_file(*)", "command(*)"]}
-}
-```
+- An empty `--settings` allow list refused a command even though the global file allowed `command(*)`.
+- Rules match by command prefix: `command(git status)` ran `git status --short`. `git push` was refused, and so was `git status && touch x`. A `touch` rule did not let `rm` through.
+- A refused call ends the turn within seconds. It still exits 0 with `"status": "SUCCESS"`, and lists `{"action": "command", "display_name": "RunCommand"}` under `denied_actions`, without the command itself. When that turn ends without a handoff, the relay's pause message says how many tool calls were refused and of what type; it cannot say which command, because agy does not. Add what it needs to the `--settings` list in your own `[agents.antigravity]`, or run it yourself.
+- A run with only `--settings` read a file in a folder missing from the global `trustedWorkspaces`.
 
-Before the #548 fix, narrower patterns such as `command(git)` did not work and only `command(*)` did. On 1.4.12 a narrow rule (`command(touch)`) was verified to work. A rule in the global file loosens every `agy` session on the machine; one passed with `--settings` applies to that run only.
+Before the #548 fix, narrower patterns such as `command(git)` did not work and only `command(*)` did.
 
 **It can end a turn while work it started is still running.** Measured once: asked to "run the project's tests" with no further guidance, it started something in the background, reported success, and the CLI exited before that work finished — no handoff, nothing committed, the background task killed on exit. The fix that held up under a real side-by-side comparison: add a line to `.whyline/relay/prompts/implement.md` telling it explicitly not to background anything:
 

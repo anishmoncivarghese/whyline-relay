@@ -6474,3 +6474,75 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 1089901b456547aeb2f2f808193ab2a9 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:32:02.296Z"} -->
+
+## 2026-11-03 — _no_handoff_detail prefixes antigravity's denied_detail with '; ' and drops its trailing period
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-8
+
+**Because:** every other no-handoff detail (grok cancellation, last_line_detail) starts with '; ' and is followed by '; nothing was routed'; denied_detail itself keeps the exact sentence the task specifies
+
+**Rejected:**
+
+- put the '; ' prefix inside denied_detail — the task fixes its return text
+- append as-is — the pause would read 'yourself.; nothing was routed'
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/adapters/antigravity.py
+
+<!-- whyline-event: fa21a1a5c931473eb4bd000fec0d8f10 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:39:58.649Z"} -->
+
+## 2026-11-03 — ANTIGRAVITY_ALLOW is tested to equal grok's Bash allow prefixes, not just a hard-coded list
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-8
+
+**Because:** the task defines agy's commands as exactly grok's; a test deriving the set from grok's recipe catches either list drifting
+
+**Rejected:**
+
+- only compare against a literal list — drift between the two recipes would go unnoticed
+
+**Files:** src/whyline_relay/recipes.py, tests/test_recipes.py
+
+<!-- whyline-event: 51235ef955bf452c907953893cf476f8 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:40:00.553Z"} -->
+
+## 2026-11-03 — RPZ-8 passes behavioral testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-8
+
+**Because:** The Antigravity recipe has valid per-run settings immediately before the final -p with the exact required allow list, repository overrides remain unchanged, denied-action detail is limited to generic agy JSON and stays human-only, the warning is updated, focused tests pass, and the full suite exits 0
+
+**Rejected:**
+
+- fail the task — no acceptance-bar defect was reproduced
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/adapters/antigravity.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, tests/test_recipes.py, tests/test_antigravity_denied.py, tests/test_preflight.py
+
+<!-- whyline-event: e2fbbf8bdaa948668d753d11ea207010 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:43:49.469Z"} -->
+
+## 2026-11-03 — RPZ-8 meets the acceptance bar
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** RPZ-8
+
+**Because:** The antigravity recipe places valid --settings JSON immediately before final -p with the exact item-1 allow list (no command(*), git push, or rm); a repository [agents.antigravity] table is used unchanged; denied_detail reads only generic agy JSON and is human-only in _no_handoff_detail; the preflight warning names 548 and the per-run allow list; uv run pytest -q exited 0
+
+**Rejected:**
+
+- request changes — no acceptance-bar defect was found
+
+**Verdict:** approved
+**Test:** uv run pytest -q: passed (exit 0)
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/adapters/antigravity.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, README.md, tests/test_recipes.py, tests/test_antigravity_denied.py, tests/test_preflight.py
+
+<!-- whyline-event: f24d47a707af41e6b094040f1c8898a2 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:52:47.855Z"} -->
