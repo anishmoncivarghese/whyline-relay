@@ -48,7 +48,7 @@ Global constraints:
   - the same through the legacy loop and between tasks
   - a limit pause clears the request
 
-- [ ] RPZ-3: A cut-off turn is recorded and handed on
+- [x] RPZ-3: A cut-off turn is recorded and handed on
   Edit `src/whyline_relay/loop.py`, `src/whyline_relay/state.py`, `src/whyline_relay/prompts.py` and their tests only.
   1. `RelayState` gains `cut_off: dict | None = None`, holding `stage`, `role`, `agent` and `changed_files`.
   2. In the KeyboardInterrupt/STOP pause path:
