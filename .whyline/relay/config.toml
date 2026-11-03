@@ -1,5 +1,5 @@
 # whyline-relay configuration. Every key is optional.
-plan = "plans/documents.plan.md"
+plan = "plans/safe-pause.plan.md"
 max_rounds = 30
 timeout_minutes = 30
 branch_prefix = "relay/"
