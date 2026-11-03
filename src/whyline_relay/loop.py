@@ -44,10 +44,13 @@ GROK_RESUMES = grok.RESUMES
 class Paused(RuntimeError):
     """The relay stopped and wants a human. Carries the reason and the log path."""
 
-    def __init__(self, reason: str, log_path: Path | None = None):
+    def __init__(
+        self, reason: str, log_path: Path | None = None, *, paused_by: str = ""
+    ):
         super().__init__(reason)
         self.reason = reason
         self.log_path = log_path
+        self.paused_by = paused_by
 
 
 def task_repo(root: Path, task: plan.Task) -> Path:
@@ -1045,6 +1048,21 @@ def _run_task(
                 and current.status == settings.status_map["changes"]
             ):
                 feedback = _send_back_feedback(current)
+                saved = state.load(root)
+                if (
+                    saved is not None
+                    and saved.task_id == task.task_id
+                    and current.event_id != saved.last_handoff_id
+                ):
+                    # The checkpointed review finished and sent the task back:
+                    # charge the round the loop would have, once.
+                    round_ += 1
+                    if round_ > settings.max_rounds:
+                        raise Paused(
+                            f"{task.task_id} hit the {settings.max_rounds}-round cap "
+                            "without an approval",
+                            None,
+                        )
 
     while True:
         if next_move == routing.APPROVED:
@@ -1191,6 +1209,9 @@ def _run_task(
                     target,
                 )
         next_move = move
+        # The checkpoint still holds the turn that just finished; resume
+        # re-decides its handoff and charges a send-back's round once.
+        _pause_if_requested(root, target)
 
 
 def _profile_for(task: plan.Task, pipe: pipeline.Pipeline) -> str:
@@ -1348,6 +1369,17 @@ def _run_configured_task(
                     stage_visits.get(current_stage_id, 0) + 1
                 )
                 check_visit_cap(pipe, current_stage_id, stage_visits, task)
+                if current.event_id != saved.last_handoff_id:
+                    # Written by the checkpointed turn, so it finished: charge
+                    # the round the loop would have, once. The checkpoint
+                    # already holds the round of a turn that never handed off.
+                    round_ += 1
+                    if round_ > settings.max_rounds:
+                        raise Paused(
+                            f"{task.task_id} hit the {settings.max_rounds}-round cap "
+                            'without reaching "@complete"',
+                            None,
+                        )
                 sent_back = (
                     pipe.stages[current_stage_id].role == "implementer"
                     and resumed_stage.role != "implementer"
@@ -1580,6 +1612,9 @@ def _run_configured_task(
                 'reaching "@complete"',
                 target,
             )
+        # The checkpoint still names the stage that just finished; resume
+        # re-decides its handoff and charges this visit and round once.
+        _pause_if_requested(root, target)
 
 
 def run_task(
@@ -1684,6 +1719,22 @@ def cancel_pause(root: Path) -> bool:
     return existed
 
 
+PAUSED_BY_USER = "paused by you"
+
+
+def _pause_if_requested(root: Path, log: Path | None = None) -> None:
+    """At a safe point, take a pending pause request and pause.
+
+    Callers leave the finished turn's checkpoint as it is, so `resume`
+    re-decides that turn's handoff exactly as after a crash once the handoff
+    is written: the next turn runs, and the finished one does not.
+    """
+    if pause_request(root) is None:
+        return
+    cancel_pause(root)
+    raise Paused(PAUSED_BY_USER, log, paused_by="user")
+
+
 # Same slice as agents._CANCEL_POLL_SECONDS: the file is noticed, then the
 # child is killed, within about two polls.
 _STOP_POLL_SECONDS = 0.05
@@ -1713,8 +1764,12 @@ def _save_pause(
     progress: dict,
     *,
     timeout_minutes: int,
+    paused_by: str = "",
 ) -> None:
     stage_state = progress.get("stage_state") or {}
+    # Whatever paused the run, a request still waiting is spent: it must not
+    # pause the run again at its first safe point after resume.
+    cancel_pause(root)
     try:
         state.save(
             root,
@@ -1733,6 +1788,8 @@ def _save_pause(
                 stage_visits=stage_state.get("stage_visits", {}),
                 pipeline_fingerprint=stage_state.get("pipeline_fingerprint", ""),
                 timeout_minutes=timeout_minutes,
+                paused_by=paused_by,
+                paused_at=datetime.now().astimezone().isoformat(),
             ),
         )
     except state.DiskFull as error:
@@ -2064,6 +2121,8 @@ def _run_plan(
     announced: set[tuple[str, str, str]] = set()
     outcomes: list[Outcome] = []
     resuming = state.load(root) if resume else None
+    if resume:
+        cancel_pause(root)
     while True:
         if stop_requested(root):
             print("STOP file present; not starting another task.")
@@ -2078,11 +2137,22 @@ def _run_plan(
             task = plan.next_unchecked(tasks, skip=skipped_ids)
         if task is None or task.checked or task.task_id in skipped_ids:
             state.clear(root)
+            cancel_pause(root)
             if only is None:
                 # The plan is done, so the run's manual switches end with it.
                 # A pause, a STOP or a resume never reaches here.
                 failover.clear_manual(root)
             return outcomes
+        if outcomes and pause_request(root) is not None:
+            # A safe point between tasks: the last one is ticked and committed.
+            # No base commit, so resume starts this task fresh.
+            cancel_pause(root)
+            _save_pause(
+                root, plan_path, branch, task, "", PAUSED_BY_USER, None, only,
+                {"round": 1, "last": None},
+                timeout_minutes=settings.timeout_minutes, paused_by="user",
+            )
+            raise Paused(PAUSED_BY_USER, paused_by="user")
 
         # Manual checks gate every release, whoever runs it, before it
         # starts. An empty base means it has not started, so resume comes
@@ -2135,7 +2205,12 @@ def _run_plan(
             and bool(resuming.base_commit)
         )
         start_round = (resuming.round or 1) if mid_task else 1
-        progress = {"round": start_round, "last": None}
+        # Keep the saved handoff id too: resume compares it with the record on
+        # disk to tell a finished turn from one that never handed off.
+        progress = {
+            "round": start_round,
+            "last": (resuming.last_handoff_id or None) if mid_task else None,
+        }
         if mid_task and resuming.stage:
             # Keep the saved stage until the task checkpoints again, so a pause
             # before its first turn (a retried commit failing again) still
@@ -2198,6 +2273,7 @@ def _run_plan(
                 root, plan_path, branch, task, base_holder[0],
                 paused.reason, paused.log_path, only, progress,
                 timeout_minutes=settings.timeout_minutes,
+                paused_by=paused.paused_by,
             )
             raise
         except KeyboardInterrupt:
@@ -2230,6 +2306,7 @@ def _run_plan(
         outcomes.append(outcome)
         if only:
             state.clear(root)
+            cancel_pause(root)
             return outcomes
 
 

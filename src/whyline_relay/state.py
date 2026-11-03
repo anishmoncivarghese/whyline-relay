@@ -72,6 +72,10 @@ class RelayState:
     # None means this record predates the field. Resume then uses config.load.
     # A stored 0 or any stored positive int is the cap for this run.
     timeout_minutes: int | None = None
+    # "user" when the pause was asked for at a safe point; "" for any other.
+    paused_by: str = ""
+    # When the relay paused, as an ISO timestamp; "" in records that predate it.
+    paused_at: str = ""
 
 
 @dataclass(frozen=True)

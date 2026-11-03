@@ -6151,3 +6151,82 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 4f4c143e82ce432d97fcd6145b9f90a4 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:13:25.731Z"} -->
+
+## 2026-11-03 — A safe-point pause leaves the finished turn's own checkpoint, and resume re-decides that turn's handoff
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-2
+
+**Because:** That is the existing recovery for a crash after a handoff is written: it computes the next stage, feedback, test-only-refusal handling and the visit charge from the record, so a pause and that crash take one path, and the visit is charged exactly once
+
+**Rejected:**
+
+- save the next stage and its charged visit — resume re-decides the on-disk handoff against the saved stage, so it would route the old record from the wrong stage, and the feedback for the next turn is not in state.json
+- a separate resume branch for user pauses — duplicates routing and feedback logic that already exists
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: f4975f477e944373a926efe020bac670 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:28:35.735Z"} -->
+
+## 2026-11-03 — Resume charges the round once only when the handoff on disk differs from the checkpoint's last_handoff_id
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-2
+
+**Because:** A different id means the checkpointed turn finished, so the loop would have advanced the round. The same id means that turn never handed off, and its checkpoint already holds the charged round. Without the check, a resumed next turn ran at the old round number and the round cap went under-charged. This also fixes the same gap after a crash. _run_plan now seeds progress['last'] from the saved state, so a pause before this run's first checkpoint keeps the id
+
+**Rejected:**
+
+- always increment on resume — double-charges when the checkpointed turn crashed before handing off (legacy routing re-decides the previous record)
+- legacy only — call on_turn with the new round at the pause: works for legacy but not for the pipeline, whose refusal-log lookup needs the finished turn's round; one mechanism for both is simpler
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: ad21d443f8e94e7c9b7bf715b85b4ad4 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:28:39.253Z"} -->
+
+## 2026-11-03 — The between-task safe point fires only after a task in this run ticked, and _save_pause sets paused_at on every pause
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-2
+
+**Because:** The spec places it after the tick commit; checking on the first iteration would let a stale PAUSE stop a fresh start before any work. The pause saves the next task with an empty base, so resume starts it fresh and the release gate re-runs. paused_at on every pause gives RPZ-4 a 'since' for any kind
+
+**Rejected:**
+
+- paused_at only for user pauses — RPZ-4 shows how long any pause has lasted
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/state.py
+
+<!-- whyline-event: fb5bdc4a989945c184347a73e676775b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:28:41.486Z"} -->
+
+## 2026-11-03 — RPZ-2 safe-point pause behavior passes testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-2
+
+**Because:** The full suite and all nine focused safe-pause tests pass, covering next-turn resume, visit and round accounting, between-task pauses, cleanup, and old-state loading
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 2fa28a93dd9644709e7febb2570b2d5d -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:32:26.727Z"} -->
+
+## 2026-11-03 — RPZ-2 safe-point pause implementation is approved
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-2
+
+**Because:** The diff preserves completed handoffs across configured and legacy resumes, charges visits and rounds once, clears PAUSE in every required terminal path, remains backward-compatible, and the full uv run pytest -q suite passed with exit 0
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: b944e269da1d468fbb435dcc2dac0e97 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:36:07.687Z"} -->
