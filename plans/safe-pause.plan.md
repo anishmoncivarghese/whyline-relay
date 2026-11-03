@@ -62,7 +62,7 @@ Global constraints:
   - the resume prompt contains the files
   - `cut_off` is cleared after the turn
 
-- [ ] RPZ-4: Pause state for status and the console
+- [x] RPZ-4: Pause state for status and the console
   Edit `src/whyline_relay/status.py` (create it if status lives elsewhere, and keep the existing status function), `src/whyline_relay/cli.py` and their tests only.
   1. Add `pause_state(root, *, clock=None) -> PauseState(kind, since, agent, task_id, round, stage, reason)`. `kind` is:
      - `none`
