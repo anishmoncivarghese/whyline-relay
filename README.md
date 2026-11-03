@@ -230,10 +230,11 @@ whyline-relay status
 
 While a run is live this prints, for example, `Running: claude reviewing APP-1, round 1, since 13:06:49 (2m ago)`. If the run is paused it shows the reason and the log path instead. Also useful: `git log --oneline --graph --all`, and `tail -f` on a file in `.whyline/relay/logs/`.
 
-**Stopping**
+**Pausing and stopping**
 
-- `Ctrl+C` in the relay's terminal stops the running agent, saves state, and exits with code 2. `whyline-relay resume` continues.
-- `whyline-relay stop` from another terminal lets the current agent finish and starts nothing new.
+- `whyline-relay pause` from another terminal asks for a safe pause. The current agent finishes its turn and hands off, then the relay pauses before the next agent starts, so nothing is lost. `status` shows `Pausing` while it waits, then `Paused by you at <task>`. `whyline-relay resume` continues with the next turn; nothing is redone.
+- `whyline-relay pause --cancel` withdraws the request before it takes effect.
+- `whyline-relay pause --now`, `whyline-relay stop` and `Ctrl+C` cut the running agent off at once and exit with code 2. The files that turn had changed are recorded, and on `resume` the next agent is told to continue from them rather than start over.
 
 Only one relay can run in a repository at a time. `start` and `resume` refuse to begin while another live run exists. Separate repositories can run in parallel, but they share your agent quotas.
 
@@ -282,14 +283,16 @@ It detects a Python project (`pyproject.toml`), a Node project (`package.json`),
 `--timeout MIN` Override the per-agent timeout from config, in minutes.
 
 **`resume`** continues after a pause, on the saved branch, from the saved decision point.
-`--repo REPO`, `--allow-dirty`, and `--skip-checks` as above.
+`--repo REPO`, `--allow-dirty`, and `--skip-checks` as above. `--retry-stage` When paused on a stage visit cap, give every capped stage one more visit. `--as-rejection` When paused because an agent "could not run a required command" but the reviewer had really rejected the work, send that rejection back to the earlier stage as a normal one.
 
 **`doctor`** runs the same preflight checks used by `start` and `resume`, reports every result, and exits 1 if any check fails.
 `--repo REPO` Use this repository root (default: current directory). `--plan PLAN` Use this plan file (default: from config). `--allow-dirty` Skip the clean-working-tree check.
 
 **`status`** shows whether a run is live, or where a paused one stopped. `--repo REPO`.
 
-**`stop`** lets the current agent finish and starts nothing new. `--repo REPO`.
+**`pause`** pauses at the next safe point, between agent turns. `--repo REPO`. `--cancel` Withdraw the request. `--now` Cut the current agent off now, as `stop` does.
+
+**`stop`** stops the current agent now, records the files its turn changed, and starts nothing new. `--repo REPO`.
 
 **`remove`** takes the relay out of a repository; see [Removing the relay](#removing-the-relay).
 `--repo REPO`, `--yes`, and `--force` Remove even while a run is paused.
