@@ -670,6 +670,158 @@ def test_resume_pauses_a_sandbox_rejection_without_starting_draft(repo, monkeypa
     assert called == []
 
 
+FIX_2_SUMMARY = (
+    "Strip Codex attached short config overrides such as "
+    "-c=sandbox_workspace_write.network_access=true and add a regression test"
+)
+
+
+def test_a_review_that_mentions_sandbox_routes_back_to_draft(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    seen: list[tuple[str, dict[str, int]]] = []
+
+    def on_turn(round_, previous_id, stage_state):
+        seen.append((stage_state["stage"], dict(stage_state["stage_visits"])))
+
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _run_turns(
+            [
+                ("claude", "ready", "implemented"),
+                ("claude", "passed", "tests passed"),
+                ("codex", "rejected", FIX_2_SUMMARY),
+                ("claude", "ready", "stripped"),
+                ("claude", "passed", "tests passed"),
+                ("claude", "approved", "looks good"),
+            ]
+        ),
+    )
+    outcome = loop.run_task(
+        repo, settings, TASK, base_commit=head(repo), echo=False, on_turn=on_turn
+    )
+    assert outcome.committed is True
+    assert ("draft", {"draft": 2, "test": 1, "review": 1}) in seen
+
+
+def test_a_refused_uv_run_still_pauses(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    monkeypatch.setattr(
+        loop.agents,
+        "run",
+        _run_turns(
+            [
+                ("claude", "ready", "implemented"),
+                ("claude", "passed", "tests passed"),
+                ("codex", "rejected", "codex: permission denied running uv"),
+            ]
+        ),
+    )
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_task(repo, settings, TASK, base_commit=head(repo), echo=False)
+    assert raised.value.reason == (
+        "claude could not run a required command: "
+        "codex: permission denied running uv"
+    )
+    assert loop.is_refused_command_pause(raised.value.reason)
+
+
+def test_a_rejection_with_issues_or_a_change_request_is_not_a_refusal():
+    pipe = make_pipeline()
+    for word in ("sandbox", "not permitted"):
+        assert not loop._summary_reports_sandbox_refusal(f"the {word} flag is wrong")
+    # Issues make a rejection a send-back even when the summary reads as a refusal.
+    assert not loop._sandbox_backroute(
+        pipe, "full", "review", "draft", "permission denied",
+        status="rejected", issues=("the retry loop never ends",),
+    )
+    assert loop._sandbox_backroute(
+        pipe, "full", "review", "draft", "permission denied",
+        status="rejected", issues=(),
+    )
+    for summary in (
+        "permission denied: fix the path",
+        "Strip the flag; it was denied",
+        "was denied, so add a regression test",
+    ):
+        assert not loop._sandbox_backroute(pipe, "full", "review", "draft", summary)
+    # "prefix" is not "fix".
+    assert loop._sandbox_backroute(
+        pipe, "full", "review", "draft", "prefix permission denied"
+    )
+
+
+def test_is_refused_command_pause_matches_only_that_pause():
+    assert loop.is_refused_command_pause(
+        loop._sandbox_pause_reason("codex", "permission denied")
+    )
+    assert not loop.is_refused_command_pause(
+        "codex was denied: rm -rf x. Allowed test command: none."
+    )
+    assert not loop.is_refused_command_pause("codex exited without handing off")
+
+
+def test_resume_as_rejection_runs_draft_with_the_saved_feedback(repo, monkeypatch):
+    pipe = make_pipeline()
+    settings = settings_with_pipeline(repo, pipe)
+    (repo / ".whyline" / "active-handoff.json").write_text(
+        json.dumps(
+            {
+                "id": "event3",
+                "task": "T-1",
+                "to_actor": "codex",
+                "status": "rejected",
+                "summary": "verification was denied",
+                "from_actor": "",
+            }
+        )
+    )
+    state.save(
+        repo,
+        state.RelayState(
+            plan="plan.md",
+            branch="relay/T-1",
+            task_id="T-1",
+            round=3,
+            base_commit=head(repo),
+            paused_reason="claude could not run a required command: verification was denied",
+            log_path="",
+            profile="full",
+            stage="review",
+            stage_visits={"draft": 1, "test": 1, "review": 1},
+            pipeline_fingerprint=settings.pipeline_fingerprint,
+        ),
+    )
+    prompts: list[str] = []
+    turns = _run_turns(
+        [
+            ("claude", "ready", "fixed"),
+            ("claude", "passed", "tests passed"),
+            ("claude", "approved", "looks good"),
+        ]
+    )
+
+    def run(command, prompt, **kwargs):
+        prompts.append(prompt)
+        return turns(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", run)
+    seen: list[tuple[str, dict[str, int]]] = []
+
+    def on_turn(round_, previous_id, stage_state):
+        seen.append((stage_state["stage"], dict(stage_state["stage_visits"])))
+
+    outcome = loop.run_task(
+        repo, settings, TASK, base_commit=head(repo), echo=False, resume=True,
+        as_rejection=True, start_round=3, on_turn=on_turn,
+    )
+    assert outcome.committed is True
+    assert seen[0] == ("draft", {"draft": 2, "test": 1, "review": 1})
+    assert "verification was denied" in prompts[0]
+
+
 def test_resume_with_a_drifted_fingerprint_pauses_before_running_anything(
     repo, monkeypatch
 ):

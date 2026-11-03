@@ -44,7 +44,7 @@ def _repo(two_role_repo, config_text: str, plan_text: str) -> Path:
 
 def _fake_agent(monkeypatch, turns: list[dict]) -> list[str]:
     """Stand in for agents.run. Each turn is a dict with to/status and
-    optionally `pause` (write PAUSE during the turn), `commit` (the legacy
+    optionally `summary`, `pause` (write PAUSE during the turn), `commit` (the legacy
     reviewer's own commit) or `limit` (no handoff, a usage-limit message).
     Returns the log name of every turn that ran, in order."""
     ran: list[str] = []
@@ -76,7 +76,7 @@ def _fake_agent(monkeypatch, turns: list[dict]) -> list[str]:
                     "task": task_id,
                     "to_actor": turn["to"],
                     "status": turn["status"],
-                    "summary": f"{turn['status']} summary",
+                    "summary": turn.get("summary", f"{turn['status']} summary"),
                     "from_actor": "",
                 }
             )
@@ -294,6 +294,84 @@ def test_a_limit_pause_clears_the_request(two_role_repo, monkeypatch, capsys):
     saved = state.load(root)
     assert saved.paused_by == ""
     assert "limit" in saved.paused_reason.lower()
+
+
+def test_as_rejection_sends_a_refused_command_pause_back_to_draft(
+    two_role_repo, monkeypatch, capsys
+):
+    config_text = "max_rounds = 10\n" + PIPELINE_CONFIG.replace("max_visits = 1\n", "")
+    root = _repo(two_role_repo, config_text, "- [ ] T-1: build\n")
+    prompts: list[str] = []
+    turns = [
+        {"to": "claude", "status": "ready"},
+        {"to": "claude", "status": "passed"},
+        {
+            "to": "codex",
+            "status": "rejected",
+            "summary": "codex: permission denied running uv",
+        },
+        {"to": "claude", "status": "ready"},
+        {"to": "claude", "status": "passed"},
+        {"to": "claude", "status": "approved"},
+    ]
+    ran = _fake_agent(monkeypatch, turns)
+    real_run = loop.agents.run
+
+    def recording(command, prompt, **kwargs):
+        prompts.append(prompt)
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", recording)
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        cli.whylinecmd,
+        "note",
+        lambda root, text, *, because, **kwargs: notes.append((text, because)),
+    )
+
+    assert _start(root) == cli.EXIT_PAUSED
+    assert "could not run a required command" in capsys.readouterr().err
+    # A plain resume rechecks the same summary and pauses again.
+    assert _resume(root) == cli.EXIT_PAUSED
+    capsys.readouterr()
+    assert len(ran) == 3
+
+    code = cli.main(["resume", "--repo", str(root), "--as-rejection"])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Sending T-1's refused-command pause back as a rejection." in captured.out
+    assert [text for text, _ in notes] == [
+        "Sending T-1's refused-command pause back as a rejection."
+    ]
+    assert "permission denied running uv" in notes[0][1]
+    assert ran[3] == "T-1-4-codex-draft"
+    assert "permission denied running uv" in prompts[3]
+    assert turns == []
+    assert _checked(root, "T-1")
+
+
+def test_as_rejection_refuses_a_limit_pause(two_role_repo, monkeypatch, capsys):
+    root = _repo(two_role_repo, PIPELINE_CONFIG, "- [ ] T-1: build\n")
+    ran = _fake_agent(monkeypatch, [{"limit": True}])
+    assert _start(root) == cli.EXIT_PAUSED
+    capsys.readouterr()
+    before = state.path(root).read_bytes()
+    notes: list[str] = []
+    monkeypatch.setattr(
+        cli.whylinecmd, "note", lambda root, text, **kwargs: notes.append(text)
+    )
+
+    code = cli.main(["resume", "--repo", str(root), "--as-rejection"])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_ERROR
+    assert captured.err == (
+        "Nothing to send back: the relay is not paused on a refused command.\n"
+    )
+    assert ran == ["T-1-1-codex-draft"]
+    assert notes == []
+    assert state.path(root).read_bytes() == before
 
 
 def test_resume_clears_a_leftover_request(two_role_repo, monkeypatch, capsys):

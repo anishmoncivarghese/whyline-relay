@@ -99,20 +99,43 @@ class Outcome:
 
 
 # A back-route whose summary contains one of these, case-insensitively, is a
-# refused command rather than a defect. Substring match is intentional.
+# refused command rather than a defect. Substring match is intentional, so
+# each marker is a refusal phrase: a bare "sandbox" also matches review
+# feedback about sandbox flags, which is a defect to send back.
 SANDBOX_MARKERS = (
     "permission denied",
     "operation not permitted",
-    "sandbox",
     "was denied",
-    "not permitted",
     "requires approval",
+    "blocked by the sandbox",
+    "sandbox denied",
+    "sandbox refused",
 )
+
+# A summary asking for a code change is review feedback, whatever else it says.
+_CODE_CHANGE_REQUEST = re.compile(
+    r"\badd a regression test\b|\bfix\b|\bstrip\b", re.IGNORECASE
+)
+
+_REFUSED_COMMAND_PAUSE = re.compile(r"^\S+ could not run a required command: ")
 
 
 def _summary_reports_sandbox_refusal(summary: str) -> bool:
     folded = summary.casefold()
     return any(marker in folded for marker in SANDBOX_MARKERS)
+
+
+def _is_normal_rejection(summary: str, status: str, issues: Sequence[str]) -> bool:
+    """True for a send-back that carries review feedback: a rejection with at
+    least one issue, or a summary asking for a code change."""
+    if status.strip().lower() == "rejected" and any(i.strip() for i in issues):
+        return True
+    return _CODE_CHANGE_REQUEST.search(summary) is not None
+
+
+def is_refused_command_pause(reason: str) -> bool:
+    """True when `reason` is the pause a refused-command back-route saves."""
+    return _REFUSED_COMMAND_PAUSE.match(reason) is not None
 
 
 def _sandbox_backroute(
@@ -121,9 +144,14 @@ def _sandbox_backroute(
     current_stage_id: str,
     target_stage_id: str | None,
     summary: str,
+    *,
+    status: str = "",
+    issues: Sequence[str] = (),
 ) -> bool:
     """True when this advance would send a refused command back to an earlier stage."""
     if not target_stage_id or not _summary_reports_sandbox_refusal(summary):
+        return False
+    if _is_normal_rejection(summary, status, issues):
         return False
     order = pipe.profiles[profile_name].stages
     try:
@@ -1287,6 +1315,7 @@ def _run_configured_task(
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
     cut_off: list[dict | None] | None = None,
+    as_rejection: bool = False,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
@@ -1304,6 +1333,9 @@ def _run_configured_task(
     until it's about to). A crash after the agent already wrote its handoff is
     caught here by re-deciding on whatever handoff already exists before the
     main loop restarts, so it is never re-run and never silently dropped.
+
+    With `as_rejection`, that re-decided handoff is routed as a normal
+    send-back even when its summary reads like a refused command.
     """
     def remember(commit: str) -> None:
         nonlocal base_commit
@@ -1397,12 +1429,15 @@ def _run_configured_task(
             if resumed.kind == "advance":
                 # Pause before the visit is counted, or resume would burn one
                 # for the stage the refusal was about to be sent back to.
-                if _sandbox_backroute(
+                # `as_rejection` is the operator ruling it a normal send-back.
+                if not as_rejection and _sandbox_backroute(
                     pipe,
                     profile_name,
                     current_stage_id,
                     resumed.target_stage,
                     current.summary,
+                    status=current.status,
+                    issues=current.issues,
                 ):
                     refused_by = effective_agents[
                         pipe.stages[current_stage_id].role
@@ -1633,6 +1668,8 @@ def _run_configured_task(
             current_stage_id,
             decision.target_stage,
             record.summary,
+            status=record.status,
+            issues=record.issues,
         ):
             raise Paused(_sandbox_pause_reason(agent, record.summary), target)
         sent_back = (
@@ -1681,9 +1718,12 @@ def run_task(
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
     cut_off: list[dict | None] | None = None,
+    as_rejection: bool = False,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
+    # Only a configured pipeline pauses on a refused-command back-route.
+    extra = {"as_rejection": as_rejection} if settings.pipeline is not None else {}
     try:
         return driver(
             root,
@@ -1700,6 +1740,7 @@ def run_task(
             plan_path=plan_path,
             announced=announced,
             cut_off=cut_off,
+            **extra,
         )
     finally:
         if _clear_running:
@@ -2183,13 +2224,16 @@ def _run_plan(
     allow_dirty: bool = False,
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
+    as_rejection: bool = False,
 ) -> list[Outcome]:
     """Run every unchecked task in file order. Tick each only after it commits.
 
     With `resume`, the first task re-enters where it stopped: it reuses the base
     commit saved when it paused (the reviewer may already have committed, and a
     fresh base would make the approval unverifiable) and the round it was on,
-    and `run_task` picks the next agent from the handoff record.
+    and `run_task` picks the next agent from the handoff record. With
+    `as_rejection` too, that task routes its saved handoff as a normal
+    send-back; later tasks are unaffected.
     """
     gitcheck.ensure_relay_ignored(root)
     # A saved Set up may have caught up with a manual switch since it was made.
@@ -2344,6 +2388,8 @@ def _run_plan(
                     plan_path=plan_path,
                     announced=announced,
                     cut_off=cut_off_holder,
+                    # Only the resumed task, the one that paused, re-decides.
+                    as_rejection=as_rejection and mid_task,
                 )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
@@ -2412,6 +2458,7 @@ def run_plan(
     allow_dirty: bool = False,
     echo: bool = True,
     runner: failover.Runner = subprocess.run,
+    as_rejection: bool = False,
 ) -> list[Outcome]:
     """Run a plan while retaining one live marker across all of its tasks."""
     try:
@@ -2425,6 +2472,7 @@ def run_plan(
             allow_dirty=allow_dirty,
             echo=echo,
             runner=runner,
+            as_rejection=as_rejection,
         )
     finally:
         running.clear(root)

@@ -6413,3 +6413,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 22c1a414948c4a8b99356bea699de192 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:18:49.945Z"} -->
+
+## 2026-11-03 — A back-route counts as a refused command only on refusal phrases, and never when it is a rejection with issues or asks for a fix/strip/regression test
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-7
+
+**Because:** FIX-2's review mentioned -c=sandbox_workspace_write and deadlocked the relay: the bare 'sandbox' marker turned review feedback into a refusal pause that every Resume re-hit
+
+**Rejected:**
+
+- keep bare 'sandbox' and only add the issues check — a summary without --issue lines would still deadlock
+- match 'fix' as a substring — 'prefix' and 'suffix' would hide real refusals; a word-boundary regex is used instead
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: bdde467f1c094c11b0ab1bb4f865a59d -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:24:30.876Z"} -->
+
+## 2026-11-03 — resume --as-rejection skips the refused-command check only on the resumed handoff of the paused task, and refuses in planner mode
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-7
+
+**Because:** the operator's ruling covers the one saved handoff; later turns must still pause on genuine refusals, and planner.resume (not editable in this task) never makes this pause
+
+**Rejected:**
+
+- rewrite the saved handoff or state to drop the summary — the agent's record should stay as written
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: b5e1efc3027d4707a1184ad06c12ef49 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:24:32.774Z"} -->
+
+## 2026-11-03 — RPZ-7 passes focused and full-suite testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-7
+
+**Because:** The exact FIX-2 sandbox summary routes back to draft, genuine permission-denied output still pauses, resume --as-rejection sends the saved refusal back through draft and records its note, limit pauses reject the override without mutation, and both focused and full test suites passed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_loop_pipeline.py, tests/test_safe_pause.py
+
+<!-- whyline-event: 708f8a67fa624c23ba84e974349f9942 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:28:33.046Z"} -->
+
+## 2026-11-03 — RPZ-7 is approved after review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-7
+
+**Because:** The refusal markers are phrase-specific, normal issue-bearing or code-change rejections bypass the refusal pause, resume --as-rejection applies only to the saved mid-task refused-command handoff, the four acceptance scenarios are covered, git diff --check passed, and uv run pytest -q completed with exit 0
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_loop_pipeline.py, tests/test_safe_pause.py
+
+<!-- whyline-event: 1089901b456547aeb2f2f808193ab2a9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:32:02.296Z"} -->

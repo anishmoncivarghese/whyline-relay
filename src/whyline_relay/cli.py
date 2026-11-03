@@ -53,6 +53,9 @@ _STAGE_VISIT_CAP = re.compile(r"hit stage '([^']+)''s (\d+)-visit cap")
 _NOTHING_TO_RETRY = (
     "Nothing to retry: the relay is not paused on a stage visit cap."
 )
+_NOT_A_REFUSAL = (
+    "Nothing to send back: the relay is not paused on a refused command."
+)
 
 
 def _warn_if_unlimited(settings: config.Config) -> None:
@@ -165,6 +168,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--retry-stage",
         action="store_true",
         help="When paused on a stage visit cap, give every capped stage one more visit.",
+    )
+    resume.add_argument(
+        "--as-rejection",
+        action="store_true",
+        help=(
+            "When paused on a refused command, route the saved handoff as a "
+            "normal rejection to the earlier stage."
+        ),
     )
 
     done_parser = subparsers.add_parser("done", help="Confirm a release task is done and continue")
@@ -506,6 +517,38 @@ def _retry_capped_stage(root: Path) -> str | None:
     return None
 
 
+def _send_back_as_rejection(root: Path) -> str | None:
+    """Check that the run is paused on a refused command and record the ruling.
+
+    Returns the refusal message on any other pause. On success, prints the
+    line, records it, and returns None so resume routes the saved handoff as
+    a normal rejection. A failing `whyline note` is a warning, as for
+    `--retry-stage`.
+    """
+    if state.load_plan(root) is not None:
+        return _NOT_A_REFUSAL
+    saved = state.load(root)
+    if saved is None or not loop.is_refused_command_pause(saved.paused_reason):
+        return _NOT_A_REFUSAL
+    line = f"Sending {saved.task_id}'s refused-command pause back as a rejection."
+    print(line)
+    try:
+        whylinecmd.note(
+            root,
+            line,
+            because=(
+                "The operator ruled the paused handoff a normal rejection, not a "
+                f"refused command. Its summary was: {saved.paused_reason}"
+            ),
+            task=saved.task_id,
+            actor="relay",
+            role="resume",
+        )
+    except whylinecmd.WhylineUnavailable as error:
+        print(f"warning: could not record the send-back: {error}", file=sys.stderr)
+    return None
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
     active = running.live(root)
@@ -518,6 +561,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
         return EXIT_ERROR
     if args.retry_stage:
         refusal = _retry_capped_stage(root)
+        if refusal is not None:
+            print(refusal, file=sys.stderr)
+            return EXIT_ERROR
+    as_rejection = getattr(args, "as_rejection", False)
+    if as_rejection:
+        refusal = _send_back_as_rejection(root)
         if refusal is not None:
             print(refusal, file=sys.stderr)
             return EXIT_ERROR
@@ -595,6 +644,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             only=saved.only or None,
             resume=True,
             allow_dirty=args.allow_dirty,
+            as_rejection=as_rejection,
         )
     except loop.Paused as paused:
         return _report_pause(paused)
