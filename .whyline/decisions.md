@@ -6352,3 +6352,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 45b1aa3cbdb54f848b6a0122c2f9abdd -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:03:05.330Z"} -->
+
+## 2026-11-03 — Retry stage gives back every stage whose saved visit count is at or above its cap, always including the one named in the pause
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-6
+
+**Because:** Saved counts are the pre-increment checkpoint, so a stage at its cap pauses on its next visit; giving back only the named stage paused FIX-2 again at review. The named stage is kept even when the config cannot list it (legacy pipeline=None).
+
+**Rejected:**
+
+- Give back only stages downstream of the named stage in the profile — rework loops can re-enter any stage, so position is no guide
+- Raise max_visits instead — changes the pipeline fingerprint and resume refuses
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py
+
+<!-- whyline-event: 6f60b0b0589848ee8a529ac6b647be5e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:11:23.624Z"} -->
+
+## 2026-11-03 — Retry stage refuses with the config error, before touching state, when the relay config does not load
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-6
+
+**Because:** The capped set now depends on the configured caps; a traceback or a half-applied retry would be worse than a clear refusal
+
+**Rejected:**
+
+- Fall back to the named stage only — silently reproduces the double-pause the task fixes
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 123721d59a924b098420ecaec5165300 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:11:25.471Z"} -->
+
+## 2026-11-03 — Pass RPZ-6 Round 2 testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-6
+
+**Because:** Focused CLI and safe-pause tests verified every capped stage gets exactly one visit back, output and note name all restored stages, one retry reaches completion through test and review, config and fingerprint remain unchanged, non-cap pauses are refused, and the full regression suite exited successfully
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py, tests/test_cli_commands.py, tests/test_safe_pause.py
+
+<!-- whyline-event: 3a7afe9f5c2d48a1a98117c5879148d6 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:15:12.306Z"} -->
+
+## 2026-11-03 — Approve RPZ-6 Round 3 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-6
+
+**Because:** The retry restores exactly one visit to every stage whose saved count is at or above its configured cap, preserves max_visits and the pipeline fingerprint, refuses non-cap pauses, names all restored stages in output and the decision note, and the end-to-end regression plus the full test suite pass
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/loop.py, tests/test_cli_commands.py, tests/test_safe_pause.py
+
+<!-- whyline-event: 22c1a414948c4a8b99356bea699de192 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:18:49.945Z"} -->

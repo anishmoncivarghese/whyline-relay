@@ -164,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument(
         "--retry-stage",
         action="store_true",
-        help="When paused on a stage visit cap, give that stage one more visit.",
+        help="When paused on a stage visit cap, give every capped stage one more visit.",
     )
 
     done_parser = subparsers.add_parser("done", help="Confirm a release task is done and continue")
@@ -440,31 +440,61 @@ def guard(root: Path, args: argparse.Namespace, branch: str) -> str | None:
     return None
 
 
+def _quoted_list(names: list[str]) -> str:
+    quoted = [repr(name) for name in names]
+    if len(quoted) == 1:
+        return quoted[0]
+    return f"{', '.join(quoted[:-1])} and {quoted[-1]}"
+
+
 def _retry_capped_stage(root: Path) -> str | None:
-    """Give the capped stage one saved visit back.
+    """Give every capped stage one saved visit back.
 
     Returns the refusal message when the run is not paused on a stage visit
-    cap. On success, saves the lowered count, prints the retry line, records
-    it, and returns None so resume continues. A failing `whyline note` is a
-    warning: the visit was already given back.
+    cap. On success, lowers by one each stage whose saved count is at or above
+    its cap (always including the one named in the pause), prints the retry
+    line, records it, and returns None so resume continues. Giving back only
+    the named stage would pause again at the next capped stage downstream. A
+    failing `whyline note` is a warning: the visits were already given back.
     """
     saved = state.load(root)
     match = _STAGE_VISIT_CAP.search(saved.paused_reason) if saved is not None else None
     if match is None:
         return _NOTHING_TO_RETRY
-    stage = match.group(1)
+    named = match.group(1)
+    try:
+        pipe = config.load(root).pipeline
+    except config.ConfigError as error:
+        return str(error)
+    stages = loop.capped_stages(pipe, saved.stage_visits) if pipe is not None else []
+    if named not in stages:
+        stages.insert(0, named)
     visits = dict(saved.stage_visits)
-    visits[stage] = visits.get(stage, 0) - 1
+    for stage in stages:
+        visits[stage] = visits.get(stage, 0) - 1
     state.save(root, replace(saved, stage_visits=visits))
-    print(f"Retrying stage {stage!r} once more.")
+    names = _quoted_list(stages)
+    line = (
+        f"Retrying stage {names} once more."
+        if len(stages) == 1
+        else f"Retrying stages {names} once more."
+    )
+    because = (
+        f"Stage {names} had hit its visit cap. Its saved visit count "
+        "was lowered by one so this resume can enter it once more. "
+        if len(stages) == 1
+        else f"Stages {names} had hit their visit caps. Each saved visit "
+        "count was lowered by one so this resume can enter each of them "
+        "once more. "
+    )
+    print(line)
     try:
         whylinecmd.note(
             root,
-            f"Retrying stage {stage!r} once more.",
+            line,
             because=(
-                f"Stage {stage!r} had hit its visit cap. Its saved visit count "
-                "was lowered by one so this resume can enter it once more. "
-                "max_visits is unchanged, so the pipeline fingerprint stays "
+                because
+                + "max_visits is unchanged, so the pipeline fingerprint stays "
                 "the same."
             ),
             task=saved.task_id,

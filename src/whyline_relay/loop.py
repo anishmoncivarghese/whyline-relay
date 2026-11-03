@@ -273,6 +273,21 @@ def check_visit_cap(
         )
 
 
+def capped_stages(
+    pipe: pipeline.Pipeline, stage_visits: dict[str, int]
+) -> list[str]:
+    """Stages whose saved visit count is at or above their cap, in pipeline order.
+
+    A saved count equal to the cap means the next visit to that stage pauses,
+    because check_visit_cap runs after the visit is counted.
+    """
+    return [
+        stage_id
+        for stage_id, stage in pipe.stages.items()
+        if stage_visits.get(stage_id, 0) >= stage.max_visits
+    ]
+
+
 def log_path(
     root: Path, task_id: str, round_: int, agent: str, role: str = ""
 ) -> Path:

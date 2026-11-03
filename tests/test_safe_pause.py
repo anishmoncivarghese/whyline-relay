@@ -160,6 +160,46 @@ def test_a_pipeline_send_back_pause_hands_the_feedback_to_the_next_draft(
     assert "failed summary" in prompts[2]
 
 
+def test_one_retry_gives_test_and_review_back_and_reaches_complete(
+    two_role_repo, monkeypatch, capsys
+):
+    config_text = "max_rounds = 10\n" + PIPELINE_CONFIG
+    root = _repo(two_role_repo, config_text, "- [ ] T-1: build\n")
+    turns = [
+        {"to": "claude", "status": "ready"},
+        {"to": "claude", "status": "passed"},
+        {"to": "codex", "status": "rejected"},
+        {"to": "claude", "status": "ready"},
+        # After the retry: test and review each run once more.
+        {"to": "claude", "status": "passed"},
+        {"to": "claude", "status": "approved"},
+    ]
+    ran = _fake_agent(monkeypatch, turns)
+    notes: list[str] = []
+    monkeypatch.setattr(
+        cli.whylinecmd, "note", lambda root, text, **kwargs: notes.append(text)
+    )
+
+    # The second draft routes to test, whose one visit is spent.
+    assert _start(root) == cli.EXIT_PAUSED
+    assert "hit stage 'test''s 1-visit cap" in capsys.readouterr().err
+    saved = state.load(root)
+    assert saved.stage_visits == {"draft": 2, "test": 1, "review": 1}
+
+    # Resume pauses on a changed fingerprint, so reaching "@complete" also
+    # shows the retry left max_visits and the fingerprint alone.
+    code = cli.main(["resume", "--repo", str(root), "--retry-stage"])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Retrying stages 'test' and 'review' once more." in captured.out
+    assert notes == ["Retrying stages 'test' and 'review' once more."]
+    assert ran[-2:] == ["T-1-5-claude-test", "T-1-6-claude-review"]
+    assert turns == []
+    assert _checked(root, "T-1")
+    assert (root / ".whyline/relay/config.toml").read_text() == config_text
+
+
 def test_a_legacy_pause_between_implementer_and_reviewer(
     two_role_repo, monkeypatch, capsys
 ):

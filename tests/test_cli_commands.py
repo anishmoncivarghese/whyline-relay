@@ -667,7 +667,8 @@ def test_retry_stage_lowers_the_capped_stage_and_records_the_note(
 ):
     config_path = _write_relay_config(repo, _PIPELINE_WITH_CAPS)
     config_before = config_path.read_bytes()
-    visits = {"draft": 4, "review": 2, "test": 1}
+    # Only draft is capped: review is under its cap of 2 and test is not a stage.
+    visits = {"draft": 4, "review": 1, "test": 1}
     _visit_cap_pause(repo, visits)
     notes: list[dict] = []
     plans: list[dict] = []
@@ -700,9 +701,7 @@ def test_retry_stage_lowers_the_capped_stage_and_records_the_note(
     assert "Retrying stage 'draft' once more." in captured.out
     saved = state.load(repo)
     assert saved is not None
-    assert saved.stage_visits["draft"] == 3
-    assert saved.stage_visits["review"] == 2
-    assert saved.stage_visits["test"] == 1
+    assert saved.stage_visits == {"draft": 3, "review": 1, "test": 1}
     assert saved.pipeline_fingerprint == "fp-unchanged"
     assert saved.paused_reason == _VISIT_CAP
     assert config_path.read_bytes() == config_before
@@ -730,8 +729,46 @@ def test_retry_stage_lowers_the_capped_stage_and_records_the_note(
     assert code == cli.EXIT_OK, capsys.readouterr().err
     saved = state.load(repo)
     assert saved is not None
-    assert saved.stage_visits == {"draft": 2, "review": 2, "test": 1}
+    assert saved.stage_visits == {"draft": 2, "review": 1, "test": 1}
     assert len(notes) == 2
+
+
+def test_retry_stage_gives_every_capped_stage_a_visit_and_names_them_all(
+    repo: Path, monkeypatch, capsys
+):
+    config_path = _write_relay_config(repo, _PIPELINE_WITH_CAPS)
+    config_before = config_path.read_bytes()
+    # draft is named in the pause; review is also at its cap of 2.
+    _visit_cap_pause(repo, {"draft": 3, "review": 2})
+    notes: list[tuple[str, str]] = []
+
+    def fake_note(root, text, *, because, task, actor, role, runner=None):
+        notes.append((text, because))
+
+    monkeypatch.setattr(cli.whylinecmd, "note", fake_note)
+    monkeypatch.setattr(cli.loop, "run_plan", lambda *args, **kwargs: [])
+
+    code = cli.main(
+        ["resume", "--repo", str(repo), "--retry-stage", "--allow-dirty", "--skip-checks"]
+    )
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK, captured.err
+    assert "Retrying stages 'draft' and 'review' once more." in captured.out
+    saved = state.load(repo)
+    assert saved is not None
+    assert saved.stage_visits == {"draft": 2, "review": 1}
+    assert saved.pipeline_fingerprint == "fp-unchanged"
+    assert config_path.read_bytes() == config_before
+    assert notes == [
+        (
+            "Retrying stages 'draft' and 'review' once more.",
+            "Stages 'draft' and 'review' had hit their visit caps. Each saved "
+            "visit count was lowered by one so this resume can enter each of "
+            "them once more. max_visits is unchanged, so the pipeline "
+            "fingerprint stays the same.",
+        )
+    ]
 
 
 @pytest.mark.parametrize(
