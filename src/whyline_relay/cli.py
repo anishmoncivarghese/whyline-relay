@@ -37,6 +37,7 @@ from whyline_relay import (
     testplan,
     whylinecmd,
 )
+from whyline_relay import status as relay_status
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -601,6 +602,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             f"Running: {active.agent} {action} {active.task}, round "
             f"{active.round}, since {since} ({ago} ago)"
         )
+    pause_line = relay_status.pause_line(relay_status.pause_state(root))
+    if pause_line is not None:
+        print(pause_line)
     saved = state.load(root)
     if saved is None:
         if active is None:

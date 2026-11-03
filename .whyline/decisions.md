@@ -6291,3 +6291,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: b0aa3849900e46798c5d49b3d23c860a -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:50:40.947Z"} -->
+
+## 2026-11-03 — A saved pause with paused_by=user reports paused_by_user even when it also carries a cut_off
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-4
+
+**Because:** cut_off survives a user pause taken before the resumed cut-off turn re-ran; the user's pause is what happened last and is what they need to see
+
+**Rejected:**
+
+- cut_off first — would describe an older interruption as the current reason for the pause
+
+**Files:** src/whyline_relay/status.py
+
+<!-- whyline-event: 95a0236b040644a5893eb0022c5a0763 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:55:39.845Z"} -->
+
+## 2026-11-03 — status.py owns pause_state plus pause_line; cmd_status stays in cli.py and prints the line above its existing details
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-4
+
+**Because:** status lived in cli.cmd_status, and existing tests and embedding rely on its Task/Paused/Resume with lines, so the new line is added rather than replacing them; pause_state's clock stands in for an unreadable PAUSE timestamp and pause_line's clock times the wait
+
+**Rejected:**
+
+- moving cmd_status into status.py — the task says keep the existing status function
+- agents.format_duration for the wait — prints 1m20s, the spec asks for 1m 20s
+
+**Files:** src/whyline_relay/status.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: 7adf329032894fd3ba0055479f650497 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:55:42.399Z"} -->
+
+## 2026-11-03 — Pass RPZ-4 Round 2 testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-4
+
+**Because:** All five pause_state kinds, required Pausing and Paused by you status lines, precedence and timestamp edge cases passed focused tests, and the complete regression suite exited successfully
+
+**Files:** src/whyline_relay/status.py, src/whyline_relay/cli.py, tests/test_status.py
+
+<!-- whyline-event: db54e7826e034b3e9d139a374103d95d -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:59:19.589Z"} -->
+
+## 2026-11-03 — Approve RPZ-4 Round 3 review
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-4
+
+**Because:** pause_state distinguishes all five required kinds with the expected metadata, status prints the required pausing and paused-by-user lines, edge-case precedence is coherent, and the plain full test suite exited successfully
+
+**Files:** src/whyline_relay/status.py, src/whyline_relay/cli.py, tests/test_status.py
+
+<!-- whyline-event: 45b1aa3cbdb54f848b6a0122c2f9abdd -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:03:05.330Z"} -->
