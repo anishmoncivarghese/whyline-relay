@@ -394,7 +394,9 @@ Only `codex` and `claude` are built in today. For a third option, see "Using Ant
 
 Since 0.2.28 the relay uses the recipe below automatically when the repository's config has no `[agents.<name>]` table of its own, so you only need the TOML when you want to change the command.
 
-Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no way to scope its permissions to a repository or an invocation, no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path — three real gaps that would make a "built-in" label dishonest about what the relay actually manages for it. This is also tracked upstream at [google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548) — headless mode's own permission enforcement is known to be unreliable; `doctor` links here directly if you configure Antigravity this way. Configure it like this:
+Google's Antigravity CLI (`agy`) works headlessly and can be used right now as a generic agent, with no relay code changes. It is not a built-in, on purpose: it has no login-status command `doctor` could check, and its denial output names only a tool type ("a RunCommand call was denied"), never the command or path. A refused call also still exits 0 with `"status": "SUCCESS"`; the refusal shows only in the JSON's `denied_actions` list. Those gaps would make a "built-in" label dishonest about what the relay actually manages for it.
+
+Use `agy` 1.4.12 or later. Older versions ignored `permissions.allow` in headless mode and hung forever on any tool call that needed approval ([google-antigravity/antigravity-cli#548](https://github.com/google-antigravity/antigravity-cli/issues/548), fixed upstream on 2026-11-03). Checked on 1.4.12 on macOS: an allowed `command(touch)` ran, an unlisted command and a write outside the repository were each refused within seconds, and an allow rule for `touch` did not let `rm` through. Configure it like this:
 
 ```toml
 [roles]
@@ -408,7 +410,7 @@ command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-pr
 
 **`-p` must be the last item in the command.** The relay always appends the prompt as the command's final argument. `agy -p` greedily consumes whatever token comes right after it, so `-p` anywhere earlier makes it swallow the next flag instead of the real prompt, and the turn silently does nothing.
 
-**It denies everything by default, including reads**, unless the repository is in `trustedWorkspaces` and the tool is in `permissions.allow`, both in one file global to the machine: `~/.gemini/antigravity-cli/settings.json`. There is no per-repository or per-invocation override. A working setup needs something like:
+**It denies everything by default, including reads**, unless the repository is in `trustedWorkspaces` and the tool is in `permissions.allow`, both in `~/.gemini/antigravity-cli/settings.json`, a file global to the machine. Since 1.4.x, `agy --settings '<json>'` also takes settings for one run only, never saved, so an allow list can be put in the relay command itself instead. A working setup needs something like:
 
 ```json
 {
@@ -417,7 +419,7 @@ command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--new-pr
 }
 ```
 
-Narrower patterns such as `command(git)` were tried and did not work as their own error messages imply; `command(*)` is what was actually verified. Because it is global, this loosens every `agy` session on the machine, not just relay runs.
+Before the #548 fix, narrower patterns such as `command(git)` did not work and only `command(*)` did. On 1.4.12 a narrow rule (`command(touch)`) was verified to work. A rule in the global file loosens every `agy` session on the machine; one passed with `--settings` applies to that run only.
 
 **It can end a turn while work it started is still running.** Measured once: asked to "run the project's tests" with no further guidance, it started something in the background, reported success, and the CLI exited before that work finished — no handoff, nothing committed, the background task killed on exit. The fix that held up under a real side-by-side comparison: add a line to `.whyline/relay/prompts/implement.md` telling it explicitly not to background anything:
 
