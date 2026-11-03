@@ -135,6 +135,6 @@ Global constraints:
   5. the full suite passes
   A gap outside this list is not a rejection. Record it with `whyline handoff RPZ-8 --issue "follow-up: <gap>"` and approve.
 
-- [ ] RPZ-5: Publish whyline-relay with RPZ-1..4 and RPZ-6..8
+- [x] RPZ-5: Publish whyline-relay with RPZ-1..4 and RPZ-6..8
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release, in user terms. Document `pause` in the README. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline --upgrade-package whyline-relay` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark PZ-1 done when that plan reaches it.
