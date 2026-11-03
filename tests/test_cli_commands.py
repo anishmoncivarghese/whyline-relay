@@ -102,6 +102,55 @@ def test_stop_writes_the_stop_file(repo: Path):
     assert (repo / ".whyline" / "relay" / "STOP").exists()
 
 
+def test_pause_writes_the_request_while_a_relay_runs(repo: Path, capsys):
+    _write_running(repo, pid=os.getpid())
+
+    assert cli.main(["pause", "--repo", str(repo)]) == cli.EXIT_OK
+
+    assert capsys.readouterr().out.strip() == (
+        "Pause requested: the relay pauses after the current agent finishes its turn."
+    )
+    data = json.loads((repo / ".whyline" / "relay" / "PAUSE").read_text())
+    assert data["now"] is False
+    assert datetime.fromisoformat(data["requested_at"]).tzinfo is not None
+    assert not (repo / ".whyline" / "relay" / "STOP").exists()
+
+
+def test_pause_with_no_relay_running_is_an_error(repo: Path, capsys):
+    assert cli.main(["pause", "--repo", str(repo)]) == cli.EXIT_ERROR
+    assert capsys.readouterr().out.strip() == "No relay is running here."
+    assert not (repo / ".whyline" / "relay" / "PAUSE").exists()
+
+
+def test_pause_cancel_withdraws_the_request(repo: Path, capsys):
+    _write_running(repo, pid=os.getpid())
+    assert cli.main(["pause", "--repo", str(repo)]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["pause", "--repo", str(repo), "--cancel"]) == cli.EXIT_OK
+    assert "withdrawn" in capsys.readouterr().out
+    assert not (repo / ".whyline" / "relay" / "PAUSE").exists()
+
+    assert cli.main(["pause", "--repo", str(repo), "--cancel"]) == cli.EXIT_OK
+    assert "No pause was requested." in capsys.readouterr().out
+
+
+def test_pause_now_writes_the_request_and_the_stop_file(repo: Path, capsys):
+    _write_running(repo, pid=os.getpid())
+
+    assert cli.main(["pause", "--repo", str(repo), "--now"]) == cli.EXIT_OK
+
+    relay = repo / ".whyline" / "relay"
+    assert json.loads((relay / "PAUSE").read_text())["now"] is True
+    assert (relay / "STOP").exists()
+    assert "Stopped the current agent" in capsys.readouterr().out
+
+
+def test_pause_cancel_and_now_are_exclusive(repo: Path):
+    with pytest.raises(SystemExit):
+        cli.main(["pause", "--repo", str(repo), "--cancel", "--now"])
+
+
 def test_status_reports_nothing_in_progress(repo: Path, capsys):
     assert cli.main(["status", "--repo", str(repo)]) == cli.EXIT_OK
     assert "no relay run in progress" in capsys.readouterr().out.lower()

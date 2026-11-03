@@ -6090,3 +6090,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 49b0adcd3a354d61b45c0a7ceb02f386 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-01T17:39:44.491Z"} -->
+
+## 2026-11-03 — whyline-relay pause refuses (exit 1) and writes nothing when no relay is running; --cancel works regardless
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-1
+
+**Because:** a PAUSE file with no reader would pause the next start before it did any work; withdrawing a request is always harmless
+
+**Rejected:**
+
+- write PAUSE anyway and warn — leaves a stale request that silently pauses the next run
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 1cd79b489f034deeb2e11b5e363609ee -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:06:38.579Z"} -->
+
+## 2026-11-03 — pause_request treats an unreadable PAUSE body as a pause request (now=False), not as no request
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-1
+
+**Because:** the file's existence is the human's request; a garbled body must not turn a pause into keep-going
+
+**Rejected:**
+
+- return None on bad JSON — ignores an explicit pause
+- raise — would crash the loop between turns
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 841e8fcb03c84627a667a90f45308fcc -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:06:40.331Z"} -->
+
+## 2026-11-03 — Pass RPZ-1 Round 2 testing
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-1
+
+**Because:** The pause request payload and cancellation behavior, CLI safe/no-relay/now modes, STOP watcher isolation, and the complete regression suite all passed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, tests/test_pause.py, tests/test_cli_commands.py
+
+<!-- whyline-event: bd6d0b733165402bb25e55844e090a9a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:10:08.918Z"} -->
+
+## 2026-11-03 — Approve RPZ-1 Round 3
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-1
+
+**Because:** The PAUSE helpers atomically persist and parse the requested payload, cancellation and CLI live-relay behavior match the specification, --now writes PAUSE and STOP, the STOP watcher remains isolated, and the full test suite plus diff checks pass
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 4f4c143e82ce432d97fcd6145b9f90a4 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:13:25.731Z"} -->

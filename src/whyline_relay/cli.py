@@ -249,6 +249,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
 
+    pause = subparsers.add_parser(
+        "pause", help="Pause the relay after the current agent finishes its turn."
+    )
+    pause.add_argument(
+        "--repo", default=".", help="Use this repository root (default: current directory)."
+    )
+    pause_mode = pause.add_mutually_exclusive_group()
+    pause_mode.add_argument(
+        "--cancel", action="store_true", help="Withdraw a pause request."
+    )
+    pause_mode.add_argument(
+        "--now",
+        action="store_true",
+        help="Pause now: stop the current agent as `stop` does.",
+    )
+
     init_parser = subparsers.add_parser("init", help="Write permissions and templates")
     init_parser.add_argument(
         "--repo", default=".", help="Use this repository root (default: current directory)."
@@ -624,6 +640,26 @@ def cmd_stop(args: argparse.Namespace) -> int:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("")
     print("Stopped the current agent. Nothing new will start.")
+    return EXIT_OK
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    if args.cancel:
+        if loop.cancel_pause(root):
+            print("Pause request withdrawn.")
+        else:
+            print("No pause was requested.")
+        return EXIT_OK
+    if running.live(root) is None:
+        # A request left behind with nothing to read it would pause the
+        # next run before it did any work.
+        print("No relay is running here.")
+        return EXIT_ERROR
+    loop.request_pause(root, now=args.now)
+    if args.now:
+        return cmd_stop(args)
+    print("Pause requested: the relay pauses after the current agent finishes its turn.")
     return EXIT_OK
 
 
@@ -1127,6 +1163,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "manual": cmd_manual,
             "status": cmd_status,
             "stop": cmd_stop,
+            "pause": cmd_pause,
             "init": cmd_init,
             "remove": cmd_remove,
             "roles": cmd_roles,

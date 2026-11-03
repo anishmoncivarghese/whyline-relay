@@ -1630,6 +1630,60 @@ def stop_requested(root: Path) -> bool:
     return stop_path(root).exists()
 
 
+def pause_path(root: Path) -> Path:
+    return config.relay_dir(root) / "PAUSE"
+
+
+@dataclass(frozen=True)
+class PauseRequest:
+    requested_at: str
+    now: bool
+
+
+def request_pause(
+    root: Path, *, now: bool = False, clock: Callable[[], datetime] | None = None
+) -> PauseRequest:
+    """Ask the relay to pause once the current agent finishes its turn.
+
+    The STOP watcher never reads this file, so the running agent is left alone.
+    """
+    stamp = (clock or (lambda: datetime.now().astimezone()))().isoformat()
+    request = PauseRequest(requested_at=stamp, now=now)
+    state._write_atomic(
+        pause_path(root),
+        json.dumps({"requested_at": request.requested_at, "now": request.now}) + "\n",
+    )
+    return request
+
+
+def pause_request(root: Path) -> PauseRequest | None:
+    path = pause_path(root)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        # The file is there, so someone asked for a pause; a garbled body
+        # must not turn that into "keep going".
+        return PauseRequest(requested_at="", now=False)
+    return PauseRequest(
+        requested_at=str(data.get("requested_at") or ""),
+        now=data.get("now") is True,
+    )
+
+
+def cancel_pause(root: Path) -> bool:
+    """Withdraw a pause request. True when there was one to withdraw."""
+    path = pause_path(root)
+    existed = path.exists()
+    path.unlink(missing_ok=True)
+    return existed
+
+
 # Same slice as agents._CANCEL_POLL_SECONDS: the file is noticed, then the
 # child is killed, within about two polls.
 _STOP_POLL_SECONDS = 0.05
