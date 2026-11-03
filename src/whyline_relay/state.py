@@ -76,6 +76,9 @@ class RelayState:
     paused_by: str = ""
     # When the relay paused, as an ISO timestamp; "" in records that predate it.
     paused_at: str = ""
+    # The turn a STOP or Ctrl+C killed before it handed off: `stage`, `role`,
+    # `agent` and the `changed_files` it left. None when no turn was cut off.
+    cut_off: dict | None = None
 
 
 @dataclass(frozen=True)

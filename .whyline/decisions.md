@@ -6230,3 +6230,64 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: b944e269da1d468fbb435dcc2dac0e97 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:36:07.687Z"} -->
+
+## 2026-11-03 — Cut-off turn identity travels on the exception (Paused.cut_off / TurnInterrupted), and the resume note is carried through a one-slot holder that run_agent empties
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-3
+
+**Because:** only run_agent knows the killed turn's stage/role/agent; a holder owned by _run_plan lets a pause before the next turn starts (bypass refusal, low disk) keep cut_off, while the first turn to start consumes it
+
+**Rejected:**
+
+- read running.json for the turn identity — the marker outlives a finished turn, so a Ctrl+C between turns would blame the previous agent
+- store and clear cut_off in state.json from run_agent — state.json is history while a run is live, and a plain start (not resume) would wrongly pick it up
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 732453354441441fb4162a5d4c5037ba -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:43:31.148Z"} -->
+
+## 2026-11-03 — TurnInterrupted subclasses KeyboardInterrupt so Ctrl+C mid-turn still reaches every existing KeyboardInterrupt handler
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RPZ-3
+
+**Because:** the CLI and run_plan already handle KeyboardInterrupt; a subclass adds the turn identity without changing who catches it
+
+**Rejected:**
+
+- set an attribute on the original KeyboardInterrupt — works but is invisible to readers and type checkers
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 3445b9674c2b48a2939fb40815d7c2fe -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:43:35.369Z"} -->
+
+## 2026-11-03 — RPZ-3 testing passed
+
+**Actor:** codex
+**Role:** tester
+**Task:** RPZ-3
+
+**Because:** The dedicated cut-off tests passed 7/7 and the complete project test suite reached 100% with exit code 0, covering Ctrl+C file capture, pause-now reason, resume prompt carryover, and cut_off clearing
+
+**Files:** tests/test_cut_off.py
+
+<!-- whyline-event: 8d9cf0657ede44198af8df81d4ef9de6 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:47:07.769Z"} -->
+
+## 2026-11-03 — RPZ-3 cut-off recording and resume handoff are approved
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** RPZ-3
+
+**Because:** The implementation records the interrupted turn and non-relay dirty paths for Ctrl+C and STOP, consumes pause-now with the required reason, prepends the exact continuation guidance once on resume, preserves it across pre-turn pauses, and the full test suite passed
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: b0aa3849900e46798c5d49b3d23c860a -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-03T05:50:40.947Z"} -->

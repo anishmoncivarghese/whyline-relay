@@ -45,12 +45,27 @@ class Paused(RuntimeError):
     """The relay stopped and wants a human. Carries the reason and the log path."""
 
     def __init__(
-        self, reason: str, log_path: Path | None = None, *, paused_by: str = ""
+        self,
+        reason: str,
+        log_path: Path | None = None,
+        *,
+        paused_by: str = "",
+        cut_off: dict | None = None,
     ):
         super().__init__(reason)
         self.reason = reason
         self.log_path = log_path
         self.paused_by = paused_by
+        # The killed turn's stage, role and agent when STOP cut it off.
+        self.cut_off = cut_off
+
+
+class TurnInterrupted(KeyboardInterrupt):
+    """Ctrl+C during an agent's turn. `cut_off` names that turn."""
+
+    def __init__(self, cut_off: dict):
+        super().__init__()
+        self.cut_off = cut_off
 
 
 def task_repo(root: Path, task: plan.Task) -> Path:
@@ -326,8 +341,13 @@ def run_agent(
     prompt_suffix: str = "",
     attachments: Sequence[Path] = (),
     runner: failover.Runner = subprocess.run,
+    cut_off: list[dict | None] | None = None,
 ) -> Path:
-    """Render the prompt, run the agent, and return the log path."""
+    """Render the prompt, run the agent, and return the log path.
+
+    `cut_off` holds the turn a pause cut off, if any. This turn opens with it
+    and empties the holder, so only the first turn after resume is told.
+    """
     _refuse_low_disk(root)
     adapter = config.adapter_for(settings, agent)
     repo = task_repo(root, task)
@@ -370,6 +390,10 @@ def run_agent(
     block = attachment_delivery.prompt_block(attachments, root)
     if block:
         prompt = f"{prompt}\n\n{block}"
+    if cut_off is not None and cut_off[0]:
+        prompt = prompts.cut_off_preamble(cut_off[0]) + prompt
+        cut_off[0] = None
+    this_turn = {"stage": stage, "role": role, "agent": agent}
     log_role = (
         log_suffix
         if log_suffix is not None
@@ -455,8 +479,12 @@ def run_agent(
                     f"<== {agent} finished in "
                     f"{agents.format_duration(time.monotonic() - started)}"
                 )
-    except (agents.AgentTimeout, agents.AgentCancelled) as error:
+    except agents.AgentCancelled as error:
+        raise Paused(str(error), target, cut_off=this_turn) from error
+    except agents.AgentTimeout as error:
         raise Paused(str(error), target) from error
+    except KeyboardInterrupt as error:
+        raise TurnInterrupted(this_turn) from error
     except agents.AgentMissing as error:
         raise Paused(str(error), target) from error
     finally:
@@ -997,6 +1025,7 @@ def _run_task(
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
+    cut_off: list[dict | None] | None = None,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -1108,6 +1137,7 @@ def _run_task(
             reviewer=reviewer,
             prompt_suffix=extra_prompt,
             runner=runner,
+            cut_off=cut_off,
         )
         if role == "implementer" and gitcheck.head_commit(repo) != head_before:
             # Codex's sandbox does not stop it committing (measured on
@@ -1241,6 +1271,7 @@ def _run_configured_task(
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
+    cut_off: list[dict | None] | None = None,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
@@ -1469,6 +1500,7 @@ def _run_configured_task(
                 stage, pipe, profile_name, effective_agents, agent, task.task_id
             ),
             runner=runner,
+            cut_off=cut_off,
         )
         if gitcheck.head_commit(repo) != head_before:
             slid = _advance_base_past_settings(
@@ -1633,6 +1665,7 @@ def run_task(
     base_holder: list[str] | None = None,
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
+    cut_off: list[dict | None] | None = None,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
@@ -1651,6 +1684,7 @@ def run_task(
             base_holder=base_holder,
             plan_path=plan_path,
             announced=announced,
+            cut_off=cut_off,
         )
     finally:
         if _clear_running:
@@ -1765,6 +1799,7 @@ def _save_pause(
     *,
     timeout_minutes: int,
     paused_by: str = "",
+    cut_off: dict | None = None,
 ) -> None:
     stage_state = progress.get("stage_state") or {}
     # Whatever paused the run, a request still waiting is spent: it must not
@@ -1790,10 +1825,36 @@ def _save_pause(
                 timeout_minutes=timeout_minutes,
                 paused_by=paused_by,
                 paused_at=datetime.now().astimezone().isoformat(),
+                cut_off=cut_off,
             ),
         )
     except state.DiskFull as error:
         _die_disk_full(error)
+
+
+def _cut_off_pause(
+    root: Path, task: plan.Task, turn: dict, reason: str
+) -> tuple[str, dict]:
+    """The reason and `cut_off` record for a turn STOP or Ctrl+C killed.
+
+    Reads a `pause --now` request before spending it, then removes PAUSE and
+    STOP so neither outlives the pause they caused.
+    """
+    request = pause_request(root)
+    if request is not None and request.now:
+        reason = f"paused now by you; {turn['agent']}'s turn was cut off"
+    try:
+        changed = gitcheck.dirty_paths(task_repo(root, task))
+    except gitcheck.GitError:
+        changed = []
+    relay = Path(".whyline") / "relay"
+    files = [
+        name for name in changed
+        if not Path(name).is_relative_to(relay)
+    ]
+    cancel_pause(root)
+    stop_path(root).unlink(missing_ok=True)
+    return reason, {**turn, "changed_files": files}
 
 
 DECISION_LOG = Path(".whyline") / "decisions.md"
@@ -2236,6 +2297,10 @@ def _run_plan(
             raise
         base_commit = resuming.base_commit if mid_task else gitcheck.head_commit(repo)
         base_holder = [base_commit]
+        # The next turn to start empties this; a pause before then keeps it.
+        cut_off_holder: list[dict | None] = [
+            resuming.cut_off if mid_task else None
+        ]
         resuming = None
 
         def on_turn(round_: int, previous_id: str | None, stage_state: dict) -> None:
@@ -2263,24 +2328,35 @@ def _run_plan(
                     base_holder=base_holder,
                     plan_path=plan_path,
                     announced=announced,
+                    cut_off=cut_off_holder,
                 )
             if not allow_dirty:
                 _require_clean(root, plan_path, task)
         except state.DiskFull as error:
             _die_disk_full(error)
         except Paused as paused:
+            reason, cut_off = paused.reason, cut_off_holder[0]
+            if paused.cut_off is not None:
+                reason, cut_off = _cut_off_pause(root, task, paused.cut_off, reason)
+                paused.reason = reason
+                paused.args = (reason,)
             _save_pause(
                 root, plan_path, branch, task, base_holder[0],
-                paused.reason, paused.log_path, only, progress,
+                reason, paused.log_path, only, progress,
                 timeout_minutes=settings.timeout_minutes,
                 paused_by=paused.paused_by,
+                cut_off=cut_off,
             )
             raise
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as interrupt:
+            reason, cut_off = "interrupted by the user (Ctrl+C)", cut_off_holder[0]
+            if isinstance(interrupt, TurnInterrupted):
+                reason, cut_off = _cut_off_pause(root, task, interrupt.cut_off, reason)
             _save_pause(
                 root, plan_path, branch, task, base_holder[0],
-                "interrupted by the user (Ctrl+C)", None, only, progress,
+                reason, None, only, progress,
                 timeout_minutes=settings.timeout_minutes,
+                cut_off=cut_off,
             )
             raise
 

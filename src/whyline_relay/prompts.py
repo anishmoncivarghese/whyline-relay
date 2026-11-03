@@ -988,6 +988,16 @@ def stage_footer(
     return "\n".join(lines)
 
 
+def cut_off_preamble(cut_off: dict) -> str:
+    """The opening of the turn after one a STOP or Ctrl+C cut off."""
+    files = ", ".join(cut_off.get("changed_files") or []) or "no files"
+    return (
+        f"The previous turn ({cut_off.get('role', '')} {cut_off.get('agent', '')}) "
+        f"was cut off before it handed off. It left changes in: {files}. "
+        "Continue from them; don't start over and don't discard them.\n\n"
+    )
+
+
 def repository_footer(root: Path, task_repo: Path | None = None) -> str:
     """Pin relay bookkeeping to its repository even for cross-repository tasks."""
     root = root.resolve()
