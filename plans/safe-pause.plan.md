@@ -87,7 +87,7 @@ Global constraints:
   - the printed line and note name every stage given back
   - a non-cap pause is still refused
 
-- [ ] RPZ-7: A rejection that mentions "sandbox" is not a refused command, and a misread pause can be sent back
+- [x] RPZ-7: A rejection that mentions "sandbox" is not a refused command, and a misread pause can be sent back
   Edit `src/whyline_relay/loop.py`, `src/whyline_relay/cli.py` and their tests only.
   Why: on 2026-11-02, agentdock's FIX-2 reviewer rejected with "Strip Codex attached short config overrides such as -c=sandbox_workspace_write.network_access=true and add a regression test". `_summary_reports_sandbox_refusal` matched the bare word "sandbox" in `SANDBOX_MARKERS`, so the relay paused with "codex could not run a required command" instead of sending the task back to Claude. Resume rechecks the same summary (the `resumed.kind == "advance"` path), so every Resume paused again: a deadlock no console button could clear.
   1. Drop the bare `"sandbox"` and `"not permitted"` from `SANDBOX_MARKERS`. Match refusal phrases only: "permission denied", "operation not permitted", "was denied", "requires approval", "blocked by the sandbox", "sandbox denied", "sandbox refused".
