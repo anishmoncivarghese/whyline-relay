@@ -32,7 +32,7 @@ Global constraints:
   - `--now` writes both files
   - the STOP watcher ignores PAUSE
 
-- [ ] RPZ-2: Pause at safe points
+- [x] RPZ-2: Pause at safe points
   Edit `src/whyline_relay/loop.py`, `src/whyline_relay/state.py` and their tests only.
   1. Add `PAUSED_BY_USER = "paused by you"`. `RelayState` gains `paused_by: str = ""` and `paused_at: str = ""`. Old state files still load.
   2. Check `pause_request(root)` at these safe points. When there is a request, delete the file and raise `Paused(PAUSED_BY_USER)` with `paused_by="user"`:
