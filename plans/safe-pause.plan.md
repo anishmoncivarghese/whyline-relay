@@ -15,7 +15,7 @@ Global constraints:
 - No new dependency.
 - Run the focused tests and the complete suite after each task.
 
-- [ ] RPZ-1: The pause request and `whyline-relay pause`
+- [x] RPZ-1: The pause request and `whyline-relay pause`
   Edit `src/whyline_relay/loop.py`, `src/whyline_relay/cli.py` and their tests only.
   1. In `loop.py`, add:
      - `pause_path(root)` → `.whyline/relay/PAUSE`
