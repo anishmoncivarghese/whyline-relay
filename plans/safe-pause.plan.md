@@ -75,7 +75,7 @@ Global constraints:
      - "Paused by you at RPZ-2, round 2. Run `whyline-relay resume` to continue."
   Tests: each kind.
 
-- [ ] RPZ-6: Retry stage gives every capped stage one more visit
+- [x] RPZ-6: Retry stage gives every capped stage one more visit
   Edit `src/whyline_relay/cli.py`, `src/whyline_relay/loop.py`, `src/whyline_relay/state.py` and their tests only.
   Why: on 2026-11-02, agentdock's FIX-2 had used 6 of 6 visits in draft, test and review. **Retry stage** gave one visit back to `test` only, so the run passed its tests, moved to `review` and paused at once on review's cap. The user had to press Retry stage a second time before the reviewer ran.
   1. `_retry_capped_stage` gives one visit back to every stage whose saved count is at or above its cap, not only the stage named in the pause reason. It prints "Retrying stages 'test' and 'review' once more." (or the one stage when only one is capped), and the `whyline note` names them all.
