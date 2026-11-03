@@ -99,7 +99,7 @@ Global constraints:
   - `--as-rejection` clears a refused-command pause and runs the earlier stage
   - `--as-rejection` refuses on a limit pause
 
-- [ ] RPZ-8: Antigravity runs with a per-run allow list, and a refused command is reported
+- [x] RPZ-8: Antigravity runs with a per-run allow list, and a refused command is reported
   Edit `src/whyline_relay/recipes.py`, `src/whyline_relay/loop.py` (only `_no_handoff_detail`), `src/whyline_relay/preflight.py` and `README.md`, create `src/whyline_relay/adapters/antigravity.py`, and add their tests only.
   Why: google-antigravity/antigravity-cli#548 is fixed. Checked on 2026-11-03 with agy 1.4.12 on macOS:
   - `agy --settings '<json>'` applies settings to that run only. Its `permissions.allow` replaces the global file's list: an empty list refused a command even though the global file allows `command(*)`.
