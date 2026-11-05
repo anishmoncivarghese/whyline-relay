@@ -153,8 +153,35 @@ codex hit its usage limit during JOB-26, and the reviewer was switched to antigr
   - run start drops a manual override equal to the configured agent
   - an override naming an agent outside `settings.agents` is ignored with the echo
 
+## Found while running agentdock's safe-pause plan (2026-11-05)
+
+grok, reviewing PZ-11, ran `git -c color.ui=false -c color.diff=false diff -- <files>`. The allow list has `Bash(git diff:*)`, but rules match on the command's start, so `git -c …` was refused and headless grok ended its whole turn. The relay resumed the session (1 of 2), and the resume prompt didn't say which command was refused, so the retry could hit the same wall and use up the last resume. Every repository that uses the built-in recipes gets this list.
+
+- [ ] RLY-15: Plain git in headless agents, and a resume that names the refused command
+  Edit `src/whyline_relay/recipes.py`, `src/whyline_relay/adapters/grok.py`, `src/whyline_relay/adapters/claude.py` and `src/whyline_relay/loop.py`, with tests in `tests/test_recipes.py` and `tests/test_grok_resume.py`.
+  1. `GROK_RULES` gains this sentence after "Run one plain command per shell call.": "Run git as plain `git diff`, `git log`, `git show` or `git status`, never with `git -c …`, `git --no-pager` or `git -C <dir>`." `CLAUDE_RULES` gets it too, because it is the same text.
+  2. Allow exactly these three no-colour forms, and nothing broader:
+     - `git -c color.ui=false -c color.diff=false diff`
+     - the same with `log`
+     - the same with `show`
+     Add them as `Bash(<form>:*)` to grok's recipe and to the claude adapter's allow list, and as `command(<form>)` to `ANTIGRAVITY_ALLOW`. Never add `git -c` on its own or `git --no-pager`, because `-c` can set options that make git run other programs (`core.pager`, `core.sshCommand`, `alias.*`).
+  3. Add `grok.refused_command(text: str) -> str | None`, which reads the first "permission required: Execute `<command>`" from the log text. It returns None when the line is absent.
+  4. `grok.resume_prompt(command, refused=None)`: when `refused` is given, the prompt starts with "Your last command, `<refused>`, is not allowed here and must not be run again." When `refused` starts with `git -c ` or `git --no-pager `, it adds: "Use the plain form, such as `git diff -- <files>`." Otherwise it adds: "Use your read, search and edit tools instead." The rest of the prompt is unchanged. The loop passes `grok.refused_command(text)` from the log it already reads.
+  5. The resume echo becomes `==> relay: <agent>'s turn was cancelled by its permission policy (refused: <command, cut to 80 chars>); resuming its session (N of M)`, or today's text when no command was found.
+  Tests:
+  - the grok recipe allows the three no-colour forms and still has no bare `git -c`, `git --no-pager` or `rm -rf` allow
+  - `ANTIGRAVITY_ALLOW` and the claude list get the same three forms
+  - `GROK_RULES` contains "never with `git -c"
+  - `refused_command` extracts the command from the `test_grok_resume.py` fixture line and returns None for text without it
+  - `resume_prompt` with a `git -c … diff` refusal names it and suggests the plain form; with a `cp` refusal it suggests the tools; with None it is today's text
+  - a stub-run cancelled turn echoes the refused command and resumes with the new prompt
+
 ## Release
 
 - [x] RLY-14: Publish whyline-relay with RLY-1..13
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark RTL-1 done and resume relay-tooling.
+
+- [ ] RLY-16: Publish whyline-relay with RLY-15
+  relay-profile: release
+  Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, bring `.whyline/relay/config.toml`'s own `[agents.grok]` command up to the new recipe (the repository's command overrides the built-in one), or delete it if it matches the recipe.
