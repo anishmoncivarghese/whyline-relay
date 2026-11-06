@@ -176,12 +176,31 @@ grok, reviewing PZ-11, ran `git -c color.ui=false -c color.diff=false diff -- <f
   - `resume_prompt` with a `git -c … diff` refusal names it and suggests the plain form; with a `cp` refusal it suggests the tools; with None it is today's text
   - a stub-run cancelled turn echoes the refused command and resumes with the new prompt
 
+## Found while running agentdock's release-button plan (2026-11-06)
+
+agentdock's SEC-5 commit (843cff7) included `.whyline/relay/PAUSE`: the user pressed Pause during the review turn, and `gitcheck.commit_all` ran `git add -A` before `_pause_if_requested` took and deleted the file. The relay directory's `.gitignore` (`init.RELAY_GITIGNORE_LINES`) lists `logs/`, `state.json`, `STOP`, `running.json`, `chat.json`, `chat-history.jsonl` and `brainstorm-tmp/`, but not `PAUSE` or the other files the relay and the console write there at run time, and `ensure_relay_gitignore` never touches a file that already exists. This repository tracks `.whyline/relay/agent-limits.json` for the same reason. A commit that carries `PAUSE` pauses the relay right after its next turn in any checkout of that commit.
+
+- [ ] RLY-17: The relay never commits its own run-time files
+  Edit `src/whyline_relay/init.py` and `src/whyline_relay/gitcheck.py`, with tests in `tests/test_init.py` and `tests/test_gitcheck.py`.
+  1. `RELAY_GITIGNORE_LINES` gains `PAUSE`, `skipped-tasks.json`, `antigravity-declined`, `brainstorm-plan-draft.md`, `recovery.json`, `agent-limits.json`, `resolve-mode.json`, `chat-active-agents.json` and `cache/`, keeping the current lines and their order.
+  2. `ensure_relay_gitignore` appends any canonical line missing from an existing `.gitignore`, under a `# added by whyline-relay` comment, and leaves the user's own lines and order alone. It writes nothing when every line is there. `init` reports "Updated .whyline/relay/.gitignore." when it appended.
+  3. The relay calls `ensure_relay_gitignore` at the start of `start` and `resume`, so repositories set up before this release are fixed on their next run.
+  4. `gitcheck.RELAY_IGNORE` already lists the relay's run-time paths for its dirty-tree check, but that list has no `PAUSE` and no `agent-limits.json`. Add both to it, and build `RELAY_GITIGNORE_LINES` from the same list, so the two can't drift apart again. `commit_all` never stages `.whyline/relay/PAUSE` or `.whyline/relay/STOP`, even when they are tracked or the `.gitignore` is missing: after `git add -A` it runs `git reset -q -- <path>` for each that is staged.
+  5. When either file is already tracked, `start` and `resume` print once: "`.whyline/relay/PAUSE` is in git; run `git rm --cached .whyline/relay/PAUSE` and commit, so other checkouts don't pause." The relay doesn't run that command itself.
+  6. In this repository, `git rm --cached .whyline/relay/agent-limits.json` as part of the task's commit.
+  Tests:
+  - a new repo gets every line in `RELAY_GITIGNORE_LINES`
+  - an existing `.gitignore` with only the old seven lines plus a user line `notes.md` gains the missing lines once, keeps `notes.md` first, and a second call changes nothing
+  - `commit_all` with a pending `PAUSE` (tracked, and untracked with no `.gitignore`) commits the other changes and leaves `PAUSE` out of the commit and on disk
+  - `start` with a tracked `PAUSE` prints the `git rm --cached` hint once
+  - `resume` in a repo with the old `.gitignore` updates it before the first turn
+
 ## Release
 
 - [x] RLY-14: Publish whyline-relay with RLY-1..13
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark RTL-1 done and resume relay-tooling.
 
-- [ ] RLY-16: Publish whyline-relay with RLY-15
+- [ ] RLY-16: Publish whyline-relay with RLY-15 and RLY-17
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, bring `.whyline/relay/config.toml`'s own `[agents.grok]` command up to the new recipe (the repository's command overrides the built-in one), or delete it if it matches the recipe.
