@@ -199,7 +199,7 @@ agentdock's SEC-5 commit (843cff7) included `.whyline/relay/PAUSE`: the user pre
 
 The user wants to change a model while the relay runs, for example claude from `sonnet` to `opus`, the way `roles switch` (RLY-13) changes a role's agent. Today `config.load` bakes `[*model_flag, model]` into each agent's command once at run start, and the loop only re-reads `active-roles.json` before each stage, so a model change waits for the run to end.
 
-- [ ] RLY-18: Switch an agent's model from its next turn (`roles model`)
+- [x] RLY-18: Switch an agent's model from its next turn (`roles model`)
   Edit `src/whyline_relay/roles.py`, `src/whyline_relay/config.py`, `src/whyline_relay/loop.py`, `src/whyline_relay/status.py`, `src/whyline_relay/cli.py` and `src/whyline_relay/gitcheck.py`, with tests in `tests/test_roles.py`, `tests/test_loop_failover.py` and `tests/test_cli_roles.py`.
   1. A model belongs to an agent, as `[agents.<name>] model` does, so the switch applies to that agent in every role it plays, backups included.
   2. Add `roles.switch_model(root, settings, agent, model, *, keep=False) -> str`. It writes `.whyline/relay/model-overrides.json`, `{"<agent>": {"model": "...", "since": "<iso>", "keep": bool}}`, atomically like `state._write_atomic`. It raises `RoleSetError` when the agent isn't in `settings.agents`, or has no `model_flag` ("<agent> has no way to set a model; set model_flag under [agents.<agent>]"). A `model` equal to the configured one, or `""`, removes the agent's entry. It returns "<agent> → <model> from its next turn." or "<agent> back to <configured model or 'its default'> from its next turn." It never touches the running process.
