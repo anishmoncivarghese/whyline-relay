@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from whyline_relay import chat, config, recipes
+from whyline_relay.adapters import claude
 
 
 def _write(root: Path, text: str) -> None:
@@ -63,8 +64,50 @@ ANTIGRAVITY_EXPECTED = [
         "git rev-parse", "whyline", "python3", "uv run", "uv", "mkdir", "ls",
         "find", "touch", "cat", "grep", "head", "tail", "wc", "diff", "pwd",
         "pytest", ".venv/bin/pytest", ".venv/bin/python",
+        "git -c color.ui=false -c color.diff=false diff",
+        "git -c color.ui=false -c color.diff=false log",
+        "git -c color.ui=false -c color.diff=false show",
     )),
 ]
+
+NO_COLOUR_FORMS = [
+    f"git -c color.ui=false -c color.diff=false {sub}" for sub in ("diff", "log", "show")
+]
+
+
+def _grok_allowed() -> list[str]:
+    command = list(recipes.RECIPES["grok"])
+    return [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--allow"]
+
+
+def test_grok_recipe_allows_exactly_the_three_no_colour_git_forms():
+    allowed = _grok_allowed()
+    for form in NO_COLOUR_FORMS:
+        assert f"Bash({form}:*)" in allowed
+    git_c = [rule for rule in allowed if rule.startswith("Bash(git -c")]
+    assert sorted(git_c) == sorted(f"Bash({form}:*)" for form in NO_COLOUR_FORMS)
+    for bare in ("Bash(git -c:*)", "Bash(git --no-pager:*)", "Bash(rm -rf:*)"):
+        assert bare not in allowed
+    assert not any("--no-pager" in rule or rule.startswith("Bash(rm") for rule in allowed)
+
+
+def test_antigravity_and_claude_allow_the_same_no_colour_forms():
+    for form in NO_COLOUR_FORMS:
+        assert f"command({form})" in recipes.ANTIGRAVITY_ALLOW
+        assert f"Bash({form}:*)" in claude.BASE_ALLOW
+    assert "command(git -c)" not in recipes.ANTIGRAVITY_ALLOW
+    assert "Bash(git -c:*)" not in claude.BASE_ALLOW
+    assert not any("--no-pager" in rule for rule in claude.BASE_ALLOW)
+    assert not any("--no-pager" in rule for rule in recipes.ANTIGRAVITY_ALLOW)
+
+
+def test_the_rules_tell_agents_to_run_plain_git():
+    assert "never with `git -c" in recipes.GROK_RULES
+    assert "`git --no-pager`" in recipes.GROK_RULES
+    assert "`git -C <dir>`" in recipes.GROK_RULES
+    assert recipes.CLAUDE_RULES == recipes.GROK_RULES
+    command = list(recipes.RECIPES["grok"])
+    assert "never with `git -c" in command[command.index("--rules") + 1]
 
 
 def _antigravity_allow() -> list[str]:

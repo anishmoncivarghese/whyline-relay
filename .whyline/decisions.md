@@ -6546,3 +6546,69 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: f24d47a707af41e6b094040f1c8898a2 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-03T06:52:47.855Z"} -->
+
+## 2026-11-07 — Updated the init 0.2.1 goldens to include the three no-colour git allows
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-15
+
+**Because:** init writes adapters.claude.BASE_ALLOW into claude-settings.json, which is the only place claude gets its allow list, so the task's required claude allow-list change necessarily changes init output
+
+**Rejected:**
+
+- keep BASE_ALLOW unchanged and add the forms elsewhere — claude has no other runtime allow list, so the forms would never reach it
+- rename the goldens to a new version — no release bump is part of this task
+
+**Files:** tests/golden/init_default_0.2.1.claude-settings.json, tests/golden/init_default_0.2.1.stdout, src/whyline_relay/adapters/claude.py
+
+<!-- whyline-event: 4ac6a12b16074ec783415be4c5028433 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:27:10.458Z"} -->
+
+## 2026-11-07 — The three no-colour git forms live once in recipes.NO_COLOUR_GIT and feed grok, antigravity and claude allow lists
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-15
+
+**Because:** the three lists must stay identical and exactly three; one tuple keeps them from drifting and makes adding a broad git -c rule a visible change
+
+**Rejected:**
+
+- spell the forms out in each list — three copies that can drift
+
+**Files:** src/whyline_relay/recipes.py
+
+<!-- whyline-event: 3dc469763b664fc38561dcaec73b481e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:27:12.255Z"} -->
+
+## 2026-11-07 — RLY-15 passes all 1371 tests and meets all plain-git, allowlist, and refused-command resume requirements
+
+**Actor:** antigravity
+**Role:** tester
+**Task:** RLY-15
+
+**Because:** Verified exact GROK_RULES/CLAUDE_RULES wording, exact three NO_COLOUR_GIT entries across grok/claude/antigravity without broad git -c or --no-pager rules, grok.refused_command extraction, grok.resume_prompt branching, 80-char echo truncation in loop.run_agent, and full pytest suite (1371 passed); updating the 0.2.1 init goldens in place matches RLY-7 precedent since init renders claude.BASE_ALLOW directly and no version bump is part of this task
+
+**Test:** uv run pytest: 1371 passed
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/adapters/grok.py, src/whyline_relay/adapters/claude.py, src/whyline_relay/loop.py, tests/test_recipes.py, tests/test_grok_resume.py, tests/golden/init_default_0.2.1.claude-settings.json, tests/golden/init_default_0.2.1.stdout
+
+<!-- whyline-event: 4611f800ac974122836a2c7fa675c951 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:31:26.057Z"} -->
+
+## 2026-11-07 — RLY-15 is approved: plain-git rules, three no-colour allows, and a resume that names the refused command
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** RLY-15
+
+**Because:** GROK_RULES and CLAUDE_RULES have the required sentence after the plain-command rule. NO_COLOUR_GIT is exactly the three color.ui/color.diff forms and is the only git -c allow on the grok recipe, claude BASE_ALLOW, and ANTIGRAVITY_ALLOW, with no bare git -c or git --no-pager. refused_command reads the first permission-required line, resume_prompt branches on git -c and git --no-pager, and the loop echoes that command cut to 80 characters. uv run pytest -q exited 0 and its progress output was all passes.
+
+**Verdict:** approved
+**Test:** uv run pytest -q: exit 0, all-pass progress
+
+**Files:** src/whyline_relay/recipes.py, src/whyline_relay/adapters/grok.py, src/whyline_relay/adapters/claude.py, src/whyline_relay/loop.py, tests/test_recipes.py, tests/test_grok_resume.py
+
+<!-- whyline-event: 82ecba03084948f683568d1d52b5973c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:42:33.250Z"} -->

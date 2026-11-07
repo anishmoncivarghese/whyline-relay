@@ -491,6 +491,7 @@ def run_agent(
                     env=_uv_cache_env(root),
                 )
                 session = None
+                text = ""
                 if resumes < GROK_RESUMES:
                     try:
                         text = target.read_text(encoding="utf-8", errors="replace")
@@ -505,17 +506,21 @@ def run_agent(
                 target.replace(
                     target.with_name(f"{target.stem}-cancelled-{resumes}.log")
                 )
+                refused = grok.refused_command(text)
                 if echo:
+                    named = (
+                        f" (refused: {refused[:80]})" if refused is not None else ""
+                    )
                     agents.print_status(
                         f"==> relay: {agent}'s turn was cancelled by its "
-                        f"permission policy; resuming its session "
+                        f"permission policy{named}; resuming its session "
                         f"({resumes} of {GROK_RESUMES})"
                     )
                 if cancel_event.is_set():
                     name = command[0] if command else "agent"
                     raise agents.AgentCancelled(f"{name} cancelled by user")
                 turn_command = grok.resume_command(command, session)
-                turn_prompt = grok.resume_prompt(command)
+                turn_prompt = grok.resume_prompt(command, refused)
         finally:
             if echo:
                 agents.print_status(

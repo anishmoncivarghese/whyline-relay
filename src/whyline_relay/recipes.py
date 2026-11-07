@@ -12,7 +12,9 @@ import json
 GROK_RULES = (
     "Headless run: nobody can approve a prompt, and any shell command outside "
     "your allow list ends your whole turn. Run one plain command per shell "
-    "call. Never use shell control flow (if, for, while, case), subshells, "
+    "call. Run git as plain `git diff`, `git log`, `git show` or `git status`, "
+    "never with `git -c …`, `git --no-pager` or `git -C <dir>`. Never use "
+    "shell control flow (if, for, while, case), subshells, "
     "$(...), backticks, background &, or bash -c. Chain only with && or |, "
     "each part an allowed command. Prefer your read, search and edit tools to "
     "shell commands."
@@ -23,6 +25,15 @@ GROK_RULES = (
 # the repository has none.
 CLAUDE_RULES = GROK_RULES
 CLAUDE_TEST_RULE = "Run tests only with `{test_command}`."
+
+# Agents still reach for the no-colour forms of the read-only git commands, so
+# exactly these three are allowed. Never `git -c` in general or
+# `git --no-pager`: `-c` can set core.pager, core.sshCommand or alias.*, which
+# make git run other programs.
+NO_COLOUR_GIT = tuple(
+    f"git -c color.ui=false -c color.diff=false {sub}"
+    for sub in ("diff", "log", "show")
+)
 
 # agy 1.4.12's `--settings` applies to that run only, and its permissions.allow
 # replaces the global file's list. Command rules match by prefix, and a chained
@@ -38,6 +49,7 @@ ANTIGRAVITY_ALLOW = (
     "command(head)", "command(tail)", "command(wc)", "command(diff)",
     "command(pwd)", "command(pytest)", "command(.venv/bin/pytest)",
     "command(.venv/bin/python)",
+    *(f"command({form})" for form in NO_COLOUR_GIT),
 )
 
 # `-p` must stay last: the relay appends the prompt as the final argument,
@@ -63,6 +75,7 @@ RECIPES: dict[str, tuple[str, ...]] = {
         "--allow", "Bash(git show:*)", "--allow", "Bash(git rev-parse:*)",
         "--allow", "Bash(pytest:*)", "--allow", "Bash(.venv/bin/pytest:*)",
         "--allow", "Bash(.venv/bin/python:*)", "--allow", "WebFetch",
+        *(arg for form in NO_COLOUR_GIT for arg in ("--allow", f"Bash({form}:*)")),
         "--rules", GROK_RULES,
         "-p",
     ),

@@ -7,6 +7,7 @@ well enough to avoid treating echoed reasoning as a machine-readable failure.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from whyline_relay.adapters.base import Adapter, json_object
@@ -82,10 +83,29 @@ def resumable_session(adapter: Adapter, text: str, command: list[str]) -> str | 
     return session if isinstance(session, str) and session else None
 
 
-def resume_prompt(command: list[str]) -> str:
+_REFUSED = re.compile(r"permission required: Execute `([^`\n]+)`")
+
+
+def refused_command(text: str) -> str | None:
+    """The command named by the first "permission required" line, else None."""
+    found = _REFUSED.search(text)
+    return found.group(1) if found else None
+
+
+def resume_prompt(command: list[str], refused: str | None = None) -> str:
     allowed = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--allow"]
     listed = ", ".join(allowed) if allowed else "your read and edit tools"
-    return (
+    lead = ""
+    if refused:
+        if refused.startswith(("git -c ", "git --no-pager ")):
+            instead = "Use the plain form, such as `git diff -- <files>`."
+        else:
+            instead = "Use your read, search and edit tools instead."
+        lead = (
+            f"Your last command, `{refused}`, is not allowed here and must not "
+            f"be run again. {instead} "
+        )
+    return lead + (
         "Your previous turn was stopped because a shell command was not "
         "permitted in this headless run; nobody can approve a prompt. Continue "
         "the same task from where you stopped. Run one plain command per shell "

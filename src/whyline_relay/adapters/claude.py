@@ -25,6 +25,7 @@ BASE_ALLOW = [
     "Bash(grep:*)",
     "Bash(ls:*)",
     "Bash(whyline:*)",
+    *(f"Bash({form}:*)" for form in recipes.NO_COLOUR_GIT),
 ]
 
 DENY = ["Bash(git push:*)", "Bash(rm -rf:*)"]

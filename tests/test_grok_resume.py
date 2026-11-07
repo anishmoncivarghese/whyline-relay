@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import chat, chatlog, config
+from whyline_relay import chat, chatlog, config, loop, plan
 from whyline_relay.adapters import generic, grok
 from whyline_relay.agents import AgentCancelled, RunResult
+
+TASK = plan.Task(task_id="T-1", text="T-1: Work", checked=False, line_index=0)
 
 CANCELLED = '{\n  "text": "x",\n  "stopReason": "cancelled",\n  "sessionId": "s-1"\n}\n'
 FINISHED = '{\n  "text": "x",\n  "stopReason": "end_turn",\n  "sessionId": "s-1"\n}\n'
@@ -60,6 +62,106 @@ def test_resume_prompt_lists_the_allowed_rules():
     assert "was stopped" in prompt
     assert "Edit" in prompt and "Bash(git add:*)" in prompt
     assert "hand off" in prompt
+
+
+REFUSED_LINE = (
+    "permission required: Execute `python -c \"import whyline_relay\"` "
+    "was not run, as a headless run cannot ask for approval\n"
+)
+NO_COLOUR_DIFF = "git -c color.ui=false -c color.diff=false diff --stat"
+
+
+def test_refused_command_reads_the_permission_required_line():
+    assert grok.refused_command(REFUSED_LINE + CANCELLED) == (
+        'python -c "import whyline_relay"'
+    )
+    assert grok.refused_command(CANCELLED) is None
+
+
+def test_refused_command_takes_the_first_line_only():
+    second = "permission required: Execute `cp a b` was not run\n"
+    assert grok.refused_command(REFUSED_LINE + second).startswith("python -c")
+
+
+def test_a_git_c_refusal_is_named_and_the_plain_form_suggested():
+    prompt = grok.resume_prompt(COMMAND, NO_COLOUR_DIFF)
+    assert prompt.startswith(
+        f"Your last command, `{NO_COLOUR_DIFF}`, is not allowed here and must "
+        "not be run again."
+    )
+    assert "Use the plain form, such as `git diff -- <files>`." in prompt
+    assert "read, search and edit tools instead" not in prompt
+    assert prompt.endswith(grok.resume_prompt(COMMAND))
+
+
+def test_a_no_pager_refusal_also_suggests_the_plain_form():
+    prompt = grok.resume_prompt(COMMAND, "git --no-pager log -1")
+    assert "Use the plain form" in prompt
+
+
+def test_another_refusal_suggests_the_read_and_edit_tools():
+    prompt = grok.resume_prompt(COMMAND, "cp a.txt b.txt")
+    assert prompt.startswith("Your last command, `cp a.txt b.txt`, is not allowed")
+    assert "Use your read, search and edit tools instead." in prompt
+    assert "Use the plain form" not in prompt
+    assert prompt.endswith(grok.resume_prompt(COMMAND))
+
+
+def test_no_refusal_keeps_todays_prompt():
+    prompt = grok.resume_prompt(COMMAND, None)
+    assert prompt == grok.resume_prompt(COMMAND)
+    assert prompt.startswith("Your previous turn was stopped")
+    assert "Your last command" not in prompt
+
+
+def _run_grok_turn(root: Path, monkeypatch, first_log: str) -> list[str]:
+    settings = _grok_repo(root)
+    prompts_seen: list[str] = []
+
+    def fake_run(command, prompt, **kwargs):
+        prompts_seen.append(prompt)
+        log = first_log if len(prompts_seen) == 1 else FINISHED
+        kwargs["log_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["log_path"].write_text(log)
+        return 0
+
+    monkeypatch.setattr(loop.whylinecmd, "sync", lambda *args, **kwargs: "PACKET")
+    monkeypatch.setattr(loop.agents, "run", fake_run)
+    loop.run_agent(
+        root, settings, "grok", "implementer", "implement", TASK, 1, "", True,
+        implementer="grok", reviewer="claude",
+    )
+    return prompts_seen
+
+
+def test_a_cancelled_turn_echoes_the_refused_command_and_resumes_naming_it(
+    tmp_path: Path, monkeypatch, capsys
+):
+    refused = "git -c color.ui=false -c core.pager=x diff " + "a" * 100
+    line = f"permission required: Execute `{refused}` was not run\n"
+    prompts_seen = _run_grok_turn(tmp_path, monkeypatch, line + CANCELLED)
+
+    out = capsys.readouterr().out
+    assert (
+        f"==> relay: grok's turn was cancelled by its permission policy "
+        f"(refused: {refused[:80]}); resuming its session (1 of {loop.GROK_RESUMES})"
+    ) in out
+    assert len(prompts_seen) == 2
+    assert prompts_seen[1].startswith(f"Your last command, `{refused}`")
+    assert "Use the plain form" in prompts_seen[1]
+
+
+def test_a_cancelled_turn_with_no_refusal_line_keeps_todays_echo(
+    tmp_path: Path, monkeypatch, capsys
+):
+    prompts_seen = _run_grok_turn(tmp_path, monkeypatch, CANCELLED)
+
+    out = capsys.readouterr().out
+    assert (
+        "==> relay: grok's turn was cancelled by its permission policy; "
+        f"resuming its session (1 of {loop.GROK_RESUMES})"
+    ) in out
+    assert prompts_seen[1] == grok.resume_prompt(["grok", "--allow", "WebFetch", "-p"])
 
 
 def _grok_repo(root: Path) -> "config.Config":
