@@ -264,6 +264,38 @@ def test_commit_decision_log_commits_nothing_when_another_path_is_dirty(
     assert len(dirty) == 2
 
 
+def _track_relay_gitignore(repo: Path) -> Path:
+    path = repo / gitcheck.RELAY_GITIGNORE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("logs/\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "track the relay gitignore"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    return path
+
+
+def test_blocking_dirty_paths_skips_only_the_relay_gitignore(repo: Path):
+    _track_relay_gitignore(repo).write_text("logs/\nPAUSE\n")
+    assert gitcheck.blocking_dirty_paths(repo) == []
+    (repo / "README.md").write_text("changed\n")
+    assert gitcheck.blocking_dirty_paths(repo) == ["README.md"]
+
+
+def test_commit_decision_log_commits_it_alone_beside_a_relay_gitignore_update(
+    repo: Path,
+):
+    gitignore = _track_relay_gitignore(repo)
+    log = _track_decision_log(repo)
+    gitignore.write_text("logs/\nPAUSE\n")
+    log.write_text("# Decisions\n\n- note\n")
+
+    assert gitcheck.commit_decision_log(repo, "BAK-3") is True
+
+    assert gitcheck.dirty_paths(repo) == [gitcheck.RELAY_GITIGNORE]
+
+
 def test_commit_decision_log_commits_nothing_on_a_clean_tree(repo: Path):
     before = gitcheck.head_commit(repo)
 
@@ -295,6 +327,67 @@ def test_commit_all_stages_and_commits_everything(repo: Path):
         gitcheck.commit_message(repo, gitcheck.head_commit(repo))
         == "feat: two files (T-1)"
     )
+
+
+def _committed_files(repo: Path) -> set[str]:
+    out = subprocess.run(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout
+    return {line for line in out.splitlines() if line}
+
+
+def test_commit_all_leaves_an_untracked_pause_out_without_a_gitignore(repo: Path):
+    pause = repo / ".whyline" / "relay" / "PAUSE"
+    pause.parent.mkdir(parents=True)
+    pause.write_text('{"now": false}')
+    (repo / "README.md").write_text("changed\n")
+
+    assert gitcheck.commit_all(repo, "feat: readme (T-1)") is True
+
+    assert _committed_files(repo) == {"README.md"}
+    assert pause.read_text() == '{"now": false}'
+    assert gitcheck.tracked_paths(repo, ".whyline/relay/PAUSE") == []
+
+
+def test_commit_all_leaves_a_tracked_pause_and_stop_out(repo: Path):
+    relay = repo / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "PAUSE").write_text("old")
+    (relay / "STOP").write_text("old")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "track markers"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    (relay / "PAUSE").write_text("new")
+    (relay / "STOP").unlink()
+    (repo / "other.txt").write_text("x")
+
+    assert gitcheck.commit_all(repo, "feat: other (T-1)") is True
+
+    assert _committed_files(repo) == {"other.txt"}
+    assert (relay / "PAUSE").read_text() == "new"
+    assert gitcheck.tracked_paths(repo, ".whyline/relay/STOP") == [
+        ".whyline/relay/STOP"
+    ]
+
+
+def test_commit_all_with_only_a_pause_commits_nothing(repo: Path):
+    pause = repo / ".whyline" / "relay" / "PAUSE"
+    pause.parent.mkdir(parents=True)
+    pause.write_text("{}")
+    before = gitcheck.head_commit(repo)
+
+    assert gitcheck.commit_all(repo, "chore: nothing") is False
+    assert gitcheck.head_commit(repo) == before
+    assert pause.exists()
+
+
+def test_relay_ignore_lists_pause_and_agent_limits():
+    assert ".whyline/relay/PAUSE" in gitcheck.RELAY_IGNORE
+    assert ".whyline/relay/agent-limits.json" in gitcheck.RELAY_IGNORE
+    assert len(set(gitcheck.RELAY_IGNORE)) == len(gitcheck.RELAY_IGNORE)
 
 
 def test_commit_all_does_nothing_and_returns_false_when_the_tree_is_clean(

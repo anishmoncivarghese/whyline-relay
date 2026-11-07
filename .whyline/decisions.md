@@ -6612,3 +6612,101 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 82ecba03084948f683568d1d52b5973c -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:42:33.250Z"} -->
+
+## 2026-11-07 — start/resume fix the relay .gitignore in loop._run_plan, append-only, and leave the change uncommitted
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-17
+
+**Because:** _run_plan is the one path start, resume and continue share, and it runs after the dirty-tree guard. The appended lines ride into the task's own commit (commit_all or the reviewer's git add -A). A commit of its own would move HEAD past a resumed task's verified commit and fail commit_verified
+
+**Rejected:**
+
+- calling it at the top of cmd_start/cmd_resume — it would dirty the tracked .gitignore before guard() and make start refuse to run
+- committing the update separately — breaks verification of a mid-task resume whose reviewer already committed
+- creating the file when absent at start — every repo without init would get a new untracked file, which _require_clean flags after approval
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/init.py
+
+<!-- whyline-event: 1f5f66dcb77a4cb099f0ddbd7ca6ebf1 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:50:48.252Z"} -->
+
+## 2026-11-07 — gitcheck.RELAY_RUNTIME_FILES is the single list that feeds both RELAY_IGNORE and RELAY_GITIGNORE_LINES
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-17
+
+**Because:** the task asks that the two lists cannot drift apart. RELAY_IGNORE gains the nine names (deduplicated), so brainstorm-plan-draft.md and resolve-mode.json also land in .git/info/exclude, beyond the PAUSE and agent-limits.json the task named
+
+**Rejected:**
+
+- deriving gitignore lines from all of RELAY_IGNORE — would add plan-state.json*, draft-plan.md and others the task did not list, and state.json* clashes with the existing state.json line
+- two hand-kept lists plus a test — still allows drift between releases
+
+**Files:** src/whyline_relay/gitcheck.py, src/whyline_relay/init.py
+
+<!-- whyline-event: f8d0bf1a7e6046f88b91f6aebc264120 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T13:50:51.336Z"} -->
+
+## 2026-11-07 — Fail RLY-17 round 2: leaving updated .whyline/relay/.gitignore uncommitted in _run_plan breaks resume preflight and _require_clean
+
+**Actor:** antigravity
+**Role:** tester
+**Task:** RLY-17
+
+**Because:** When a repo has an old tracked .whyline/relay/.gitignore, loop._fix_relay_gitignore appends the missing lines and leaves the file dirty in the working tree. (1) Any start that pauses before a task commits (user pause, Ctrl+C, no-handoff/rate-limit, manual check, or human release task) leaves M .whyline/relay/.gitignore on disk, causing subsequent whyline-relay resume, done, or skip to fail real preflight.run with 'working tree has uncommitted changes' (exit 1), and preventing gitcheck.commit_decision_log from committing a lone .whyline/decisions.md. test_resume_updates_an_old_gitignore_before_the_first_turn missed this because conftest.py stubs cli._launch_checks and line 535 ran git checkout -- .whyline/relay/.gitignore. (2) Tasks with relay-repo commit in the target repo while root/.whyline/relay/.gitignore stays dirty, so loop._require_clean raises Paused. (3) Resuming mid-task when the task commit already landed (@ticking or 2-role post-reviewer-commit pause) also fails loop._require_clean on the dirty .gitignore, and STOP/all-skipped early exits from _run_plan leave .gitignore modified.
+
+**Test:** uv run pytest: 1382 passed
+**Test:** repro start->pause->resume with old .whyline/relay/.gitignore and real preflight.run: failed (resume exits 1 on dirty .whyline/relay/.gitignore)
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/cli.py, src/whyline_relay/init.py, tests/test_init.py
+
+<!-- whyline-event: 622a1d2d854547f480564495b1ab790e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:03:27.484Z"} -->
+
+## 2026-11-07 — Commit the relay .gitignore update on its own at start/fresh resume; for a mid-task resume leave it dirty and exempt it from clean-tree checks until the task or tick commit carries it
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-17
+
+**Because:** A standalone commit keeps pauses, STOP and early returns from leaving the tree dirty, but on a mid-task resume it would move HEAD past the saved base or the verified task commit, so there the change waits and blocking_dirty_paths keeps preflight, guard, commit_decision_log and _require_clean from refusing it; the tick commit includes the tracked file so cross-repo and post-commit resumes end clean
+
+**Rejected:**
+
+- always leave it uncommitted (round 2) — resume preflight, decision-log autocommit and _require_clean fail on it
+- always commit it immediately — breaks commit_verified on @ticking and post-reviewer-commit resumes
+- name the task in the chore commit message — would let commit_verified pass before the task really committed
+
+**Files:** src/whyline_relay/loop.py, src/whyline_relay/gitcheck.py, src/whyline_relay/preflight.py, src/whyline_relay/cli.py
+
+<!-- whyline-event: c2c940c605d54f55af307630d1e00c84 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:11:22.848Z"} -->
+
+## 2026-11-07 — Pass RLY-17 round 4: all 1385 tests pass and start/resume .gitignore updates, clean-tree checks, and commit_all marker guards behave per spec
+
+**Actor:** antigravity
+**Role:** tester
+**Task:** RLY-17
+
+**Because:** Verified all 6 requirements and required tests: RELAY_GITIGNORE_LINES preserves the 7 original lines in order followed by the 9 shared RELAY_RUNTIME_FILES entries also present in RELAY_IGNORE; ensure_relay_gitignore appends missing lines once under '# added by whyline-relay' while preserving user lines and order, and init reports 'Updated .whyline/relay/.gitignore.'; start/fresh resume commits a tracked .gitignore update standalone so pauses/STOP leave a clean tree, while mid-task resume leaves it uncommitted without moving base_commit, exempts it via blocking_dirty_paths across preflight/guard/commit_decision_log/_require_clean, and carries it in task or tick commits (including cross-repo @ticking resumes); commit_all resets staged PAUSE and STOP after git add -A whether tracked or untracked; start and resume print the exact git rm --cached hint once without untracking; agent-limits.json is already untracked (7fc9987)
+
+**Files:** src/whyline_relay/init.py, src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, src/whyline_relay/cli.py, tests/test_init.py, tests/test_gitcheck.py
+
+<!-- whyline-event: bc437e8eafd54a80bd43ec170544fee0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:18:10.492Z"} -->
+
+## 2026-11-07 — Pass RLY-17: runtime files stay uncommitted and an old relay gitignore is updated on start and resume.
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** RLY-17
+
+**Because:** Checked the working tree against all six requirements. RELAY_GITIGNORE_LINES keeps the original seven lines, then the shared RELAY_RUNTIME_FILES list, which also feeds RELAY_IGNORE including PAUSE and agent-limits.json. ensure_relay_gitignore appends missing lines once under the added-by comment and init reports the update. start and resume run that from _run_plan, committing a tracked update when there is no saved base and exempting it from clean-tree checks until the task or tick commit. commit_all resets staged PAUSE and STOP after git add -A. The tracked-marker hint is printed and the relay does not untrack the file. agent-limits.json is already untracked. uv run pytest -q exited 0 with 1385 passed.
+
+**Files:** src/whyline_relay/init.py, src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, src/whyline_relay/preflight.py, src/whyline_relay/cli.py, tests/test_init.py, tests/test_gitcheck.py
+
+<!-- whyline-event: fdf84b35be3b4220920b11f53197de27 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:31:10.979Z"} -->

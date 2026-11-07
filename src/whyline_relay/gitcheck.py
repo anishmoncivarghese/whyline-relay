@@ -9,7 +9,28 @@ import time
 from pathlib import Path
 from typing import Callable
 
-RELAY_IGNORE = (
+RELAY_DIR = ".whyline/relay/"
+# Run-time files, relative to RELAY_DIR, that both RELAY_IGNORE and the
+# relay's own .gitignore (init.RELAY_GITIGNORE_LINES) list. Add a new one
+# here and both pick it up.
+RELAY_RUNTIME_FILES = (
+    "PAUSE",
+    "skipped-tasks.json",
+    "antigravity-declined",
+    "brainstorm-plan-draft.md",
+    "recovery.json",
+    "agent-limits.json",
+    "resolve-mode.json",
+    "chat-active-agents.json",
+    "cache/",
+)
+# Files the relay must never commit, even when they are tracked or the
+# .gitignore is missing.
+NEVER_COMMIT = (RELAY_DIR + "PAUSE", RELAY_DIR + "STOP")
+# The relay appends to its own .gitignore at start and resume; see
+# blocking_dirty_paths.
+RELAY_GITIGNORE = RELAY_DIR + ".gitignore"
+RELAY_IGNORE = tuple(dict.fromkeys((
     ".whyline/relay/logs/",
     ".whyline/relay/state.json*",
     ".whyline/relay/plan-state.json*",
@@ -19,14 +40,10 @@ RELAY_IGNORE = (
     ".whyline/relay/STOP",
     ".whyline/relay/running.json",
     ".whyline/relay/active-roles.json",
-    ".whyline/relay/antigravity-declined",
-    ".whyline/relay/skipped-tasks.json",
     ".whyline/relay/auto-run.json",
     ".whyline/relay/auto-run.lock",
-    ".whyline/relay/chat-active-agents.json",
-    ".whyline/relay/recovery.json",
-    ".whyline/relay/cache/",
-)
+    *(RELAY_DIR + name for name in RELAY_RUNTIME_FILES),
+)))
 
 
 class GitError(RuntimeError):
@@ -200,6 +217,17 @@ def dirty_paths(root: Path) -> list[str]:
     return [line.split(maxsplit=1)[1] for line in output.splitlines() if line.strip()]
 
 
+def blocking_dirty_paths(root: Path) -> list[str]:
+    """`dirty_paths` without the relay's own .gitignore.
+
+    Start and resume append missing lines to that file. A run that can't
+    commit the change at once (a resumed task, whose base commit must not
+    move) leaves it for the task's or the tick's commit, so a pending edit
+    there must not fail a clean-tree check.
+    """
+    return [path for path in dirty_paths(root) if path != RELAY_GITIGNORE]
+
+
 def differs_from(root: Path, base_commit: str) -> bool:
     """True when the working tree, untracked files included, differs from
     `base_commit` outside `.whyline/`. Notes and handoffs live there, so a turn
@@ -217,11 +245,12 @@ def commit_decision_log(root: Path, task_id: str) -> bool:
     A round can pause after an agent runs `whyline note` and before the relay
     commits. Resume would then fail its clean-tree check on a file the relay's
     own agents changed. Any other dirty path, including an untracked file, is
-    left untouched so that check still sees every path. A clean tree commits
-    nothing.
+    left untouched so that check still sees every path; a pending edit to the
+    relay's .gitignore is not one (see `blocking_dirty_paths`). A clean tree
+    commits nothing.
     """
     decision_log = ".whyline/decisions.md"
-    if dirty_paths(root) != [decision_log]:
+    if blocking_dirty_paths(root) != [decision_log]:
         return False
     return commit_paths(
         root, [root / decision_log], f"chore: record {task_id} decisions"
@@ -264,8 +293,14 @@ def commit_all(root: Path, message: str) -> bool:
     repeating this call is always safe. Callers that still need a commit in
     that case use `commit_empty`; this function must not grow an allow-empty
     flag, because a clean tree staying uncommitted is the contract.
+
+    The PAUSE and STOP markers are unstaged again after `git add -A`: a
+    committed PAUSE would pause every other checkout of the branch.
     """
     _git(root, "add", "-A")
+    staged = _git(root, "diff", "--cached", "--name-only", "--", *NEVER_COMMIT)
+    for path in staged.splitlines():
+        _git(root, "reset", "-q", "--", path)
     if not _git(root, "diff", "--cached", "--name-only"):
         return False
     _git(root, "commit", "-m", message)

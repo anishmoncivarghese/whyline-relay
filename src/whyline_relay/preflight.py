@@ -566,7 +566,7 @@ def run(
 
     if scope == "repository":
         try:
-            paths = gitcheck.dirty_paths(root)
+            paths = gitcheck.blocking_dirty_paths(root)
         except gitcheck.GitError as error:
             results.append(_result("FAIL", f"could not check working tree: {error}"))
         else:
@@ -583,7 +583,7 @@ def run(
         results.append(_result("ok", "working-tree check skipped (--allow-dirty)"))
     else:
         try:
-            dirty = gitcheck.is_dirty(root)
+            dirty = bool(gitcheck.blocking_dirty_paths(root))
         except gitcheck.GitError as error:
             results.append(_result("FAIL", f"could not check working tree: {error}"))
         else:

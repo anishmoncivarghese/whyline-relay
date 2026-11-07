@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from whyline_relay import adapters, config, invocation, prompts, whyline_model
+from whyline_relay import adapters, config, gitcheck, invocation, prompts, whyline_model
 from whyline_relay.adapters.claude import BASE_ALLOW, DENY, PRESETS, allowlist
 
 
@@ -18,21 +18,37 @@ RELAY_GITIGNORE_LINES = (
     "chat.json",
     "chat-history.jsonl",
     "brainstorm-tmp/",
+    *gitcheck.RELAY_RUNTIME_FILES,
 )
+GITIGNORE_ADDED_COMMENT = "# added by whyline-relay"
 
 
-def ensure_relay_gitignore(root: Path) -> None:
-    """Write .whyline/relay/.gitignore with the canonical content, once.
+def ensure_relay_gitignore(root: Path, *, create: bool = True) -> str | None:
+    """Make .whyline/relay/.gitignore list every canonical line.
 
-    Both init and chat's own first-launch setup call this, since chat can
-    run in a repo that never ran init at all -- whichever runs first creates
-    a correct file; the other is then a no-op.
+    Init and chat's own first-launch setup both call this, since chat can run
+    in a repo that never ran init at all. A missing file is written whole
+    (unless `create` is False). An existing one gains only its missing lines,
+    under GITIGNORE_ADDED_COMMENT, so the user's own lines and their order are
+    kept. Returns "created", "updated", or None when nothing was written.
     """
     path = root / ".whyline" / "relay" / ".gitignore"
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(RELAY_GITIGNORE_LINES) + "\n", encoding="utf-8")
+    if not path.exists():
+        if not create:
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(RELAY_GITIGNORE_LINES) + "\n", encoding="utf-8")
+        return "created"
+    existing = path.read_text(encoding="utf-8")
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [line for line in RELAY_GITIGNORE_LINES if line not in present]
+    if not missing:
+        return None
+    with path.open("a", encoding="utf-8") as handle:
+        if existing and not existing.endswith("\n"):
+            handle.write("\n")
+        handle.write("\n".join([GITIGNORE_ADDED_COMMENT, *missing]) + "\n")
+    return "updated"
 
 
 def _ask_agent(confirm, role: str, default: str) -> str | None:
@@ -202,16 +218,17 @@ def run(
             kept.append(path)
 
     # Same "Wrote" report as the other generated files, but only when this
-    # call created the file. An existing one is left alone, even with
-    # --overwrite, so a later chat setup cannot clobber it.
+    # call created the file. An existing one is only appended to, even with
+    # --overwrite, so the user's own lines survive.
     gitignore = relay / ".gitignore"
-    created_gitignore = not gitignore.exists()
-    ensure_relay_gitignore(root)
-    if created_gitignore:
+    gitignore_change = ensure_relay_gitignore(root)
+    if gitignore_change == "created":
         written.append(gitignore)
 
     for path in written:
         print(f"Wrote {path.relative_to(root)}.")
+    if gitignore_change == "updated":
+        print(f"Updated {gitignore.relative_to(root)}.")
     for path in kept:
         relative = path.relative_to(root)
         print(

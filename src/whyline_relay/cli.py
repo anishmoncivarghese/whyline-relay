@@ -443,7 +443,7 @@ def guard(root: Path, args: argparse.Namespace, branch: str) -> str | None:
             f"refusing to run on {branch}. Pass --branch NAME to use a different "
             "branch, or --allow-main if you really mean it."
         )
-    if gitcheck.is_dirty(root) and not getattr(args, "allow_dirty", False):
+    if gitcheck.blocking_dirty_paths(root) and not getattr(args, "allow_dirty", False):
         return (
             "refusing to start with uncommitted changes. Commit or stash them, "
             "or pass --allow-dirty."

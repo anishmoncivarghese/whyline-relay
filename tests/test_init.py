@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import subprocess
 from pathlib import Path
 
 from whyline_relay import cli, init
@@ -77,7 +79,7 @@ def test_run_writes_settings_templates_and_config(tmp_path: Path, capsys):
     assert (tmp_path / ".whyline" / "relay" / "prompts" / "review.md").exists()
     assert (tmp_path / ".whyline" / "relay" / "config.toml").exists()
     assert (tmp_path / ".whyline" / "relay" / ".gitignore").read_text() == (
-        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\nbrainstorm-tmp/\n"
+        "\n".join(init.RELAY_GITIGNORE_LINES) + "\n"
     )
     for relative in GENERATED:
         assert f"Wrote {relative}." in out
@@ -359,21 +361,68 @@ def test_ask_model_eof_with_a_preset_falls_back_to_it(tmp_path):
 def test_ensure_relay_gitignore_creates_it_when_absent(tmp_path: Path):
     from whyline_relay import init
 
-    init.ensure_relay_gitignore(tmp_path)
+    assert init.ensure_relay_gitignore(tmp_path) == "created"
     content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
-    assert content == (
-        "logs/\nstate.json\nSTOP\nrunning.json\nchat.json\nchat-history.jsonl\nbrainstorm-tmp/\n"
-    )
+    assert content == "\n".join(init.RELAY_GITIGNORE_LINES) + "\n"
+    for line in (
+        "PAUSE", "skipped-tasks.json", "antigravity-declined",
+        "brainstorm-plan-draft.md", "recovery.json", "agent-limits.json",
+        "resolve-mode.json", "chat-active-agents.json", "cache/",
+    ):
+        assert line in content.splitlines()
 
 
-def test_ensure_relay_gitignore_leaves_an_existing_one_alone(tmp_path: Path):
-    from whyline_relay import init
+_OLD_GITIGNORE = (
+    "logs/", "state.json", "STOP", "running.json",
+    "chat.json", "chat-history.jsonl", "brainstorm-tmp/",
+)
 
-    target = tmp_path / ".whyline" / "relay"
-    target.mkdir(parents=True)
-    (target / ".gitignore").write_text("custom\n")
-    init.ensure_relay_gitignore(tmp_path)
-    assert (target / ".gitignore").read_text() == "custom\n"
+
+def test_relay_gitignore_keeps_the_old_lines_first_and_in_order():
+    assert init.RELAY_GITIGNORE_LINES[: len(_OLD_GITIGNORE)] == _OLD_GITIGNORE
+
+
+def test_relay_gitignore_runtime_lines_are_all_in_relay_ignore():
+    from whyline_relay import gitcheck
+
+    for line in init.RELAY_GITIGNORE_LINES[len(_OLD_GITIGNORE):]:
+        assert gitcheck.RELAY_DIR + line in gitcheck.RELAY_IGNORE
+
+
+def test_ensure_relay_gitignore_appends_missing_lines_once(tmp_path: Path):
+    target = tmp_path / ".whyline" / "relay" / ".gitignore"
+    target.parent.mkdir(parents=True)
+    target.write_text("notes.md\n" + "\n".join(_OLD_GITIGNORE) + "\n")
+
+    assert init.ensure_relay_gitignore(tmp_path) == "updated"
+    lines = target.read_text().splitlines()
+    assert lines[0] == "notes.md"
+    assert lines[1:8] == list(_OLD_GITIGNORE)
+    assert lines[8] == init.GITIGNORE_ADDED_COMMENT
+    assert lines[9:] == list(init.RELAY_GITIGNORE_LINES[len(_OLD_GITIGNORE):])
+
+    before = target.read_bytes()
+    assert init.ensure_relay_gitignore(tmp_path) is None
+    assert target.read_bytes() == before
+
+
+def test_ensure_relay_gitignore_without_create_leaves_a_missing_file(tmp_path: Path):
+    assert init.ensure_relay_gitignore(tmp_path, create=False) is None
+    assert not (tmp_path / ".whyline" / "relay" / ".gitignore").exists()
+
+
+def test_init_reports_an_updated_gitignore(tmp_path: Path, capsys):
+    target = tmp_path / ".whyline" / "relay" / ".gitignore"
+    target.parent.mkdir(parents=True)
+    target.write_text("\n".join(_OLD_GITIGNORE) + "\n")
+
+    assert init.run(tmp_path, assume_yes=True) == 0
+    out = capsys.readouterr().out
+    assert "Updated .whyline/relay/.gitignore." in out
+    assert "Wrote .whyline/relay/.gitignore." not in out
+
+    init.run(tmp_path, assume_yes=True)
+    assert "Updated .whyline/relay/.gitignore." not in capsys.readouterr().out
 
 
 def test_relay_gitignore_covers_brainstorm_temp_files(tmp_path: Path):
@@ -382,3 +431,195 @@ def test_relay_gitignore_covers_brainstorm_temp_files(tmp_path: Path):
     init.ensure_relay_gitignore(tmp_path)
     content = (tmp_path / ".whyline" / "relay" / ".gitignore").read_text()
     assert "brainstorm-tmp/" in content
+
+
+_LEGACY_CONFIG = (
+    '[roles]\nimplementer = "codex"\nreviewer = "claude"\n'
+    '[agents.codex]\ncommand = ["codex"]\n'
+    '[agents.claude]\ncommand = ["claude"]\n'
+)
+_PAUSE_HINT = (
+    "`.whyline/relay/PAUSE` is in git; run `git rm --cached .whyline/relay/PAUSE` "
+    "and commit, so other checkouts don't pause."
+)
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _relay_repo(two_role_repo, extra: dict[str, str]) -> Path:
+    root = two_role_repo("- [ ] T-1: build\n")
+    (root / ".whyline/relay/config.toml").write_text(_LEGACY_CONFIG)
+    for relative, content in extra.items():
+        (root / relative).write_text(content)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "config")
+    return root
+
+
+def _fake_agent(monkeypatch, turns: list[dict], seen: list[str]) -> None:
+    """Stand in for agents.run. Before each turn, records the relay's
+    .gitignore as the agent would find it."""
+    from whyline_relay import loop
+
+    def run(command, prompt, *, cwd, log_path, **kwargs):
+        turn = turns.pop(0)
+        root = Path(cwd)
+        gitignore = root / ".whyline/relay/.gitignore"
+        seen.append(gitignore.read_text() if gitignore.exists() else "")
+        if turn.get("pause"):
+            loop.request_pause(root)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("ok\n")
+        task_id = re.search(r"^## Task (\S+)", prompt, re.M).group(1)
+        if turn.get("commit"):
+            (root / f"work-{task_id}.txt").write_text("x\n")
+            # "only": commit the work alone, as a reviewer staging by name would.
+            _git(root, "add", *(
+                [f"work-{task_id}.txt"] if turn["commit"] == "only" else ["-A"]
+            ))
+            _git(root, "commit", "-m", f"feat: work ({task_id})")
+        target = root / ".whyline" / "active-handoff.json"
+        previous = json.loads(target.read_text()) if target.exists() else {}
+        counter = int(previous.get("counter", 0)) + 1
+        target.write_text(json.dumps({
+            "id": f"event{counter}", "counter": counter, "task": task_id,
+            "to_actor": turn["to"], "status": turn["status"],
+            "summary": f"{turn['status']} summary", "from_actor": "",
+        }))
+        return 0
+
+    monkeypatch.setattr(loop.agents, "run", run)
+
+
+def test_start_with_a_tracked_pause_prints_the_untrack_hint_once(
+    two_role_repo, monkeypatch, capsys
+):
+    root = _relay_repo(two_role_repo, {".whyline/relay/PAUSE": "{}"})
+    seen: list[str] = []
+    _fake_agent(monkeypatch, [{"to": "claude", "status": "ready-for-review"}], seen)
+
+    cli.main(["start", "--repo", str(root)])
+
+    out = capsys.readouterr().out
+    assert out.count(_PAUSE_HINT) == 1
+    assert "STOP` is in git" not in out
+
+
+def test_start_without_a_tracked_marker_prints_no_hint(
+    two_role_repo, monkeypatch, capsys
+):
+    root = _relay_repo(two_role_repo, {})
+    seen: list[str] = []
+    _fake_agent(monkeypatch, [
+        {"to": "claude", "status": "ready-for-review"},
+        {"to": "claude", "status": "approved", "commit": True},
+    ], seen)
+
+    assert cli.main(["start", "--repo", str(root)]) == cli.EXIT_OK
+    assert "is in git; run `git rm --cached" not in capsys.readouterr().out
+    assert not (root / ".whyline/relay/.gitignore").exists()
+
+
+def _real_tree_check(monkeypatch) -> None:
+    """Put back preflight's own clean-tree check, which conftest stubs out.
+
+    Only the working-tree result is kept: the rest needs real agents and a
+    real whyline."""
+    from whyline_relay import preflight
+
+    def launch_checks(root, plan_path, *, allow_dirty):
+        checks = preflight.run(
+            root, plan_path, allow_dirty=allow_dirty,
+            runner=lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+        return [check for check in checks if "working tree" in check.message]
+
+    monkeypatch.setattr(cli, "_launch_checks", launch_checks)
+
+
+def _status(root: Path) -> str:
+    return subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True
+    ).stdout
+
+
+def _assert_updated(text: str) -> None:
+    lines = text.splitlines()
+    assert lines[: len(_OLD_GITIGNORE)] == list(_OLD_GITIGNORE)
+    assert init.GITIGNORE_ADDED_COMMENT in lines
+    for line in init.RELAY_GITIGNORE_LINES:
+        assert lines.count(line) == 1
+
+
+def test_start_commits_an_old_gitignore_so_a_pause_then_resume_works(
+    two_role_repo, monkeypatch, capsys
+):
+    old = "\n".join(_OLD_GITIGNORE) + "\n"
+    root = _relay_repo(two_role_repo, {".whyline/relay/.gitignore": old})
+    _real_tree_check(monkeypatch)
+    seen: list[str] = []
+    _fake_agent(monkeypatch, [
+        {"to": "claude", "status": "ready-for-review", "pause": True},
+        {"to": "claude", "status": "approved", "commit": True},
+    ], seen)
+
+    assert cli.main(["start", "--repo", str(root)]) == cli.EXIT_PAUSED
+    capsys.readouterr()
+    _assert_updated(seen[0])
+    # The update is its own commit, so the pause leaves nothing behind.
+    assert _status(root) == ""
+    log = subprocess.run(
+        ["git", "log", "--format=%s", "-1", "--", ".whyline/relay/.gitignore"],
+        cwd=root, capture_output=True, text=True,
+    ).stdout
+    assert log.strip() == "chore: update .whyline/relay/.gitignore"
+
+    assert cli.main(["resume", "--repo", str(root)]) == cli.EXIT_OK, (
+        capsys.readouterr().err
+    )
+    assert _status(root) == ""
+
+
+def test_resume_updates_an_old_gitignore_before_the_first_turn(
+    two_role_repo, monkeypatch, capsys
+):
+    from whyline_relay import loop
+
+    old = "\n".join(_OLD_GITIGNORE) + "\n"
+    root = _relay_repo(two_role_repo, {".whyline/relay/.gitignore": old})
+    _real_tree_check(monkeypatch)
+    seen: list[str] = []
+    _fake_agent(monkeypatch, [
+        {"to": "claude", "status": "ready-for-review", "pause": True},
+        {"to": "claude", "status": "changes-requested", "pause": True},
+        {"to": "claude", "status": "ready-for-review"},
+        {"to": "claude", "status": "approved", "commit": "only"},
+    ], seen)
+    # A task paused by a release that predates the update.
+    fix = loop._fix_relay_gitignore
+    monkeypatch.setattr(loop, "_fix_relay_gitignore", lambda root, *, commit: None)
+    assert cli.main(["start", "--repo", str(root)]) == cli.EXIT_PAUSED
+    monkeypatch.setattr(loop, "_fix_relay_gitignore", fix)
+    capsys.readouterr()
+    assert (root / ".whyline/relay/.gitignore").read_text() == old
+
+    # Mid-task, so the update waits in the tree rather than moving the base;
+    # pausing again on it must not make the next resume refuse a dirty tree.
+    assert cli.main(["resume", "--repo", str(root)]) == cli.EXIT_PAUSED
+    err = capsys.readouterr().err
+    _assert_updated(seen[1])
+    assert "uncommitted" not in err
+    assert _status(root) == " M .whyline/relay/.gitignore\n"
+
+    assert cli.main(["resume", "--repo", str(root)]) == cli.EXIT_OK, (
+        capsys.readouterr().err
+    )
+    # The reviewer committed only its work; the tick commit carried the update.
+    assert _status(root) == ""
+    committed = subprocess.run(
+        ["git", "show", "HEAD:.whyline/relay/.gitignore"],
+        cwd=root, capture_output=True, text=True,
+    ).stdout
+    _assert_updated(committed)

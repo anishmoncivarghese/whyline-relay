@@ -23,6 +23,7 @@ from whyline_relay import (
     failover,
     gitcheck,
     handoff,
+    init,
     invocation,
     pipeline,
     plan,
@@ -1981,7 +1982,9 @@ def _require_clean(root: Path, plan_path: Path, task: plan.Task) -> None:
             exempt.add(str(test_plan.resolve().relative_to(root.resolve())))
         except ValueError:
             pass
-    leftovers = [path for path in gitcheck.dirty_paths(root) if path not in exempt]
+    leftovers = [
+        path for path in gitcheck.blocking_dirty_paths(root) if path not in exempt
+    ]
     if repo != root.resolve():
         leftovers += [str(repo / path) for path in gitcheck.dirty_paths(repo)]
     if leftovers:
@@ -2019,12 +2022,16 @@ def _tick_and_commit(root: Path, plan_path: Path, task: plan.Task) -> None:
     A verify task also commits its test plan when that file still has changes.
     The finishing commit already includes it when it lives in the task
     repository; this catches the copy that lives beside the plan instead.
+    So does a pending update to the relay's tracked .gitignore that a resumed
+    task left behind (see `_fix_relay_gitignore`).
     """
     current = plan_path.read_text(encoding="utf-8")
     plan_path.write_text(plan.tick(current, task.task_id), encoding="utf-8")
     paths = [plan_path]
     if task_repo(root, task) != root.resolve():
         paths.append(root / DECISION_LOG)
+    if gitcheck.tracked_paths(root, gitcheck.RELAY_GITIGNORE):
+        paths.append(root / gitcheck.RELAY_GITIGNORE)
     test_plan = _verify_test_plan(plan_path, task)
     if test_plan is not None:
         paths.append(test_plan)
@@ -2221,6 +2228,39 @@ def record_manual(
     return remaining
 
 
+def _fix_relay_gitignore(root: Path, *, commit: bool) -> None:
+    """Bring a repository set up by an older release up to date.
+
+    Appends any missing line to an existing .whyline/relay/.gitignore (a repo
+    without one is init's or chat's to create). With `commit`, a tracked file
+    is committed on its own straight away, so no pause or STOP can leave it
+    dirty. A resumed task passes False: a commit of its own would move HEAD
+    past the task's saved base, or past its verified commit. The change then
+    waits for the task's or the tick's commit, and `blocking_dirty_paths`
+    keeps it from failing a clean-tree check meanwhile.
+
+    Also names each PAUSE or STOP marker that is already tracked, which
+    `.gitignore` cannot hide; the relay does not untrack it itself.
+    """
+    if (
+        init.ensure_relay_gitignore(root, create=False) == "updated"
+        and commit
+        and gitcheck.tracked_paths(root, gitcheck.RELAY_GITIGNORE)
+    ):
+        gitcheck.commit_paths(
+            root,
+            [root / gitcheck.RELAY_GITIGNORE],
+            f"chore: update {gitcheck.RELAY_GITIGNORE}",
+        )
+    for marker in gitcheck.NEVER_COMMIT:
+        if gitcheck.tracked_paths(root, marker):
+            effect = "pause" if marker.endswith("PAUSE") else "stop"
+            print(
+                f"`{marker}` is in git; run `git rm --cached {marker}` and commit, "
+                f"so other checkouts don't {effect}."
+            )
+
+
 def _run_plan(
     root: Path,
     settings: config.Config,
@@ -2243,12 +2283,15 @@ def _run_plan(
     `as_rejection` too, that task routes its saved handoff as a normal
     send-back; later tasks are unaffected.
     """
+    resuming = state.load(root) if resume else None
     gitcheck.ensure_relay_ignored(root)
+    _fix_relay_gitignore(
+        root, commit=resuming is None or not resuming.base_commit
+    )
     # A saved Set up may have caught up with a manual switch since it was made.
     failover.clear_caught_up(root, roles.current_roles(settings))
     announced: set[tuple[str, str, str]] = set()
     outcomes: list[Outcome] = []
-    resuming = state.load(root) if resume else None
     if resume:
         cancel_pause(root)
     while True:
