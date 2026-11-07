@@ -30,7 +30,7 @@ command = [
 
 [roles]
 implementer = "claude"
-tester      = "antigravity"
+tester      = "grok"
 reviewer    = "grok"
 release = "human"
 
@@ -62,4 +62,4 @@ approved = "@complete"
 rejected = "draft"
 
 [backup]
-chain = ["antigravity", "grok"]
+chain = ["grok"]
