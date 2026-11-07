@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -5,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, failover, loop, plan
+from whyline_relay import config, failover, loop, plan, roles
 
 
 FAKE = str(Path(__file__).parent / "fake_role_agent.py")
@@ -452,3 +453,190 @@ def test_no_chain_configured_pauses_exactly_as_before(repo, tmp_path):
         loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
     assert "hit a usage or rate limit" in str(excinfo.value)
     assert "every backup in the chain is unavailable" not in str(excinfo.value)
+
+
+def fake(root, frm, to, status, commit):
+    return [sys.executable, FAKE, str(root), frm, to, status, commit]
+
+
+def model_settings(root, codex, claude, chain=()):
+    """claude configured on sonnet, codex on its CLI default."""
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[agents.claude]\nmodel = "sonnet"\n')
+    base = config.load(root)
+    return replace(
+        base,
+        agents={**base.agents, "codex": codex, "claude": claude},
+        backup_chain=list(chain),
+    )
+
+
+def model_of(command):
+    return command[command.index("--model") + 1] if "--model" in command else ""
+
+
+def test_a_switch_during_a_turn_is_used_from_the_next_turn_and_echoes_once(
+    repo, monkeypatch, capsys
+):
+    settings = model_settings(
+        repo,
+        fake(repo, "codex", "claude", "ready-for-review", "no"),
+        fake(repo, "claude", "claude", "approved", "yes") + ["--model", "sonnet"],
+    )
+    real_run = loop.agents.run
+    calls = []
+
+    def spy(command, prompt, **kwargs):
+        agent = kwargs["agent_name"]
+        calls.append((agent, list(command)))
+        command = list(command)
+        if len(calls) == 1:
+            # Both land while codex's first turn is running.
+            roles.switch_model(repo, settings, "codex", "o3")
+            roles.switch_model(repo, settings, "claude", "opus")
+        if agent == "claude" and sum(a == "claude" for a, _ in calls) == 1:
+            command[4:7] = ["codex", "changes-requested", "no"]
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=True)
+    assert outcome.committed
+    assert [(agent, model_of(command)) for agent, command in calls] == [
+        ("codex", ""),
+        ("claude", "opus"),
+        ("codex", "o3"),
+        ("claude", "opus"),
+    ]
+    # The flag's value was replaced, not a second flag appended.
+    assert calls[1][1].count("--model") == 1
+    out = capsys.readouterr().out
+    assert out.count("==> relay: claude now uses opus (switched by you)") == 1
+    assert out.count("==> relay: codex now uses o3 (switched by you)") == 1
+
+
+def test_a_model_switch_applies_to_the_agent_as_reviewer_and_as_backup(
+    repo, tmp_path, monkeypatch
+):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    settings = model_settings(
+        repo,
+        [sys.executable, str(limited)],
+        fake(repo, "claude", "claude", "approved", "yes") + ["--model", "sonnet"],
+        chain=["claude"],
+    )
+    roles.switch_model(repo, settings, "claude", "opus")
+    real_run = loop.agents.run
+    calls = []
+
+    def spy(command, prompt, **kwargs):
+        calls.append((kwargs["agent_name"], list(command)))
+        command = list(command)
+        if len(calls) == 2:
+            # claude's first turn is the implementer's, as codex's backup.
+            command[4:7] = ["claude", "ready-for-review", "no"]
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    assert failover.read_overrides(repo)["implementer"].agent == "claude"
+    assert [(agent, model_of(command)) for agent, command in calls] == [
+        ("codex", ""),
+        ("claude", "opus"),
+        ("claude", "opus"),
+    ]
+
+
+def test_a_garbled_model_overrides_file_runs_the_configured_model(
+    repo, monkeypatch, capsys
+):
+    settings = model_settings(
+        repo,
+        fake(repo, "codex", "claude", "ready-for-review", "no"),
+        fake(repo, "claude", "claude", "approved", "yes") + ["--model", "sonnet"],
+    )
+    garbled = repo / ".whyline" / "relay" / "model-overrides.json"
+    garbled.write_text("{not json")
+    real_run = loop.agents.run
+    calls = []
+
+    def spy(command, prompt, **kwargs):
+        calls.append((kwargs["agent_name"], list(command)))
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    assert loop.run_task(repo, settings, TASK, base_commit=base, echo=True).committed
+    assert [model_of(command) for _, command in calls] == ["", "sonnet"]
+    out = capsys.readouterr().out
+    assert out.count("model switches ignored; model-overrides.json could not be read") == 1
+    assert garbled.read_text() == "{not json"
+
+
+def test_an_entry_for_an_agent_not_in_this_run_is_ignored_once(
+    repo, monkeypatch, capsys
+):
+    settings = model_settings(
+        repo,
+        fake(repo, "codex", "claude", "ready-for-review", "no"),
+        fake(repo, "claude", "claude", "approved", "yes") + ["--model", "sonnet"],
+    )
+    target = repo / ".whyline" / "relay" / "model-overrides.json"
+    target.write_text(
+        json.dumps({"ghost": {"model": "big", "since": "t", "keep": False}})
+    )
+    base = loop.gitcheck.head_commit(repo)
+    assert loop.run_task(repo, settings, TASK, base_commit=base, echo=True).committed
+    out = capsys.readouterr().out
+    assert out.count("==> relay: ghost model switch to big ignored") == 1
+    assert "ghost" in json.loads(target.read_text())
+
+
+def test_running_json_and_the_turn_log_carry_the_model(repo, monkeypatch):
+    settings = model_settings(
+        repo,
+        fake(repo, "codex", "claude", "ready-for-review", "no"),
+        fake(repo, "claude", "claude", "approved", "yes") + ["--model", "sonnet"],
+    )
+    roles.switch_model(repo, settings, "claude", "opus")
+    real_run = loop.agents.run
+    markers = []
+
+    def spy(command, prompt, **kwargs):
+        markers.append(
+            json.loads((repo / ".whyline" / "relay" / "running.json").read_text())
+        )
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    assert loop.run_task(repo, settings, TASK, base_commit=base, echo=False).committed
+    assert [(m["agent"], m["model"]) for m in markers] == [
+        ("codex", ""),
+        ("claude", "opus"),
+    ]
+    for agent, model in (("codex", ""), ("claude", "opus")):
+        log = loop.log_path(repo, "T-1", 1, agent).read_text().splitlines()
+        assert log[0].startswith(loop.TURN_LOG_HEADER)
+        record = json.loads(log[0][len(loop.TURN_LOG_HEADER):])
+        assert record == {"agent": agent, "model": model}
+        assert log[1].startswith("fake-role-agent")
+
+
+def test_plan_completion_removes_switches_without_keep(repo):
+    settings = model_settings(
+        repo,
+        fake(repo, "codex", "claude", "ready-for-review", "no"),
+        fake(repo, "claude", "claude", "approved", "yes"),
+    )
+    roles.switch_model(repo, settings, "claude", "opus")
+    roles.switch_model(repo, settings, "codex", "o3", keep=True)
+    (repo / "plan.md").write_text("- [x] T-1: done\n")
+    loop.run_plan(repo, settings, repo / "plan.md", branch="relay/plan", echo=False)
+    remaining = roles.read_model_overrides(repo)
+    assert set(remaining) == {"codex"}
+    assert 'model = "o3"' in config.config_path(repo).read_text()

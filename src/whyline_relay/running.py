@@ -22,6 +22,8 @@ class Running:
     role: str = ""
     stage: str = ""
     visit: int = 0
+    # The model the turn runs on; "" for the agent CLI's default.
+    model: str = ""
 
 
 class AlreadyRunning(RuntimeError):
@@ -50,7 +52,7 @@ def read(root: Path) -> Running | None:
         return None
     if not isinstance(marker.role, str) or not isinstance(marker.stage, str):
         return None
-    if not isinstance(marker.visit, int):
+    if not isinstance(marker.visit, int) or not isinstance(marker.model, str):
         return None
     return marker
 
@@ -130,6 +132,7 @@ def start_turn(
     *,
     stage: str = "",
     visit: int = 0,
+    model: str = "",
 ) -> Running:
     """Atomically claim the repository, or update this process's current turn."""
     marker = Running(
@@ -141,6 +144,7 @@ def start_turn(
         role=role,
         stage=stage,
         visit=visit,
+        model=model,
     )
     target = path(root)
     temporary = _temporary(target, marker)

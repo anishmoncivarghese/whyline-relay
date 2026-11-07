@@ -22,6 +22,7 @@ RELAY_RUNTIME_FILES = (
     "agent-limits.json",
     "resolve-mode.json",
     "chat-active-agents.json",
+    "model-overrides.json",
     "cache/",
 )
 # Files the relay must never commit, even when they are tracked or the

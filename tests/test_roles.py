@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -304,3 +305,132 @@ def test_status_omits_the_note_when_backup_for_is_the_configured_agent(tmp_path)
     output = roles.status(tmp_path, settings)
     assert "rate-limit: grok hit a usage or rate limit" in output
     assert "configured is now" not in output
+
+
+def test_with_model_replaces_the_value_after_the_flag():
+    command = ["claude", "-p", "--model", "sonnet", "--verbose"]
+    assert config.with_model(command, ("--model",), "opus") == [
+        "claude", "-p", "--model", "opus", "--verbose",
+    ]
+    assert command[3] == "sonnet"
+
+
+def test_with_model_appends_when_there_is_no_flag():
+    assert config.with_model(["codex", "exec"], ("--model",), "o3") == [
+        "codex", "exec", "--model", "o3",
+    ]
+
+
+def test_with_model_replaces_only_the_last_flag():
+    command = ["x", "--model", "a", "--model", "b", "--tail"]
+    assert config.with_model(command, ("--model",), "c") == [
+        "x", "--model", "a", "--model", "c", "--tail",
+    ]
+
+
+def test_with_model_handles_a_two_token_flag():
+    command = ["agent", "-c", "model", "small", "-c", "other", "v"]
+    assert config.with_model(command, ("-c", "model"), "large") == [
+        "agent", "-c", "model", "large", "-c", "other", "v",
+    ]
+    assert config.with_model(["agent", "run"], ("-c", "model"), "large") == [
+        "agent", "run", "-c", "model", "large",
+    ]
+
+
+def test_with_model_ignores_a_trailing_flag_with_no_value():
+    assert config.with_model(["x", "--model"], ("--model",), "opus") == [
+        "x", "--model", "--model", "opus",
+    ]
+
+
+def test_load_keeps_each_agents_model_flag_and_configured_model(tmp_path):
+    _write(
+        tmp_path,
+        '[agents.claude]\nmodel = "sonnet"\n'
+        '[agents.tool]\nadapter = "generic"\ncommand = ["tool"]\n'
+        'model_flag = ["-c", "model"]\n',
+    )
+    settings = config.load(tmp_path)
+    assert settings.model_flags["claude"] == ("--model",)
+    assert settings.model_flags["codex"] == ("--model",)
+    assert settings.model_flags["tool"] == ("-c", "model")
+    assert settings.models["claude"] == "sonnet"
+    assert "codex" not in settings.models
+
+
+def _sonnet_claude(root: Path) -> config.Config:
+    _write(root, '[agents.claude]\nmodel = "sonnet"\n')
+    return config.load(root)
+
+
+def _model_file(root: Path) -> Path:
+    return root / ".whyline" / "relay" / "model-overrides.json"
+
+
+def test_switch_model_writes_the_override_file(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    message = roles.switch_model(tmp_path, settings, "claude", "opus")
+    assert message == "claude → opus from its next turn."
+    record = json.loads(_model_file(tmp_path).read_text())
+    assert record["claude"]["model"] == "opus"
+    assert record["claude"]["keep"] is False
+    assert record["claude"]["since"]
+    assert not list(_model_file(tmp_path).parent.glob("*.tmp"))
+    # config.toml is untouched without keep.
+    assert 'model = "sonnet"' in config.config_path(tmp_path).read_text()
+
+
+def test_reset_and_the_configured_model_both_remove_the_entry(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    roles.switch_model(tmp_path, settings, "claude", "opus")
+    roles.switch_model(tmp_path, settings, "codex", "o3")
+    assert roles.switch_model(tmp_path, settings, "claude", "sonnet") == (
+        "claude back to sonnet from its next turn."
+    )
+    assert set(roles.read_model_overrides(tmp_path)) == {"codex"}
+    assert roles.switch_model(tmp_path, settings, "codex", "") == (
+        "codex back to its default from its next turn."
+    )
+    assert not _model_file(tmp_path).exists()
+
+
+def test_keep_writes_the_model_to_config_toml(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    roles.switch_model(tmp_path, settings, "claude", "opus", keep=True)
+    assert roles.read_model_overrides(tmp_path)["claude"].keep is True
+    assert config.load(tmp_path).models["claude"] == "opus"
+    text = config.config_path(tmp_path).read_text()
+    assert 'model = "sonnet"' not in text
+
+
+def test_an_agent_without_a_model_flag_is_refused(tmp_path):
+    _write(tmp_path, '[agents.tool]\nadapter = "generic"\ncommand = ["tool"]\n')
+    settings = config.load(tmp_path)
+    with pytest.raises(roles.RoleSetError) as raised:
+        roles.switch_model(tmp_path, settings, "tool", "big")
+    assert str(raised.value) == (
+        "tool has no way to set a model; set model_flag under [agents.tool]"
+    )
+    assert not _model_file(tmp_path).exists()
+
+
+def test_an_agent_not_set_up_is_refused(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    with pytest.raises(roles.RoleSetError):
+        roles.switch_model(tmp_path, settings, "nobody", "big")
+
+
+def test_status_shows_a_switched_model(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    roles.switch_model(tmp_path, settings, "claude", "opus")
+    roles.switch_model(tmp_path, settings, "codex", "o3")
+    lines = roles.status(tmp_path, settings).splitlines()
+    assert "claude: opus (switched from sonnet)" in lines
+    assert "codex: o3 (switched from its default)" in lines
+
+
+def test_a_kept_switch_is_not_shown_once_config_toml_has_it(tmp_path):
+    settings = _sonnet_claude(tmp_path)
+    roles.switch_model(tmp_path, settings, "claude", "opus", keep=True)
+    assert "switched from" not in roles.status(tmp_path, config.load(tmp_path))

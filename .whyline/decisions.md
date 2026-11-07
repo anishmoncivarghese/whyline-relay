@@ -6710,3 +6710,84 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: fdf84b35be3b4220920b11f53197de27 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:31:10.979Z"} -->
+
+## 2026-11-07 — Record the turn's model as a 'relay turn: {json}' first line of each turn log, prepended after the child exits
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-18
+
+**Because:** There is no structured turn log; agents.run truncates the log when it starts, so the relay can only stamp afterwards. Skipped when the call never wrote the log, so a stale log is never stamped. The line is not JSON and has no '==>', so json_object's trailing-block parse and the 'no status lines in logs' rule both still hold
+
+**Rejected:**
+
+- a header kwarg on agents.run — many test fakes replace agents.run with fixed signatures
+- a trailing line — record_limit and pause messages read the log's last non-empty line
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: e077fc3714944c7dbccc5dcd86d7f302 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:45:16.724Z"} -->
+
+## 2026-11-07 — Model switches matching the configured model are dropped at run start as well as at plan completion
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-18
+
+**Because:** A --keep switch writes config.toml, so by the next run its entry is redundant. If it stayed, a later hand edit of config.toml back to another model would be silently overridden by the stale kept entry. This mirrors failover.clear_caught_up for role switches
+
+**Rejected:**
+
+- only clear at plan completion — a kept entry would never be cleared and would shadow config.toml forever
+
+**Files:** src/whyline_relay/roles.py
+
+<!-- whyline-event: c55f2447f87946d7b55a18164ce38bf5 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:45:18.796Z"} -->
+
+## 2026-11-07 — An agent's configured model is the value after its model_flag in the final command, not only [agents.<name>] model
+
+**Actor:** claude
+**Role:** implementer
+**Task:** RLY-18
+
+**Because:** A model can also be written straight into command = [...]; reading it from the command makes switch-back, status and caught-up checks agree with what actually runs
+
+**Rejected:**
+
+- read only the model key — a model set inside command would show as 'its default'
+
+**Files:** src/whyline_relay/config.py
+
+<!-- whyline-event: b70d6ccbf45a4f9789c0f23cb655ab93 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T14:45:20.903Z"} -->
+
+## 2026-11-07 — Pass RLY-18: model switch applies from the next turn in every role, including backups
+
+**Actor:** grok
+**Role:** tester
+**Task:** RLY-18
+
+**Because:** uv run pytest -q exited 0 on the full suite, 1411 collected. Spec checks all held: with_model replace/append/two-token flag; switch_model writes model-overrides.json atomically and refuses agents without model_flag; --reset and the configured model remove the entry; keep writes config.toml and is dropped at the next run start when it matches; without keep the entry is gone after plan completion; a mid-turn switch is used on the next turn and echoes once; claude as reviewer and as backup both get opus; garbled overrides run the configured model, echo once, and stay on disk; running.json and the turn log carry the model; roles status and whyline-relay status show claude: opus (switched from sonnet); CLI roles model --keep and --reset; model-overrides.json is in RELAY_IGNORE and RELAY_GITIGNORE_LINES. Independent probes also confirmed pipeline reviewer turns, command-embedded models, and that switch_model leaves running.json untouched.
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/config.py, src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, src/whyline_relay/roles.py, src/whyline_relay/running.py, src/whyline_relay/status.py, tests/test_cli_roles.py, tests/test_loop_failover.py, tests/test_loop_single.py, tests/test_roles.py
+
+<!-- whyline-event: ecc0a1397d2a40f29caed45da267d20b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T15:45:28.425Z"} -->
+
+## 2026-11-07 — Approve RLY-18: model switch applies from the next turn in every role, including backups
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** RLY-18
+
+**Because:** uv run pytest -q exited 0 on the full suite. Spec checks all held: with_model replace/append/two-token flag; switch_model writes model-overrides.json atomically and refuses agents without model_flag; --reset and the configured model remove the entry; keep writes config.toml via _upsert_agent_model; without keep the entry is gone after plan completion; a mid-turn switch is used on the next turn and echoes once; claude as reviewer and as backup both get opus; garbled overrides run the configured model, echo once, and stay on disk; running.json and the turn log carry the model; roles status and whyline-relay status show claude: opus (switched from sonnet); CLI roles model --keep and --reset; model-overrides.json is in RELAY_RUNTIME_FILES, which feeds RELAY_IGNORE and RELAY_GITIGNORE_LINES. Loop applies the override after _turn_agents on both the two-role and pipeline paths and never touches the running process.
+
+**Verdict:** approved
+**Test:** uv run pytest -q: exited 0
+
+**Files:** src/whyline_relay/cli.py, src/whyline_relay/config.py, src/whyline_relay/gitcheck.py, src/whyline_relay/loop.py, src/whyline_relay/roles.py, src/whyline_relay/running.py, src/whyline_relay/status.py, tests/test_cli_roles.py, tests/test_loop_failover.py, tests/test_loop_single.py, tests/test_roles.py
+
+<!-- whyline-event: 6f73d3da0c204c7d9a2e3fd1f80bf08b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T15:54:39.325Z"} -->

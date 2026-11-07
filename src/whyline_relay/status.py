@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from whyline_relay import invocation, loop, running, state
+from whyline_relay import config, invocation, loop, roles, running, state
 
 NONE = "none"
 PAUSING = "pausing"
@@ -84,6 +84,16 @@ def pause_state(
             agent=str(saved.cut_off.get("agent") or ""),
         )
     return PauseState(PAUSED, **common)
+
+
+def model_lines(root: Path) -> str:
+    """"claude: opus (switched from sonnet)" per switched model; "" when none,
+    or when config.toml cannot be read (status still reports the rest)."""
+    try:
+        settings = config.load(root)
+    except config.ConfigError:
+        return ""
+    return roles.model_status(root, settings)
 
 
 def _elapsed(seconds: float) -> str:

@@ -532,7 +532,8 @@ def test_run_agent_shows_the_child_the_relay_uv_cache(repo: Path, monkeypatch):
     before = dict(os.environ)
     log = _run_codex_turn(repo, _uv_printing_settings(repo))
     cache = str(repo / ".whyline" / "relay" / "cache" / "uv")
-    assert log.read_text() == cache + "\n"
+    # The first line is the relay's turn header; the child's output follows.
+    assert log.read_text().split("\n", 1)[1] == cache + "\n"
     assert dict(os.environ) == before
     assert "UV_CACHE_DIR" not in os.environ
 
@@ -541,7 +542,7 @@ def test_an_existing_uv_cache_dir_wins(repo: Path, monkeypatch):
     monkeypatch.setenv("UV_CACHE_DIR", "/custom/uv-cache")
     before = dict(os.environ)
     log = _run_codex_turn(repo, _uv_printing_settings(repo))
-    assert log.read_text() == "/custom/uv-cache\n"
+    assert log.read_text().split("\n", 1)[1] == "/custom/uv-cache\n"
     assert dict(os.environ) == before
     assert os.environ["UV_CACHE_DIR"] == "/custom/uv-cache"
 

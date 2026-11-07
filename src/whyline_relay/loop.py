@@ -363,6 +363,36 @@ def _uv_cache_env(root: Path) -> dict[str, str] | None:
     return {"UV_CACHE_DIR": str(root / ".whyline" / "relay" / "cache" / "uv")}
 
 
+# No "==>": those are terminal-only status lines and never go in a log.
+TURN_LOG_HEADER = "relay turn: "
+
+
+def _log_mtime(target: Path) -> int | None:
+    try:
+        return target.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _stamp_turn_log(target: Path, before: int | None, agent: str, model: str) -> None:
+    """Open the turn log with the agent and the model the turn ran on.
+
+    Written once the child is done, since agents.run truncates the log as it
+    starts. Skipped when the call never wrote the log (an agent missing, or a
+    STOP before it spawned), so an earlier run's log is never stamped. The
+    line is not JSON, so a trailing JSON result still parses.
+    """
+    after = _log_mtime(target)
+    if after is None or after == before:
+        return
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+        record = json.dumps({"agent": agent, "model": model})
+        target.write_text(f"{TURN_LOG_HEADER}{record}\n{text}", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def run_agent(
     root: Path,
     settings: config.Config,
@@ -386,17 +416,25 @@ def run_agent(
     attachments: Sequence[Path] = (),
     runner: failover.Runner = subprocess.run,
     cut_off: list[dict | None] | None = None,
+    agent_command: list[str] | None = None,
+    model: str | None = None,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path.
 
     `cut_off` holds the turn a pause cut off, if any. This turn opens with it
     and empties the holder, so only the first turn after resume is told.
+    `agent_command` and `model` are this turn's, from _turn_model; None runs
+    the configured command and model.
     """
     _refuse_low_disk(root)
     adapter = config.adapter_for(settings, agent)
     repo = task_repo(root, task)
+    if agent_command is None:
+        agent_command = settings.agents[agent]
+    if model is None:
+        model = settings.models.get(agent, "")
     command = _command_with_task_dir(
-        list(settings.agents[agent]), adapter.dir_flag, root, repo
+        list(agent_command), adapter.dir_flag, root, repo
     )
     command = attachment_delivery.command_with_images(
         command, adapter.name, attachments
@@ -412,7 +450,14 @@ def run_agent(
             None,
         )
     running.start_turn(
-        root, agent, task.task_id, round_, role=role, stage=stage, visit=visit
+        root,
+        agent,
+        task.task_id,
+        round_,
+        role=role,
+        stage=stage,
+        visit=visit,
+        model=model,
     )
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
@@ -480,17 +525,21 @@ def run_agent(
                 # appearing while this call is in flight.
                 if stop_requested(root):
                     cancel_event.set()
-                agents.run(
-                    turn_command,
-                    turn_prompt,
-                    cwd=root,
-                    log_path=target,
-                    timeout_seconds=timeout_seconds,
-                    echo=echo,
-                    agent_name=agent,
-                    cancel_event=cancel_event,
-                    env=_uv_cache_env(root),
-                )
+                before = _log_mtime(target)
+                try:
+                    agents.run(
+                        turn_command,
+                        turn_prompt,
+                        cwd=root,
+                        log_path=target,
+                        timeout_seconds=timeout_seconds,
+                        echo=echo,
+                        agent_name=agent,
+                        cancel_event=cancel_event,
+                        env=_uv_cache_env(root),
+                    )
+                finally:
+                    _stamp_turn_log(target, before, agent, model)
                 session = None
                 text = ""
                 if resumes < GROK_RESUMES:
@@ -822,6 +871,76 @@ def _turn_agents(
             announced.add(key)
         agents.print_status(message)
     return result
+
+
+def _announce(
+    echo: bool,
+    announced: set[tuple[str, str, str]] | None,
+    key: tuple[str, str, str],
+    message: str,
+) -> None:
+    if not echo or (announced is not None and key in announced):
+        return
+    if announced is not None:
+        announced.add(key)
+    agents.print_status(message)
+
+
+def _turn_model(
+    root: Path,
+    settings: config.Config,
+    agent: str,
+    *,
+    echo: bool = False,
+    announced: set[tuple[str, str, str]] | None = None,
+) -> tuple[list[str], str]:
+    """`agent`'s command and model for the next turn, from model-overrides.json
+    as it is now. A model switch belongs to the agent, so it holds whichever
+    role the agent plays, backups included.
+
+    An unreadable file, or an entry for an agent this run cannot switch, is
+    ignored for the turn and left on disk, with one echo per run, the way an
+    unusable role override is.
+    """
+    command = list(settings.agents[agent])
+    configured = settings.models.get(agent, "")
+    try:
+        overrides = roles.read_model_overrides(root)
+    except roles.UnreadableModelOverrides as error:
+        name = roles.model_overrides_path(root).name
+        _announce(
+            echo,
+            announced,
+            ("model-overrides", "unreadable", ""),
+            f"==> relay: model switches ignored; {name} could not be read "
+            f"({error})",
+        )
+        return command, configured
+    for name, override in overrides.items():
+        if name in settings.agents and name in settings.model_flags:
+            continue
+        why = (
+            "it was not set up when this run started"
+            if name not in settings.agents
+            else "it has no model_flag"
+        )
+        _announce(
+            echo,
+            announced,
+            ("model-ignored", name, override.since),
+            f"==> relay: {name} model switch to {override.model} ignored; {why}",
+        )
+    override = overrides.get(agent)
+    flag = settings.model_flags.get(agent)
+    if override is None or flag is None or override.model == configured:
+        return command, configured
+    _announce(
+        echo,
+        announced,
+        ("model", agent, override.since),
+        f"==> relay: {agent} now uses {override.model} (switched by you)",
+    )
+    return config.with_model(command, flag, override.model), override.model
 
 
 def _switched_since(
@@ -1168,6 +1287,9 @@ def _run_task(
         else:
             ephemeral_tried.pop(role, None)
             ephemeral_basis.pop(role, None)
+        agent_command, model = _turn_model(
+            root, settings, agent, echo=echo, announced=announced
+        )
         template = "implement" if role == "implementer" else "review"
         previous = handoff.read(root)
         previous_id = previous.event_id if previous else None
@@ -1190,6 +1312,8 @@ def _run_task(
             prompt_suffix=extra_prompt,
             runner=runner,
             cut_off=cut_off,
+            agent_command=agent_command,
+            model=model,
         )
         if role == "implementer" and gitcheck.head_commit(repo) != head_before:
             # Codex's sandbox does not stop it committing (measured on
@@ -1518,6 +1642,9 @@ def _run_configured_task(
             agent = effective_agents[stage.role]
             ephemeral_tried.pop(stage.role, None)
             ephemeral_basis.pop(stage.role, None)
+        agent_command, model = _turn_model(
+            root, settings, agent, echo=echo, announced=announced
+        )
         turn_implementer = (
             agent if stage.role == "implementer"
             else effective_agents.get("implementer", implementer_agent)
@@ -1560,6 +1687,8 @@ def _run_configured_task(
             ),
             runner=runner,
             cut_off=cut_off,
+            agent_command=agent_command,
+            model=model,
         )
         if gitcheck.head_commit(repo) != head_before:
             slid = _advance_base_past_settings(
@@ -2290,6 +2419,7 @@ def _run_plan(
     )
     # A saved Set up may have caught up with a manual switch since it was made.
     failover.clear_caught_up(root, roles.current_roles(settings))
+    roles.clear_model_overrides(root, settings, completed=False)
     announced: set[tuple[str, str, str]] = set()
     outcomes: list[Outcome] = []
     if resume:
@@ -2313,6 +2443,7 @@ def _run_plan(
                 # The plan is done, so the run's manual switches end with it.
                 # A pause, a STOP or a resume never reaches here.
                 failover.clear_manual(root)
+                roles.clear_model_overrides(root, settings, completed=True)
             return outcomes
         if outcomes and pause_request(root) is not None:
             # A safe point between tasks: the last one is ticked and committed.

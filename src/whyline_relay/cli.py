@@ -371,6 +371,26 @@ def build_parser() -> argparse.ArgumentParser:
     roles_switch.add_argument(
         "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
+    roles_model = roles_sub.add_parser(
+        "model", help="Switch an agent's model from its next turn"
+    )
+    roles_model.add_argument("agent", help="The agent whose model to switch")
+    roles_model.add_argument(
+        "model", nargs="?", default=None, help="The model to switch it to"
+    )
+    roles_model.add_argument(
+        "--keep",
+        action="store_true",
+        help="Also write the model to config.toml, so later runs start with it.",
+    )
+    roles_model.add_argument(
+        "--reset",
+        action="store_true",
+        help="Go back to the configured model from the agent's next turn.",
+    )
+    roles_model.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
 
     test_command_parser = subparsers.add_parser(
         "test-command", help="Show or set the command that runs this repo's tests"
@@ -685,6 +705,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     pause_line = relay_status.pause_line(relay_status.pause_state(root))
     if pause_line is not None:
         print(pause_line)
+    if models := relay_status.model_lines(root):
+        print(models)
     saved = state.load(root)
     if saved is None:
         if active is None:
@@ -789,6 +811,23 @@ def cmd_roles(args: argparse.Namespace) -> int:
     if args.roles_command == "switch":
         try:
             print(roles.switch(root, settings, args.role, args.agent, keep=args.keep))
+        except roles.RoleSetError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        return EXIT_OK
+    if args.roles_command == "model":
+        if args.reset == (args.model is not None) or (args.reset and args.keep):
+            print(
+                "Error: give a model, optionally with --keep, or --reset alone",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        try:
+            print(
+                roles.switch_model(
+                    root, settings, args.agent, args.model or "", keep=args.keep
+                )
+            )
         except roles.RoleSetError as error:
             print(f"Error: {error}", file=sys.stderr)
             return EXIT_USAGE

@@ -223,6 +223,38 @@ class Config:
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     release_role: str = "human"
     dir_flags: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # How each agent takes a model on its command line; absent when it can't.
+    model_flags: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The model each agent's command already selects; absent for the CLI default.
+    models: dict[str, str] = field(default_factory=dict)
+
+
+def _flag_index(command: list[str], model_flag: tuple[str, ...]) -> int | None:
+    """Where the last `model_flag` sequence followed by a value starts, or None."""
+    width = len(model_flag)
+    for index in range(len(command) - width - 1, -1, -1):
+        if tuple(command[index : index + width]) == model_flag:
+            return index
+    return None
+
+
+def model_in(command: list[str], model_flag: tuple[str, ...]) -> str:
+    """The value after the last `model_flag` in `command`, or "" when none."""
+    index = _flag_index(command, model_flag) if model_flag else None
+    return "" if index is None else command[index + len(model_flag)]
+
+
+def with_model(
+    command: list[str], model_flag: tuple[str, ...], model: str
+) -> list[str]:
+    """`command` selecting `model`: the value after the last `model_flag`
+    replaced, or `[*model_flag, model]` appended when there is none. Every
+    other argument keeps its order."""
+    index = _flag_index(command, model_flag)
+    if index is None:
+        return [*command, *model_flag, model]
+    value = index + len(model_flag)
+    return [*command[:value], model, *command[value + 1 :]]
 
 
 def adapter_for(settings: Config, agent: str) -> adapters.Adapter:
@@ -355,7 +387,12 @@ def load(root: Path) -> Config:
     agents = dict(DEFAULTS["agents"])
     configured_adapters: dict[str, str] = {}
     dir_flags: dict[str, tuple[str, ...]] = {}
-    for name, table in (raw.get("agents") or {}).items():
+    model_flags: dict[str, tuple[str, ...]] = {}
+    raw_agents = raw.get("agents") or {}
+    for name, adapter in adapters.BUILTIN.items():
+        if name not in raw_agents and adapter.model_flag is not None:
+            model_flags[name] = adapter.model_flag
+    for name, table in raw_agents.items():
         if name in adapters.BUILTIN:
             if "adapter" in table:
                 raise ConfigError(f"agent '{name}' is built in and cannot set adapter")
@@ -419,6 +456,8 @@ def load(root: Path) -> Config:
                     '["--model"], under this agent'
                 )
             agents[name] = [*agents[name], *model_flag, model]
+        if model_flag is not None:
+            model_flags[name] = model_flag
         if "dir_flag" in table:
             value = table["dir_flag"]
             if not isinstance(value, str) or not value:
@@ -447,6 +486,11 @@ def load(root: Path) -> Config:
         rules_test_command = test_command(root)
         for name in claude_agents:
             agents[name] = claude_adapter.with_rules(agents[name], rules_test_command)
+    models = {
+        name: model
+        for name, flag in model_flags.items()
+        if (model := model_in(agents[name], flag))
+    }
 
     role_values = dict(raw.get("roles") or {})
     release_role = role_values.pop("release", "human")
@@ -592,4 +636,6 @@ def load(root: Path) -> Config:
         planner=planner_cfg,
         release_role=release_role,
         dir_flags=dir_flags,
+        model_flags=model_flags,
+        models=models,
     )

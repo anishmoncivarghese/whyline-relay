@@ -97,3 +97,65 @@ def test_status_when_paused_still_shows_the_pause_and_resume(tmp_path: Path, cap
     out = capsys.readouterr().out
     assert "Paused    stopped" in out
     assert "Resume with" in out
+
+
+def _sonnet_config(root: Path) -> Path:
+    relay = root / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text('[agents.claude]\nmodel = "sonnet"\n')
+    return relay
+
+
+def test_roles_model_switches_and_status_shows_it(tmp_path: Path, capsys):
+    _sonnet_config(tmp_path)
+    repo = ["--repo", str(tmp_path)]
+    assert cli.main(["roles", *repo, "model", "claude", "opus"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "claude → opus from its next turn.\n"
+
+    assert cli.main(["roles", *repo, "status"]) == cli.EXIT_OK
+    assert "claude: opus (switched from sonnet)" in capsys.readouterr().out.splitlines()
+
+    assert cli.main(["status", *repo]) == cli.EXIT_OK
+    assert "claude: opus (switched from sonnet)" in capsys.readouterr().out.splitlines()
+
+
+def test_roles_model_reset_removes_the_entry(tmp_path: Path, capsys):
+    relay = _sonnet_config(tmp_path)
+    repo = ["--repo", str(tmp_path)]
+    cli.main(["roles", *repo, "model", "claude", "opus"])
+    capsys.readouterr()
+    assert cli.main(["roles", *repo, "model", "claude", "--reset"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "claude back to sonnet from its next turn.\n"
+    assert not (relay / "model-overrides.json").exists()
+
+
+def test_roles_model_keep_writes_config_toml(tmp_path: Path, capsys):
+    relay = _sonnet_config(tmp_path)
+    repo = ["--repo", str(tmp_path)]
+    assert cli.main(
+        ["roles", *repo, "model", "claude", "opus", "--keep"]
+    ) == cli.EXIT_OK
+    assert 'model = "opus"' in (relay / "config.toml").read_text()
+
+
+@pytest.mark.parametrize(
+    "extra", [["claude"], ["claude", "opus", "--reset"], ["claude", "--reset", "--keep"]]
+)
+def test_roles_model_needs_a_model_or_reset(tmp_path: Path, capsys, extra):
+    _sonnet_config(tmp_path)
+    code = cli.main(["roles", "--repo", str(tmp_path), "model", *extra])
+    assert code == cli.EXIT_USAGE
+    assert "--reset" in capsys.readouterr().err
+
+
+def test_roles_model_refuses_an_agent_without_a_model_flag(tmp_path: Path, capsys):
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        '[agents.tool]\nadapter = "generic"\ncommand = ["tool"]\n'
+    )
+    code = cli.main(["roles", "--repo", str(tmp_path), "model", "tool", "big"])
+    assert code == cli.EXIT_USAGE
+    assert capsys.readouterr().err == (
+        "Error: tool has no way to set a model; set model_flag under [agents.tool]\n"
+    )
