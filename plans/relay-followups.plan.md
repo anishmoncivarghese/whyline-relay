@@ -157,7 +157,7 @@ codex hit its usage limit during JOB-26, and the reviewer was switched to antigr
 
 grok, reviewing PZ-11, ran `git -c color.ui=false -c color.diff=false diff -- <files>`. The allow list has `Bash(git diff:*)`, but rules match on the command's start, so `git -c …` was refused and headless grok ended its whole turn. The relay resumed the session (1 of 2), and the resume prompt didn't say which command was refused, so the retry could hit the same wall and use up the last resume. Every repository that uses the built-in recipes gets this list.
 
-- [ ] RLY-15: Plain git in headless agents, and a resume that names the refused command
+- [x] RLY-15: Plain git in headless agents, and a resume that names the refused command
   Edit `src/whyline_relay/recipes.py`, `src/whyline_relay/adapters/grok.py`, `src/whyline_relay/adapters/claude.py` and `src/whyline_relay/loop.py`, with tests in `tests/test_recipes.py` and `tests/test_grok_resume.py`.
   1. `GROK_RULES` gains this sentence after "Run one plain command per shell call.": "Run git as plain `git diff`, `git log`, `git show` or `git status`, never with `git -c …`, `git --no-pager` or `git -C <dir>`." `CLAUDE_RULES` gets it too, because it is the same text.
   2. Allow exactly these three no-colour forms, and nothing broader:
