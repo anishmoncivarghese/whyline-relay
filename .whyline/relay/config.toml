@@ -17,17 +17,7 @@ command = ["agy", "--output-format", "json", "--mode", "accept-edits", "--add-di
 
 [agents.grok]
 adapter = "generic"
-command = [
-  "grok", "--output-format", "json", "--permission-mode", "dontAsk",
-  "--deny", "Bash(git push:*)", "--deny", "Bash(rm -rf:*)",
-  "--allow", "Edit", "--allow", "Bash(git add:*)", "--allow", "Bash(git commit:*)",
-  "--allow", "Bash(git diff:*)", "--allow", "Bash(git status:*)", "--allow", "Bash(git log:*)",
-  "--allow", "Bash(whyline:*)", "--allow", "Bash(python3:*)",
-  "--allow", "Bash(uv run:*)", "--allow", "Bash(uv:*)",
-  "--allow", "Bash(mkdir:*)", "--allow", "Bash(ls:*)", "--allow", "Bash(find:*)",
-  "--allow", "Bash(touch:*)", "--allow", "Bash(cat:*)",
-  "-p"
-]
+command = ["grok", "--output-format", "json", "--permission-mode", "dontAsk", "--deny", "Bash(git push:*)", "--deny", "Bash(rm -rf:*)", "--allow", "Edit", "--allow", "Bash(git add:*)", "--allow", "Bash(git commit:*)", "--allow", "Bash(git diff:*)", "--allow", "Bash(git status:*)", "--allow", "Bash(git log:*)", "--allow", "Bash(whyline:*)", "--allow", "Bash(python3:*)", "--allow", "Bash(uv run:*)", "--allow", "Bash(uv:*)", "--allow", "Bash(mkdir:*)", "--allow", "Bash(ls:*)", "--allow", "Bash(find:*)", "--allow", "Bash(touch:*)", "--allow", "Bash(cat:*)", "--model", "grok-4.6", "-p"]
 
 [roles]
 implementer = "claude"
