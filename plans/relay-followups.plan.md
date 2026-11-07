@@ -195,12 +195,37 @@ agentdock's SEC-5 commit (843cff7) included `.whyline/relay/PAUSE`: the user pre
   - `start` with a tracked `PAUSE` prints the `git rm --cached` hint once
   - `resume` in a repo with the old `.gitignore` updates it before the first turn
 
+## Requested while running agentdock's release-button plan (2026-11-07)
+
+The user wants to change a model while the relay runs, for example claude from `sonnet` to `opus`, the way `roles switch` (RLY-13) changes a role's agent. Today `config.load` bakes `[*model_flag, model]` into each agent's command once at run start, and the loop only re-reads `active-roles.json` before each stage, so a model change waits for the run to end.
+
+- [ ] RLY-18: Switch an agent's model from its next turn (`roles model`)
+  Edit `src/whyline_relay/roles.py`, `src/whyline_relay/config.py`, `src/whyline_relay/loop.py`, `src/whyline_relay/status.py`, `src/whyline_relay/cli.py` and `src/whyline_relay/gitcheck.py`, with tests in `tests/test_roles.py`, `tests/test_loop_failover.py` and `tests/test_cli_roles.py`.
+  1. A model belongs to an agent, as `[agents.<name>] model` does, so the switch applies to that agent in every role it plays, backups included.
+  2. Add `roles.switch_model(root, settings, agent, model, *, keep=False) -> str`. It writes `.whyline/relay/model-overrides.json`, `{"<agent>": {"model": "...", "since": "<iso>", "keep": bool}}`, atomically like `state._write_atomic`. It raises `RoleSetError` when the agent isn't in `settings.agents`, or has no `model_flag` ("<agent> has no way to set a model; set model_flag under [agents.<agent>]"). A `model` equal to the configured one, or `""`, removes the agent's entry. It returns "<agent> → <model> from its next turn." or "<agent> back to <configured model or 'its default'> from its next turn." It never touches the running process.
+  3. With `keep`, it also writes `model = "<model>"` under `[agents.<agent>]` in `config.toml` with `_upsert_agent_model`, so later runs start with it. Without `keep`, the loop removes the entry when the plan completes, as it does for manual role switches without `keep`.
+  4. Add `config.with_model(command: list[str], model_flag: tuple[str, ...], model: str) -> list[str]`: replace the value after the last `model_flag` sequence in `command`, or append `[*model_flag, model]` when there is none. Every other argument keeps its order. `config.load` keeps each agent's `model_flag` and configured model on the settings so the loop can use them.
+  5. Before every turn, right after `_turn_agents` picks the agent, the loop reads `model-overrides.json` and builds that turn's command with `with_model`. It echoes once per switch per run: "==> relay: claude now uses opus (switched by you)". An unreadable file, or an entry for an agent not in this run, is ignored for the turn and left on disk, with one echo, the way an unusable role override is. The turn log and `running.json` record the model the turn used (`"model": "opus"`, empty for the CLI default).
+  6. `roles status` and `whyline-relay status` show a switched model as "claude: opus (switched from sonnet)".
+  7. The CLI gets `whyline-relay roles model <agent> <model> [--keep]` and `whyline-relay roles model <agent> --reset`, calling `switch_model`.
+  8. `model-overrides.json` goes into `gitcheck.RELAY_IGNORE` and the relay `.gitignore` lines (RLY-17's single list).
+  Tests:
+  - `with_model` replaces `--model sonnet` with `--model opus`, appends when there is no flag, and handles a two-token flag such as `("-c", "model")`
+  - a switch written while a turn runs is used by the next turn's command, never the current one, and echoes once
+  - a switch for claude applies when claude runs as reviewer and as a backup
+  - `--reset` and switching to the configured model both remove the entry
+  - `keep` writes `config.toml`; without it the entry is gone after the plan completes
+  - an agent without `model_flag` is refused with the message above
+  - a garbled `model-overrides.json` runs the configured model and echoes once
+  - `running.json` and the turn log carry the model
+  - `roles status` shows "claude: opus (switched from sonnet)"
+
 ## Release
 
 - [x] RLY-14: Publish whyline-relay with RLY-1..13
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, mark RTL-1 done and resume relay-tooling.
 
-- [ ] RLY-16: Publish whyline-relay with RLY-15 and RLY-17
+- [ ] RLY-16: Publish whyline-relay with RLY-15, RLY-17 and RLY-18
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version. Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI. Afterwards run `uv --no-cache tool upgrade whyline` and confirm that `whyline-relay --version` shows the new version. Then, in agentdock, bring `.whyline/relay/config.toml`'s own `[agents.grok]` command up to the new recipe (the repository's command overrides the built-in one), or delete it if it matches the recipe.
