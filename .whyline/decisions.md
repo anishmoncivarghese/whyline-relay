@@ -6791,3 +6791,20 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 6f73d3da0c204c7d9a2e3fd1f80bf08b -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-07T15:54:39.325Z"} -->
+
+## 2026-11-07 — Released whyline-relay 0.2.43 (RLY-15, RLY-17, RLY-18) and upgraded the shared uv tool env only after both relays had stopped
+
+**Actor:** claude
+**Role:** releaser
+**Task:** RLY-16
+
+**Because:** the whyline tool env backs both consoles and their relays; upgrading mid-run could break a running relay. whyline needed an explicit install of 0.3.65 because uv tool upgrade kept 0.3.64
+
+**Rejected:**
+
+- upgrade right after whyline 0.3.65 published — the relay-followups run was still using that env
+
+**Files:** docs/releases/v0.2.43.md
+
+<!-- whyline-event: b72434ff4db543f7b4cad513e347f56c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-07T16:17:51.080Z"} -->
