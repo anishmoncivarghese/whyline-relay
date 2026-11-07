@@ -30,8 +30,8 @@ command = [
 
 [roles]
 implementer = "claude"
-tester      = "codex"
-reviewer    = "codex"
+tester      = "antigravity"
+reviewer    = "grok"
 release = "human"
 
 [pipeline]
