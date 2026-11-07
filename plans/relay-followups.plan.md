@@ -180,7 +180,7 @@ grok, reviewing PZ-11, ran `git -c color.ui=false -c color.diff=false diff -- <f
 
 agentdock's SEC-5 commit (843cff7) included `.whyline/relay/PAUSE`: the user pressed Pause during the review turn, and `gitcheck.commit_all` ran `git add -A` before `_pause_if_requested` took and deleted the file. The relay directory's `.gitignore` (`init.RELAY_GITIGNORE_LINES`) lists `logs/`, `state.json`, `STOP`, `running.json`, `chat.json`, `chat-history.jsonl` and `brainstorm-tmp/`, but not `PAUSE` or the other files the relay and the console write there at run time, and `ensure_relay_gitignore` never touches a file that already exists. This repository tracks `.whyline/relay/agent-limits.json` for the same reason. A commit that carries `PAUSE` pauses the relay right after its next turn in any checkout of that commit.
 
-- [ ] RLY-17: The relay never commits its own run-time files
+- [x] RLY-17: The relay never commits its own run-time files
   Edit `src/whyline_relay/init.py` and `src/whyline_relay/gitcheck.py`, with tests in `tests/test_init.py` and `tests/test_gitcheck.py`.
   1. `RELAY_GITIGNORE_LINES` gains `PAUSE`, `skipped-tasks.json`, `antigravity-declined`, `brainstorm-plan-draft.md`, `recovery.json`, `agent-limits.json`, `resolve-mode.json`, `chat-active-agents.json` and `cache/`, keeping the current lines and their order.
   2. `ensure_relay_gitignore` appends any canonical line missing from an existing `.gitignore`, under a `# added by whyline-relay` comment, and leaves the user's own lines and order alone. It writes nothing when every line is there. `init` reports "Updated .whyline/relay/.gitignore." when it appended.
