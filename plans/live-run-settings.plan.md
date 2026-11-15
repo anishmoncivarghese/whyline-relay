@@ -64,7 +64,7 @@ Global constraints:
   6. Tools such as the whyline console call `run_settings.set_timeout`, `set_rounds`, `set_backup`, `reset` and `effective` directly.
   Tests: each command and its message, the exit code on a bad value, the no-relay case, the `status` line, `running.json`'s two fields, and `test_backup_only_agent_can_switch_model`.
 
-- [ ] LRS-4: Publish whyline-relay with LRS-1..3
+- [x] LRS-4: Publish whyline-relay with LRS-1..3
   relay-profile: release
   Bump the version in `pyproject.toml`, `src/whyline_relay/__init__.py` and `uv.lock` to the next patch version (0.2.45). Write `docs/releases/v<version>.md` from every task since the previous release (`git log v<previous>..HEAD`), in user terms: the three `settings` commands, that a change applies from the next turn and never to the running one, what `--keep` does, and that a backup agent's model can be switched with `roles model`. Run `uv run pytest -q` with the agent CLIs off PATH and `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, and again on Python 3.11. Push, wait for green CI, then tag `v<version>`, push the tag and let the release workflow publish to PyPI.
   Do not upgrade the installed whyline tool while a relay is running in any repository on this Mac: the tool environment is shared.
