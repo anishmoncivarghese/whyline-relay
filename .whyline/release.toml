@@ -1,0 +1,35 @@
+[release]
+mode = "ask"
+branch = "main"
+start_after_plan = false
+bring_in_main = true
+checks = ["uv run pytest -q"]
+ci_ignore = []
+on_no_runner = "ask"
+notes = "docs/releases/v{version}.md"
+version_files = []
+after = []
+
+[targets]
+github = true
+pypi = true
+npm = false
+docker = false
+homebrew = false
+
+[docker]
+registries = ["ghcr"]
+image = ""
+
+[homebrew]
+tap = ""
+formula = ""
+
+[security]
+secrets = "block"
+dependencies = "block-high"
+contents = "block"
+history_scanned = ""
+pre_commit = false
+audit = "off"
+skip_paths = ["tests/**/fixtures/**"]
