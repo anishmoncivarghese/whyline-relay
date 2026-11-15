@@ -6912,3 +6912,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 2f6b40fdd5c44229bfe92dd2bd96d11b -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T10:17:16.451Z"} -->
+
+## 2026-11-15 — Release 0.2.44 by hand from relay/preflight-settings.plan with only PFS-1 and PFS-2
+
+**Actor:** claude
+**Role:** release
+**Task:** PFS-3
+
+**Because:** the preflight crash blocks doctor, start and resume wherever Antigravity holds a role, and this repository has no Release set up
+
+**Rejected:**
+
+- Run Release from the console — no .whyline/release.toml here, it would open Set up first
+- wait for more tasks — agentdock RDF-5 needs 0.2.44 on PyPI
+
+**Files:** pyproject.toml
+
+<!-- whyline-event: 53a406e4451b4fabb5a710f22a0b40fd -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T11:33:34.204Z"} -->
