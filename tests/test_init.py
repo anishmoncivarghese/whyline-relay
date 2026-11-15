@@ -367,7 +367,8 @@ def test_ensure_relay_gitignore_creates_it_when_absent(tmp_path: Path):
     for line in (
         "PAUSE", "skipped-tasks.json", "antigravity-declined",
         "brainstorm-plan-draft.md", "recovery.json", "agent-limits.json",
-        "resolve-mode.json", "chat-active-agents.json", "cache/",
+        "resolve-mode.json", "chat-active-agents.json", "model-overrides.json",
+        "run-settings.json", "cache/",
     ):
         assert line in content.splitlines()
 

@@ -6930,3 +6930,146 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 53a406e4451b4fabb5a710f22a0b40fd -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T11:33:34.204Z"} -->
+
+## 2026-11-15 — run-settings.json is listed in gitcheck.RELAY_RUNTIME_FILES, which feeds both RELAY_IGNORE and the relay .gitignore
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-1
+
+**Because:** RLY-17 put the run-time list in gitcheck so the two cannot drift; setup.py no longer holds those lines
+
+**Rejected:**
+
+- edit setup.py — that is not where the gitignore lines live after RLY-17
+
+**Files:** src/whyline_relay/gitcheck.py
+
+<!-- whyline-event: 0f25c02f989742dabdbae12dd9163042 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T16:37:42.014Z"} -->
+
+## 2026-11-15 — keep is a per-field tuple of names, not one bool for the whole file
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-1
+
+**Because:** timeout --keep then rounds without --keep must still remember that timeout was written to config.toml; a single bool would forget the earlier keep
+
+**Rejected:**
+
+- single bool on RunSettings — a later non-keep setter would clear it
+- three keep bools as separate fields — the spec lists one keep field, and a tuple serializes cleanly as a JSON list
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: facef880447c460d948c0d9e498b59ce -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T16:37:42.014Z"} -->
+
+## 2026-11-15 — a backup name is refused only when one agent holds every current role and there are at least three roles
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-1
+
+**Because:** the spec says none may be the configured agent of all three roles; the example message still allows codex as a backup while it is implementer
+
+**Rejected:**
+
+- refuse every currently assigned role agent — that would reject Backups: codex, then grok when implementer is codex
+- refuse only when implementer, tester and reviewer keys exist even if they differ — the constraint is one agent covering all three
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 8c18e574b7c7471b92cc6d1f2a24e59f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T16:37:42.014Z"} -->
+
+## 2026-11-15 — LRS-1 passes testing: run_settings behaves per spec and full suite is green
+
+**Actor:** claude
+**Role:** tester
+**Task:** LRS-1
+
+**Because:** full uv run pytest -q exit 0; required tests (round cap, backup order, no-keep, gitignore line) exist and pass
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 4112f0c70e6d46c0a5bb88911246ef61 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T16:41:25.105Z"} -->
+
+## 2026-11-15 — LRS-1 requires fixes before approval
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** LRS-1
+
+**Because:** Although uv run pytest -q passes, effective raises UnicodeDecodeError for an unreadable non-UTF-8 file and backup keep rewrites the whole table instead of only the chain line
+
+**Rejected:**
+
+- approve — two explicit LRS-1 guarantees fail outside the current test coverage
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 7f369561b6b24da9b110d461ee41a9b2 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T16:54:53.308Z"} -->
+
+## 2026-11-15 — Decode failures on run-settings.json raise Unreadable, same as OSError
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-1
+
+**Because:** Path.read_text raises UnicodeDecodeError for non-UTF-8 bytes, which is not OSError, so effective() would raise instead of returning configured values with problem set
+
+**Rejected:**
+
+- let UnicodeDecodeError escape — effective() must never raise
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: b349d7589f124e489571fdc8df2f949e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:01:34.945Z"} -->
+
+## 2026-11-15 — backup --keep upserts or removes only the chain line in [backup]
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-1
+
+**Because:** roles._upsert_agent_model changes one key line and leaves comments and unknown keys; rewriting the table deleted those and moved the table
+
+**Rejected:**
+
+- setup._set_backup whole-table rewrite — it drops comments and extra keys
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 6da4d4b7039d4387acf3ca5215a614ee -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:01:37.304Z"} -->
+
+## 2026-11-15 — LRS-1 passes testing round 5: full suite green, run_settings behaves per spec
+
+**Actor:** claude
+**Role:** tester
+**Task:** LRS-1
+
+**Because:** uv run pytest -q exit 0; targeted run_settings/gitcheck/init tests pass, including non-UTF-8 handling and keep editing only its own line
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 0db2ef848891490c94ed0296e978ee92 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:05:11.487Z"} -->
+
+## 2026-11-15 — LRS-1 approved in review round 6
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** LRS-1
+
+**Because:** The implementation satisfies the specified run-settings behavior, preserves unrelated config text for keep edits, covers the required cases, and uv run pytest -q exited 0
+
+**Files:** src/whyline_relay/run_settings.py
+
+<!-- whyline-event: 588f873ac58b49e89bd76851f90048d0 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:18:55.200Z"} -->

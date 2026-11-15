@@ -387,6 +387,7 @@ def test_commit_all_with_only_a_pause_commits_nothing(repo: Path):
 def test_relay_ignore_lists_pause_and_agent_limits():
     assert ".whyline/relay/PAUSE" in gitcheck.RELAY_IGNORE
     assert ".whyline/relay/agent-limits.json" in gitcheck.RELAY_IGNORE
+    assert ".whyline/relay/run-settings.json" in gitcheck.RELAY_IGNORE
     assert len(set(gitcheck.RELAY_IGNORE)) == len(gitcheck.RELAY_IGNORE)
 
 
