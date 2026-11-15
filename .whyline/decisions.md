@@ -7073,3 +7073,63 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 588f873ac58b49e89bd76851f90048d0 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:18:55.200Z"} -->
+
+## 2026-11-15 — failover.live_chain lazy-imports run_settings
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-2
+
+**Because:** run_settings imports roles, and roles imports failover; a module-level import would cycle.
+
+**Rejected:**
+
+- import run_settings at failover module top — circular import with roles
+
+**Files:** src/whyline_relay/failover.py
+
+<!-- whyline-event: cb3081b0cff64693a36eb8746f53f057 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:34:03.131Z"} -->
+
+## 2026-11-15 — Pause state still stores the run's original timeout_minutes
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-2
+
+**Because:** Resume overlays run-settings.json on the Config loaded at start (or restored from state). Saving the live timeout into state.json would make a later reset fail to take effect, because state would already have overwritten the original.
+
+**Rejected:**
+
+- save effective timeout in _save_pause — a reset before resume would then be ignored
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: a99942bd6ef4403094ff10ec89e96da3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:34:03.131Z"} -->
+
+## 2026-11-15 — LRS-2 passes testing: loop/failover use live run-settings
+
+**Actor:** claude
+**Role:** tester
+**Task:** LRS-2
+
+**Because:** Full uv run pytest -q exited 0 with no failures; diff covers effective timeout per turn, effective round cap at every check/message, live backup chain, change log lines, unreadable-file once per change, clear() beside clear_model_overrides; required tests present and passing
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: be56f87a742f4e32b67ec3eac9909e7e -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:37:51.140Z"} -->
+
+## 2026-11-15 — Approve LRS-2 live run-settings integration
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** LRS-2
+
+**Because:** The diff reads timeout once per turn, re-reads the effective round cap and backup chain at their use sites, preserves active stand-ins, deduplicates change and unreadable-file notices, clears completed run settings, and uv run pytest -q exited 0
+
+**Files:** src/whyline_relay/loop.py
+
+<!-- whyline-event: 15689cfae604489397ebdd6e5e50d9d4 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:42:50.644Z"} -->

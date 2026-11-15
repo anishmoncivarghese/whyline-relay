@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, config, loop, plan, state
+from whyline_relay import cli, config, loop, plan, run_settings, state
 
 FAKE = str(Path(__file__).parent / "fake_agent.py")
 TASK = plan.Task(task_id="WL-1", text="WL-1: Add the cache", checked=False, line_index=0)
@@ -837,3 +837,200 @@ def test_prompts_ask_for_issues_only_when_whyline_supports_them(
     assert ("which\nnumbers you fixed" in implement) is supported
     if not supported:
         assert all("--issue" not in prompt for _, prompt in seen)
+
+
+def test_running_turn_keeps_its_timeout(repo: Path, monkeypatch):
+    settings = settings_using("review", "approve", repo)
+    seen: list[int | None] = []
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        seen.append(kwargs["timeout_seconds"])
+        run_settings.set_timeout(repo, settings, 45)
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    assert seen == [30 * 60, 45 * 60]
+
+
+def test_unreadable_file_changes_nothing(repo: Path, monkeypatch, capsys):
+    settings = settings_using("review", "approve", repo)
+    target = run_settings.path(repo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{", encoding="utf-8")
+    seen: list[int | None] = []
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        seen.append(kwargs["timeout_seconds"])
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=True)
+    assert outcome.committed
+    assert seen == [30 * 60, 30 * 60]
+    out = capsys.readouterr().out
+    assert (
+        out.count("run-settings.json can't be read; using the configured values")
+        == 1
+    )
+    assert target.read_text(encoding="utf-8") == "{"
+
+
+def test_unreadable_file_logs_once_per_change_not_per_turn(
+    repo: Path, monkeypatch, capsys
+):
+    settings = settings_using("review", "approve", repo)
+    target = run_settings.path(repo)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{", encoding="utf-8")
+    real_run = loop.agents.run
+    turns = {"n": 0}
+
+    def spy(command, prompt, **kwargs):
+        turns["n"] += 1
+        if turns["n"] == 1:
+            target.write_text("{ still bad\n", encoding="utf-8")
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    assert loop.run_task(repo, settings, TASK, base_commit=base, echo=True).committed
+    out = capsys.readouterr().out
+    assert (
+        out.count("run-settings.json can't be read; using the configured values")
+        == 2
+    )
+
+
+def test_a_timeout_change_logs_once(repo: Path, monkeypatch, capsys):
+    settings = settings_using("review", "approve", repo)
+    real_run = loop.agents.run
+    turns = {"n": 0}
+
+    def spy(command, prompt, **kwargs):
+        turns["n"] += 1
+        if turns["n"] == 1:
+            run_settings.set_timeout(repo, settings, 45)
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    assert loop.run_task(repo, settings, TASK, base_commit=base, echo=True).committed
+    assert capsys.readouterr().out.count("timeout now 45m (changed by you)") == 1
+
+
+def test_a_raised_cap_lets_a_task_take_a_fourth_round(repo: Path, monkeypatch):
+    settings = settings_using("review", "changes", repo)
+    real_run = loop.agents.run
+    calls: list[str] = []
+
+    def spy(command, prompt, **kwargs):
+        calls.append(kwargs["agent_name"])
+        command = list(command)
+        if len(calls) == 6:
+            run_settings.set_rounds(repo, settings, 4)
+        if len(calls) == 8:
+            command[command.index("changes")] = "approve"
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    assert outcome.rounds == 4
+    assert len(calls) == 8
+
+
+def _one_task_plan(repo: Path) -> Path:
+    plan_path = repo / "plan.md"
+    plan_path.write_text("- [ ] WL-1: One\n")
+    (repo / ".whyline" / ".gitignore").write_text(
+        "active-handoff.json\nledger.jsonl\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "plan"], cwd=repo, check=True, capture_output=True
+    )
+    return plan_path
+
+
+def test_a_paused_round_cap_resumes_when_the_cap_is_raised(
+    repo: Path, monkeypatch
+):
+    plan_path = _one_task_plan(repo)
+    settings = settings_using("review", "changes", repo)
+    with pytest.raises(loop.Paused) as raised:
+        loop.run_plan(repo, settings, plan_path, branch="relay/plan", echo=False)
+    assert "3-round cap" in raised.value.reason
+    saved = state.load(repo)
+    assert saved is not None
+    assert len(list((repo / ".whyline" / "relay" / "logs").iterdir())) == 6
+
+    run_settings.set_rounds(repo, settings, 4)
+    # Nothing resumes by itself: the pause, the logs and the unticked box stay.
+    assert state.load(repo).paused_reason == saved.paused_reason
+    assert plan.parse(plan_path.read_text())[0].checked is False
+    assert len(list((repo / ".whyline" / "relay" / "logs").iterdir())) == 6
+
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        command = list(command)
+        if "changes" in command:
+            command[command.index("changes")] = "approve"
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    outcomes = loop.run_plan(
+        repo, settings, plan_path, branch="relay/plan", resume=True, echo=False
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["WL-1"]
+    assert outcomes[0].rounds == 4
+    assert plan.parse(plan_path.read_text())[0].checked is True
+
+
+def test_run_settings_file_is_cleared_when_the_plan_completes(
+    repo: Path, monkeypatch
+):
+    plan_path = _one_task_plan(repo)
+    settings = settings_using("review", "approve", repo)
+    real_run = loop.agents.run
+
+    def run_then_commit(command, prompt, **kwargs):
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", run_then_commit)
+    run_settings.set_timeout(repo, settings, 45)
+    run_settings.set_rounds(repo, settings, 5)
+    assert run_settings.path(repo).exists()
+    outcomes = loop.run_plan(
+        repo, settings, plan_path, branch="relay/plan", echo=False
+    )
+    assert [outcome.task_id for outcome in outcomes] == ["WL-1"]
+    assert not run_settings.path(repo).exists()

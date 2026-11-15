@@ -30,6 +30,7 @@ from whyline_relay import (
     prompts,
     roles,
     routing,
+    run_settings,
     running,
     state,
     testplan,
@@ -418,6 +419,7 @@ def run_agent(
     cut_off: list[dict | None] | None = None,
     agent_command: list[str] | None = None,
     model: str | None = None,
+    live: dict | None = None,
 ) -> Path:
     """Render the prompt, run the agent, and return the log path.
 
@@ -493,14 +495,16 @@ def run_agent(
         "implementing" if role == "implementer" else "reviewing"
     )
     revisit = f", visit {visit}" if visit > 1 else ""
+    effective = _live_settings(root, settings, echo=echo, live=live)
     if echo:
         agents.print_status(
             f"==> {agent}: {action} {task.task_id}{revisit} "
-            f"(round {round_} of {settings.max_rounds})"
+            f"(round {round_} of {effective.max_rounds})"
         )
     # agents.run rejects 0. A configured 0 is "no watchdog", so pass None.
+    # Read once for this turn: a change while the child runs applies next.
     timeout_seconds = (
-        None if settings.timeout_minutes == 0 else settings.timeout_minutes * 60
+        None if effective.timeout_minutes == 0 else effective.timeout_minutes * 60
     )
     # The main thread blocks inside the child. A side thread sets this when
     # STOP appears; agents.run kills the child and raises AgentCancelled.
@@ -886,6 +890,85 @@ def _announce(
     agents.print_status(message)
 
 
+_UNSET = object()
+
+
+def _run_settings_file_id(root: Path) -> str:
+    """Identity of run-settings.json so an unreadable rewrite logs again."""
+    try:
+        st = run_settings.path(root).stat()
+    except OSError:
+        return ""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _backup_now_line(chain: tuple[str, ...]) -> str:
+    names = "none" if not chain else ", then ".join(chain)
+    return f"backups now {names} (changed by you)"
+
+
+def _note_live_change(
+    echo: bool,
+    live: dict,
+    field: str,
+    value,
+    message: str,
+) -> None:
+    last = live.get(field, _UNSET)
+    live[field] = value
+    if last is _UNSET or last == value:
+        return
+    if echo:
+        agents.print_status(f"==> relay: {message}")
+
+
+def _live_settings(
+    root: Path,
+    settings: config.Config,
+    *,
+    echo: bool = False,
+    live: dict | None = None,
+) -> run_settings.Effective:
+    """Configured timeout, round cap and backups overlaid with the file now.
+
+    Logs one line when a value differs from the one used for the previous
+    turn, and logs an unreadable file once per change of that file.
+    """
+    got = run_settings.effective(root, settings)
+    if live is None:
+        live = {}
+    if got.problem:
+        identity = _run_settings_file_id(root)
+        if live.get("unreadable_id") != identity:
+            live["unreadable_id"] = identity
+            if echo:
+                agents.print_status(f"==> relay: {got.problem}")
+    else:
+        live["unreadable_id"] = None
+    _note_live_change(
+        echo,
+        live,
+        "timeout_minutes",
+        got.timeout_minutes,
+        f"timeout now {got.timeout_minutes}m (changed by you)",
+    )
+    _note_live_change(
+        echo,
+        live,
+        "max_rounds",
+        got.max_rounds,
+        f"round cap now {got.max_rounds} (changed by you)",
+    )
+    _note_live_change(
+        echo,
+        live,
+        "backup_chain",
+        got.backup_chain,
+        _backup_now_line(got.backup_chain),
+    )
+    return got
+
+
 def _turn_model(
     root: Path,
     settings: config.Config,
@@ -984,6 +1067,7 @@ def _failover_no_handoff(
     ephemeral_tried: dict[str, list[str]],
     ephemeral_basis: dict[str, failover.ActiveOverride | None],
     turn_override: failover.ActiveOverride | None,
+    live: dict | None = None,
 ) -> bool:
     """Handle a turn that produced no handoff.
 
@@ -1019,12 +1103,14 @@ def _failover_no_handoff(
                 "from its next turn"
             )
         return True
+    chain = list(failover.live_chain(root, settings))
+    _live_settings(root, settings, echo=echo, live=live)
     if reason == "overload":
         tried = list(ephemeral_tried.get(role, []))
         if agent not in tried:
             tried.append(agent)
         backup = failover.next_backup(
-            settings.backup_chain, set(tried), failover.limited_agents(root)
+            chain, set(tried), failover.limited_agents(root)
         )
         if backup is None:
             last = _last_nonempty_line(text)
@@ -1062,7 +1148,7 @@ def _failover_no_handoff(
     if agent not in tried_sticky:
         tried_sticky.append(agent)
     limited = failover.limited_agents(root)
-    backup = failover.next_backup(settings.backup_chain, set(tried_sticky), limited)
+    backup = failover.next_backup(chain, set(tried_sticky), limited)
     if backup is not None:
         verb, _ = failover.REASON_TEXT[reason]
         failover.write_override(
@@ -1083,9 +1169,9 @@ def _failover_no_handoff(
                 f"({agent} {verb})"
             )
         return True
-    if not settings.backup_chain:
+    if not chain:
         raise Paused(failover.pause_message(agent, role, reason, existing), target)
-    skipped = sorted(limited & set(settings.backup_chain) - set(tried_sticky))
+    skipped = sorted(limited & set(chain) - set(tried_sticky))
     raise Paused(
         f"every backup in the chain is unavailable for {role} "
         f"({', '.join(sorted(tried_sticky))} all failed"
@@ -1197,6 +1283,7 @@ def _run_task(
     plan_path: Path | None = None,
     announced: set[tuple[str, str, str]] | None = None,
     cut_off: list[dict | None] | None = None,
+    live: dict | None = None,
 ) -> Outcome:
     """Drive one task from implement to an approved, verified commit.
 
@@ -1225,6 +1312,8 @@ def _run_task(
 
     if announced is None:
         announced = set()
+    if live is None:
+        live = {}
     start = _turn_agents(root, settings)
     implementer = start["implementer"]
     reviewer = start["reviewer"]
@@ -1257,9 +1346,12 @@ def _run_task(
                     # The checkpointed review finished and sent the task back:
                     # charge the round the loop would have, once.
                     round_ += 1
-                    if round_ > settings.max_rounds:
+                    cap = _live_settings(
+                        root, settings, echo=echo, live=live
+                    ).max_rounds
+                    if round_ > cap:
                         raise Paused(
-                            f"{task.task_id} hit the {settings.max_rounds}-round cap "
+                            f"{task.task_id} hit the {cap}-round cap "
                             "without an approval",
                             None,
                         )
@@ -1314,6 +1406,7 @@ def _run_task(
             cut_off=cut_off,
             agent_command=agent_command,
             model=model,
+            live=live,
         )
         if role == "implementer" and gitcheck.head_commit(repo) != head_before:
             # Codex's sandbox does not stop it committing (measured on
@@ -1359,6 +1452,7 @@ def _run_task(
                 ephemeral_tried=ephemeral_tried,
                 ephemeral_basis=ephemeral_basis,
                 turn_override=turn_override,
+                live=live,
             ):
                 continue
             adapter = config.adapter_for(settings, agent)
@@ -1408,9 +1502,10 @@ def _run_task(
                     _send_back_status("review", task.task_id, record)
                 )
             round_ += 1
-            if round_ > settings.max_rounds:
+            cap = _live_settings(root, settings, echo=echo, live=live).max_rounds
+            if round_ > cap:
                 raise Paused(
-                    f"{task.task_id} hit the {settings.max_rounds}-round cap without "
+                    f"{task.task_id} hit the {cap}-round cap without "
                     "an approval",
                     target,
                 )
@@ -1449,13 +1544,14 @@ def _run_configured_task(
     announced: set[tuple[str, str, str]] | None = None,
     cut_off: list[dict | None] | None = None,
     as_rejection: bool = False,
+    live: dict | None = None,
 ) -> Outcome:
     """Drive one task through a configured [pipeline], stage by stage.
 
     Mirrors _run_task's contract and most of its per-turn checks (task
     mismatch, from_actor, blocked, unknown, no-handoff/timeout) but routes on
     pipeline.decide() against the stage that just ran, not a fixed pair of
-    roles. On a no-handoff, walks settings.backup_chain for stage.role exactly like
+    roles. On a no-handoff, walks the live backup chain for stage.role exactly like
     _run_task's own legacy failover branch, via failover.next_backup.
 
     With `resume`, state.json's saved stage/profile/stage_visits pick the task
@@ -1482,6 +1578,8 @@ def _run_configured_task(
     pipe = settings.pipeline
     if announced is None:
         announced = set()
+    if live is None:
+        live = {}
     effective_agents = _turn_agents(root, settings)
     round_ = start_round
     feedback = ""
@@ -1588,9 +1686,12 @@ def _run_configured_task(
                     # the round the loop would have, once. The checkpoint
                     # already holds the round of a turn that never handed off.
                     round_ += 1
-                    if round_ > settings.max_rounds:
+                    cap = _live_settings(
+                        root, settings, echo=echo, live=live
+                    ).max_rounds
+                    if round_ > cap:
                         raise Paused(
-                            f"{task.task_id} hit the {settings.max_rounds}-round cap "
+                            f"{task.task_id} hit the {cap}-round cap "
                             'without reaching "@complete"',
                             None,
                         )
@@ -1689,6 +1790,7 @@ def _run_configured_task(
             cut_off=cut_off,
             agent_command=agent_command,
             model=model,
+            live=live,
         )
         if gitcheck.head_commit(repo) != head_before:
             slid = _advance_base_past_settings(
@@ -1730,6 +1832,7 @@ def _run_configured_task(
                 ephemeral_tried=ephemeral_tried,
                 ephemeral_basis=ephemeral_basis,
                 turn_override=turn_override,
+                live=live,
             ):
                 continue
             adapter = config.adapter_for(settings, agent)
@@ -1828,9 +1931,10 @@ def _run_configured_task(
         stage_visits[current_stage_id] = stage_visits.get(current_stage_id, 0) + 1
         check_visit_cap(pipe, current_stage_id, stage_visits, task)
         round_ += 1
-        if round_ > settings.max_rounds:
+        cap = _live_settings(root, settings, echo=echo, live=live).max_rounds
+        if round_ > cap:
             raise Paused(
-                f"{task.task_id} hit the {settings.max_rounds}-round cap without "
+                f"{task.task_id} hit the {cap}-round cap without "
                 'reaching "@complete"',
                 target,
             )
@@ -1857,6 +1961,7 @@ def run_task(
     announced: set[tuple[str, str, str]] | None = None,
     cut_off: list[dict | None] | None = None,
     as_rejection: bool = False,
+    live: dict | None = None,
 ) -> Outcome:
     """Drive one task and clear its live marker when used outside ``run_plan``."""
     driver = _run_configured_task if settings.pipeline is not None else _run_task
@@ -1878,6 +1983,7 @@ def run_task(
             plan_path=plan_path,
             announced=announced,
             cut_off=cut_off,
+            live=live,
             **extra,
         )
     finally:
@@ -2420,7 +2526,9 @@ def _run_plan(
     # A saved Set up may have caught up with a manual switch since it was made.
     failover.clear_caught_up(root, roles.current_roles(settings))
     roles.clear_model_overrides(root, settings, completed=False)
+    run_settings.clear(root, completed=False)
     announced: set[tuple[str, str, str]] = set()
+    live: dict = {}
     outcomes: list[Outcome] = []
     if resume:
         cancel_pause(root)
@@ -2444,6 +2552,7 @@ def _run_plan(
                 # A pause, a STOP or a resume never reaches here.
                 failover.clear_manual(root)
                 roles.clear_model_overrides(root, settings, completed=True)
+                run_settings.clear(root, completed=True)
             return outcomes
         if outcomes and pause_request(root) is not None:
             # A safe point between tasks: the last one is ticked and committed.
@@ -2570,6 +2679,7 @@ def _run_plan(
                     plan_path=plan_path,
                     announced=announced,
                     cut_off=cut_off_holder,
+                    live=live,
                     # Only the resumed task, the one that paused, re-decides.
                     as_rejection=as_rejection and mid_task,
                 )

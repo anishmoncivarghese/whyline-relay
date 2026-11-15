@@ -492,3 +492,24 @@ def test_billing_exhaustion_wordings_are_usage_limits():
         "usage balance exhausted",
     ):
         assert agents.rate_limited(text), text
+
+
+def test_live_chain_reads_the_run_settings_file(tmp_path):
+    from whyline_relay import config, run_settings
+
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True, exist_ok=True)
+    (relay / "config.toml").write_text(
+        '[backup]\nchain = ["claude"]\n'
+        '[agents.grok]\nadapter = "generic"\ncommand = ["grok"]\n'
+    )
+    settings = config.load(tmp_path)
+    assert failover.live_chain(tmp_path, settings) == ("claude",)
+    run_settings.set_backup(tmp_path, settings, ["codex", "grok"])
+    assert failover.live_chain(tmp_path, settings) == ("codex", "grok")
+    run_settings.path(tmp_path).write_text("{", encoding="utf-8")
+    assert failover.live_chain(tmp_path, settings) == ("claude",)
+
+
+def test_next_backup_accepts_a_tuple_chain():
+    assert failover.next_backup(("claude", "codex"), tried=set()) == "claude"

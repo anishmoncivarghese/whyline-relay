@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Callable
 
 from whyline_relay import agents, config
@@ -503,8 +504,17 @@ def rate_limited(adapter: Adapter, text: str, command: list[str]) -> bool:
     return agents.rate_limited(grok.rate_limit_text(adapter, text, command))
 
 
+def live_chain(root: Path, settings: config.Config) -> tuple[str, ...]:
+    """The backup order in force right now, including a live run-settings
+    change. An agent already standing in for a role is not chosen from this
+    list; it is already in active-roles.json and keeps its turn."""
+    from whyline_relay import run_settings
+
+    return run_settings.effective(root, settings).backup_chain
+
+
 def next_backup(
-    chain: list[str], tried: set[str], exclude: frozenset[str] = frozenset()
+    chain: Sequence[str], tried: set[str], exclude: frozenset[str] = frozenset()
 ) -> str | None:
     """The first chain entry not already tried or excluded, or None if the
     chain is exhausted. Callers add the just-failed agent to `tried` before

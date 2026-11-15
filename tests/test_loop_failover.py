@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import config, failover, loop, plan, roles
+from whyline_relay import config, failover, loop, plan, roles, run_settings
 
 
 FAKE = str(Path(__file__).parent / "fake_role_agent.py")
@@ -640,3 +640,72 @@ def test_plan_completion_removes_switches_without_keep(repo):
     remaining = roles.read_model_overrides(repo)
     assert set(remaining) == {"codex"}
     assert 'model = "o3"' in config.config_path(repo).read_text()
+
+
+def test_a_changed_chain_is_used_at_the_next_failover(repo, tmp_path, monkeypatch):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    base = config.load(repo)
+    settings = config.Config(
+        plan=base.plan,
+        max_rounds=base.max_rounds,
+        timeout_minutes=base.timeout_minutes,
+        branch_prefix=base.branch_prefix,
+        agents={
+            "codex": [sys.executable, str(limited)],
+            "claude": [
+                sys.executable, FAKE, str(repo), "claude", "claude",
+                "approved", "yes",
+            ],
+            "aider": [sys.executable, str(limited)],
+            "cline": [
+                sys.executable, FAKE, str(repo), "cline", "claude",
+                "ready-for-review", "no",
+            ],
+        },
+        status_map=base.status_map,
+        adapters={"aider": "generic", "cline": "generic"},
+        backup_chain=["aider"],
+    )
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        if kwargs["agent_name"] == "codex":
+            run_settings.set_backup(repo, settings, ["cline"])
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base_commit = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base_commit, echo=False)
+    assert outcome.committed
+    assert failover.read_overrides(repo)["implementer"].agent == "cline"
+
+
+def test_a_removed_stand_in_finishes_its_turn(repo, tmp_path, monkeypatch):
+    limited = tmp_path / "limited.py"
+    limited.write_text(RATE_LIMITED)
+    settings = settings_with_backup(
+        repo,
+        [sys.executable, str(limited)],
+        "aider",
+        [
+            sys.executable, FAKE, str(repo), "aider", "claude",
+            "ready-for-review", "no",
+        ],
+        ["aider"],
+    )
+    real_run = loop.agents.run
+    seen: list[str] = []
+
+    def spy(command, prompt, **kwargs):
+        seen.append(kwargs["agent_name"])
+        if kwargs["agent_name"] == "aider":
+            run_settings.set_backup(repo, settings, [])
+        return real_run(command, prompt, **kwargs)
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    assert seen[:3] == ["codex", "aider", "claude"]
+    assert failover.read_overrides(repo)["implementer"].agent == "aider"
