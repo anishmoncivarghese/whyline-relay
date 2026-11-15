@@ -43,7 +43,7 @@ Global constraints:
   8. `run-settings.json` joins the run-time files the relay's `.gitignore` covers and its commit step leaves out.
   Tests: `test_round_cap_below_current_round_is_refused`, `test_backup_order_is_validated`, `test_without_keep_nothing_lasts`, each setter's message and its bounds, a value equal to the configured one removing the change, `keep` changing only its own line, `reset` for one and for all, and the `.gitignore` line.
 
-- [ ] LRS-2: The loop uses the changed values
+- [x] LRS-2: The loop uses the changed values
   Edit `src/whyline_relay/loop.py`, `src/whyline_relay/failover.py` and their tests only.
   1. Where a turn is started, its timeout comes from `run_settings.effective(root, settings).timeout_minutes`, read once for that turn.
   2. Every place that compares a round with `settings.max_rounds`, and every message that prints it, uses the effective cap, read at that check.
