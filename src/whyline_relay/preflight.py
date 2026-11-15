@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from whyline_relay import (
     plan,
     planner,
     prompts,
+    recipes,
     roles,
     running,
 )
@@ -119,23 +121,30 @@ def _relay_setup(root: Path) -> tuple[Check, config.Config | None]:
             None,
         )
 
-    missing: list[Path] = []
-    invalid: list[str] = []
+    problems: list[str] = []
     for _, (command, _) in _agents_in_use(settings).items():
-        for index, argument in enumerate(command):
-            if argument != "--settings":
+        for value in recipes.settings_values(command):
+            if not value:
+                problems.append("--settings has no path")
                 continue
-            if index + 1 == len(command):
-                invalid.append("--settings has no path")
+            path = recipes.settings_file(value)
+            if path is None:
+                try:
+                    json.loads(value)
+                except ValueError:
+                    problems.append(f"--settings is not valid JSON: {value[:60]}…")
                 continue
-            path = Path(command[index + 1])
             resolved = path if path.is_absolute() else root / path
-            if not resolved.is_file():
-                missing.append(path)
-    if invalid or missing:
-        details = [*invalid, *(f"settings file is missing: {path}" for path in missing)]
+            try:
+                exists = resolved.is_file()
+            except OSError:
+                problems.append(f"--settings is not a usable path: {value[:60]}…")
+                continue
+            if not exists:
+                problems.append(f"settings file is missing: {path}")
+    if problems:
         return _result(
-            "FAIL", "; ".join(details), invocation.command("init")
+            "FAIL", "; ".join(problems), invocation.command("init")
         ), settings
     return _result("ok", "relay setup is complete"), settings
 

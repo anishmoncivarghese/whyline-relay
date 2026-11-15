@@ -5,6 +5,7 @@ hand-written config. A repository's own [agents.<name>] always wins."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 # Headless grok ends its whole turn as "cancelled" on any command outside its
 # allow list (measured on grok 1.0.41), instead of refusing that one command,
@@ -84,3 +85,22 @@ RECIPES: dict[str, tuple[str, ...]] = {
 # A recipe is skipped when the config already names the agent under one of
 # these older keys (chat.AGENT_ALIASES maps agy -> antigravity).
 ALIASES: dict[str, tuple[str, ...]] = {"antigravity": ("agy",)}
+
+
+def settings_values(command: list[str] | tuple[str, ...]) -> list[str]:
+    """Every value given to `--settings`, in order, for `--settings <value>`
+    and `--settings=<value>`. A trailing `--settings` gives the empty string."""
+    values: list[str] = []
+    for index, argument in enumerate(command):
+        if argument == "--settings":
+            values.append(command[index + 1] if index + 1 < len(command) else "")
+        elif argument.startswith("--settings="):
+            values.append(argument[len("--settings="):])
+    return values
+
+
+def settings_file(value: str) -> Path | None:
+    """None for inline JSON, otherwise the path. Never touches the disk."""
+    if value.lstrip().startswith("{"):
+        return None
+    return Path(value).expanduser()

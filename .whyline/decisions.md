@@ -6826,3 +6826,46 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 15317b3c558b4d03b54f22533a226ec8 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:26:01.011Z","commit":"19c0a58b265f5ec7fa67d501de23f4f07181028c"} -->
+
+## 2026-11-15 — Classify --settings values in recipes (settings_values/settings_file) and catch OSError from is_file in preflight
+
+**Actor:** claude
+**Role:** implementer
+**Task:** PFS-1
+
+**Because:** Inline JSON (Antigravity) was treated as a path and a long value made is_file raise ENAMETOOLONG, crashing preflight; classifying without touching the disk and reporting OSError as a failed check fixes every such value
+
+**Rejected:**
+
+- Change the Antigravity recipe to write a settings file — more moving parts, other long values would still crash
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/recipes.py
+
+<!-- whyline-event: cd62735299334a22a10388cf9a20bd1f -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:34:15.282Z"} -->
+
+## 2026-11-15 — PFS-1 reads --settings values safely
+
+**Actor:** grok
+**Role:** tester
+**Task:** PFS-1
+
+**Because:** Full suite 1425 passed. settings_values handles both forms and a trailing empty value; settings_file returns None for inline JSON without touching the disk; _relay_setup reports empty, invalid JSON, unusable OSError paths and missing files as one FAIL with whyline-relay init; Antigravity's 741-char JSON and every builtin recipe in each role pass setup.
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/recipes.py, tests/test_preflight.py, tests/test_recipes.py
+
+<!-- whyline-event: 644356cb491e423f872750d68e8a18e9 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:42:35.221Z"} -->
+
+## 2026-11-15 — Approve PFS-1: --settings values are classified without crashing on long paths
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** PFS-1
+
+**Because:** uv run pytest -q exited 0. settings_values reads both forms and a trailing empty value; settings_file returns None for inline JSON without touching the disk; _relay_setup reports empty, invalid JSON, unusable OSError paths and missing files as one FAIL with whyline-relay init; Antigravity keeps its inline JSON; every builtin recipe in each role and the backup chain passes setup.
+
+**Files:** src/whyline_relay/preflight.py, src/whyline_relay/recipes.py, tests/test_preflight.py, tests/test_recipes.py
+
+<!-- whyline-event: 2aac9d39eca44cd5a862d27f78198ef5 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:50:19.703Z"} -->

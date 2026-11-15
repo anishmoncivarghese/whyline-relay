@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -5,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from whyline_relay import cli, loop, plan, preflight, prompts, state
+from whyline_relay import cli, loop, plan, preflight, prompts, recipes, state
 
 
 def _git(root: Path, *args: str) -> None:
@@ -283,6 +284,70 @@ def test_relay_setup_requires_configured_settings_file(ready_repo: Path):
     assert check == preflight.Check(
         "FAIL", "settings file is missing: missing.json", "whyline-relay init"
     )
+
+
+def _setup_with(ready_repo: Path, *claude_args: str) -> preflight.Check:
+    (ready_repo / ".whyline" / "relay" / "config.toml").write_text(
+        '[agents.codex]\ncommand = ["python", "run.py"]\n'
+        f"[agents.claude]\ncommand = {json.dumps(['python', 'run.py', *claude_args])}\n"
+    )
+    return preflight._relay_setup(ready_repo)[0]
+
+
+def test_the_settings_file_form_with_equals_and_a_missing_file_fails(ready_repo: Path):
+    check = _setup_with(ready_repo, "--settings=missing.json")
+    assert check == preflight.Check(
+        "FAIL", "settings file is missing: missing.json", "whyline-relay init"
+    )
+
+
+def test_invalid_inline_json_settings_fails(ready_repo: Path):
+    check = _setup_with(ready_repo, "--settings", '{"permissions": ')
+    assert check.status == "FAIL"
+    assert check.message == '--settings is not valid JSON: {"permissions": …'
+    assert check.hint == "whyline-relay init"
+
+
+def test_inline_json_settings_is_not_a_path(ready_repo: Path):
+    value = json.dumps({"permissions": {"allow": [f"command(c{i})" for i in range(60)]}})
+    assert len(value) > 700
+    for args in (("--settings", value), (f"--settings={value}",)):
+        assert _setup_with(ready_repo, *args).status == "ok"
+
+
+def test_unusable_settings_value_is_a_failed_check(ready_repo: Path):
+    value = "x" * 300
+    check = _setup_with(ready_repo, "--settings", value)
+    assert check.status == "FAIL"
+    assert check.message.startswith("--settings is not a usable path: ")
+    assert "x" * 61 not in check.message
+    assert check.hint == "whyline-relay init"
+
+
+@pytest.mark.parametrize("role", ["implementer", "tester", "reviewer", "backup"])
+@pytest.mark.parametrize("name", sorted(recipes.RECIPES))
+def test_every_builtin_recipe_passes_setup(tmp_path: Path, name: str, role: str):
+    _git(tmp_path, "init", "-b", "main")
+    (tmp_path / "plan.md").write_text("- [ ] APP-1: Build it\n  Include tests.\n")
+    roles = {"implementer": "codex", "tester": "codex", "reviewer": "codex"}
+    backup = ""
+    if role == "backup":
+        backup = f'[backup]\nchain = ["{name}"]\n'
+    else:
+        roles[role] = name
+    toml = (
+        'plan = "plan.md"\n[roles]\n'
+        + "".join(f'{key} = "{value}"\n' for key, value in roles.items())
+        + "[pipeline]"
+        + PIPELINE_TOML.split("[pipeline]", 1)[1]
+        + backup
+    )
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(toml)
+    check, settings = preflight._relay_setup(tmp_path)
+    assert settings is not None
+    assert check == preflight.Check("ok", "relay setup is complete")
 
 
 def test_every_distinct_configured_program_is_checked(ready_repo: Path, monkeypatch):

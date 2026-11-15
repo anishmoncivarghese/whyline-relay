@@ -24,6 +24,18 @@ def test_recipes_end_with_the_prompt_flag(tmp_path):
         assert command[-1] == "-p"
 
 
+def test_settings_values_reads_both_forms_in_order():
+    command = ["a", "--settings", "one.json", "--settings={\"x\": 1}", "--settings"]
+    assert recipes.settings_values(command) == ["one.json", '{"x": 1}', ""]
+    assert recipes.settings_values(["a", "-p"]) == []
+
+
+def test_settings_file_is_none_for_inline_json_and_never_touches_the_disk():
+    assert recipes.settings_file('  {"a": 1}') is None
+    assert recipes.settings_file("~/s.json") == Path("~/s.json").expanduser()
+    assert recipes.settings_file("x" * 300) == Path("x" * 300)
+
+
 def test_a_repos_own_agent_table_wins(tmp_path):
     _write(tmp_path, '[agents.grok]\nadapter = "generic"\ncommand = ["grok", "-p"]\n')
     assert config.load(tmp_path).agents["grok"] == ["grok", "-p"]
