@@ -31,7 +31,7 @@ Global constraints:
 - An unreadable `run-settings.json` leaves the configured values in force. LRS-2, `test_unreadable_file_changes_nothing`.
 - Without `--keep`, `config.toml` is byte for byte what it was, and the file is gone when the run ends. LRS-1, `test_without_keep_nothing_lasts`.
 
-- [ ] LRS-1: The run-settings file and its rules
+- [x] LRS-1: The run-settings file and its rules
   Create `src/whyline_relay/run_settings.py` and `tests/test_run_settings.py`. Edit `src/whyline_relay/setup.py` (or the module that holds the relay's run-time `.gitignore` lines, RLY-17) and its tests.
   1. `RunSettings`: `timeout_minutes: int | None`, `max_rounds: int | None`, `backup_chain: tuple[str, ...] | None`, `since`, `keep`. None means "not changed".
   2. `path(root)` is `.whyline/relay/run-settings.json`. `read(root) -> RunSettings` raises `Unreadable` on bad JSON or a wrong shape. `effective(root, settings) -> Effective` (`timeout_minutes`, `max_rounds`, `backup_chain`, and `changed: dict[str, tuple[old, new]]`) never raises: an unreadable file gives the configured values and `problem` set to one line.
