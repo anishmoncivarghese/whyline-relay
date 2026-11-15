@@ -42,7 +42,7 @@ Global constraints:
   4. No recipe changes. Antigravity keeps its inline JSON.
   Tests: `test_every_builtin_recipe_passes_setup` (a repository set up the way `init` does it; each name in `recipes.RECIPES` placed in turn as implementer, tester, reviewer and in the backup chain, using the built-in command), `test_inline_json_settings_is_not_a_path` (both forms, with a 741-character value), `test_unusable_settings_value_is_a_failed_check` (a 300-character value that is not JSON; the message holds at most 60 characters of it), invalid inline JSON, the `--settings=` form with a missing file, and the existing missing-file test unchanged.
 
-- [ ] PFS-2: One broken check never takes down the preflight
+- [x] PFS-2: One broken check never takes down the preflight
   Edit `src/whyline_relay/preflight.py`, `src/whyline_relay/cli.py` and their tests only.
   1. In `preflight.run`, each check (the git check, `_whyline`, `_relay_setup`, `_programs`, `_logins`, `_role_checks`, the pipeline stage checks and every check after them) runs through one helper. When a check raises anything other than `KeyboardInterrupt` or `SystemExit`, the helper returns a FAIL check `<check name> could not run: <ErrorType>: <first line of the message, at most 200 characters>` with the hint `run whyline-relay doctor again; if it repeats, report it`, and the remaining checks run.
   2. When `_relay_setup` itself could not run, the checks that need its settings are skipped, as they are today when the config is missing.
