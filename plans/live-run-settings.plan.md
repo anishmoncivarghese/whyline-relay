@@ -54,7 +54,7 @@ Global constraints:
   7. A relay paused on the round cap resumes when the cap is raised above the task's round and `resume` is run; nothing resumes by itself.
   Tests: `test_running_turn_keeps_its_timeout` (a change during a fake turn applies to the next one only), `test_unreadable_file_changes_nothing`, a raised cap letting a task take a fourth round, a changed chain used at the next failover, a removed stand-in finishing its turn, the single log line, and the file cleared at the end of the run.
 
-- [ ] LRS-3: `whyline-relay settings`, and `status`
+- [x] LRS-3: `whyline-relay settings`, and `status`
   Edit `src/whyline_relay/cli.py`, `src/whyline_relay/status.py`, `src/whyline_relay/roles.py` (tests only, unless the backup test below fails) and their tests.
   1. `whyline-relay settings` prints the three values, each as `timeout 45m (was 30m, changed by you)` or `timeout 30m`.
   2. `whyline-relay settings timeout <minutes> [--keep]`, `settings rounds <n> [--keep]`, `settings backup [<agent> …] [--keep]` and `settings reset [timeout|rounds|backup]` call the functions in LRS-1 and print their message. `rounds` passes the running task's round from `running.json` as `current_round`. Errors exit 2 with the message.
