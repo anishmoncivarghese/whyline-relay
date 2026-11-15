@@ -7231,3 +7231,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: e66baf98d45a4ce9ace07f4bd65b2498 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T18:24:31.272Z"} -->
+
+## 2026-11-15 — Release settings file with the PyPI target on, and the release workflow reuses an existing GitHub release
+
+**Actor:** claude
+**Role:** release
+**Task:** LRS-4
+
+**Because:** 0.2.45 showed finished in the console while the tag workflow went red: the button created the GitHub release first, the workflow's create step then failed, and with no PyPI target nothing waited for or checked the publish
+
+**Rejected:**
+
+- Remove the workflow's GitHub release step — tags pushed by hand would then get no release or files
+- Leave the target off and check PyPI by hand — finished would still be printed if the publish failed
+
+**Files:** .github/workflows/release.yml, .whyline/release.toml
+
+<!-- whyline-event: 581448ba8a8e4b0183cdfc8adc020daa -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T19:25:18.719Z"} -->
