@@ -30,7 +30,7 @@ Global constraints:
 - A value the operating system refuses as a path is a failed check, not an exception. PFS-1, `test_unusable_settings_value_is_a_failed_check`.
 - A check that raises is reported as a failed check and the checks after it still run. PFS-2, `test_a_broken_check_does_not_stop_the_rest`.
 
-- [ ] PFS-1: The setup check reads `--settings` values safely
+- [x] PFS-1: The setup check reads `--settings` values safely
   Edit `src/whyline_relay/recipes.py`, `src/whyline_relay/preflight.py`, `tests/test_preflight.py` and `tests/test_recipes.py` only.
   1. `recipes.settings_values(command) -> list[str]`: every value given to `--settings` in a command, in order, for both forms: `--settings <value>` and `--settings=<value>`. A trailing `--settings` with nothing after it gives the empty string.
   2. `recipes.settings_file(value) -> Path | None`: None when the value is inline JSON (after `lstrip()` it starts with `{`), otherwise `Path(value).expanduser()`. It never touches the disk.
