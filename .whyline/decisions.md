@@ -6808,3 +6808,21 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: b72434ff4db543f7b4cad513e347f56c -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-07T16:17:51.080Z"} -->
+
+## 2026-11-15 — Fix the preflight crash on Antigravity's inline --settings in whyline-relay itself (PFS-1..3), and isolate every preflight check
+
+**Actor:** claude
+**Role:** planner
+**Task:** PFS-1
+
+**Because:** The bug is in the package, not in any repo's config, so one release fixes every repo and every install; whyline then raises its minimum to 0.2.44 (agentdock RDF-5) so an upgrade cannot keep a broken relay
+
+**Rejected:**
+
+- Change the Antigravity recipe to write a settings file — more moving parts, and the preflight would still crash on any other long value
+- Per-repo workaround only (swap the tester) — leaves every other user exposed
+
+**Files:** plans/preflight-settings.plan.md
+
+<!-- whyline-event: 15317b3c558b4d03b54f22533a226ec8 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:26:01.011Z","commit":"19c0a58b265f5ec7fa67d501de23f4f07181028c"} -->
