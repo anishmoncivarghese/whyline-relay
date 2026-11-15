@@ -434,3 +434,18 @@ def test_a_kept_switch_is_not_shown_once_config_toml_has_it(tmp_path):
     settings = _sonnet_claude(tmp_path)
     roles.switch_model(tmp_path, settings, "claude", "opus", keep=True)
     assert "switched from" not in roles.status(tmp_path, config.load(tmp_path))
+
+
+def test_backup_only_agent_can_switch_model(tmp_path):
+    _write(
+        tmp_path,
+        '[roles]\nimplementer = "codex"\nreviewer = "codex"\n'
+        '[backup]\nchain = ["claude"]\n'
+        '[agents.claude]\nmodel = "sonnet"\n',
+    )
+    settings = config.load(tmp_path)
+    assert "claude" not in roles.current_roles(settings).values()
+    assert settings.backup_chain == ["claude"]
+    message = roles.switch_model(tmp_path, settings, "claude", "opus")
+    assert message == "claude → opus from its next turn."
+    assert roles.read_model_overrides(tmp_path)["claude"].model == "opus"

@@ -31,6 +31,7 @@ from whyline_relay import (
     prompts,
     remove,
     roles,
+    run_settings,
     running,
     setup,
     state,
@@ -441,6 +442,67 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument(
         "--repo", default=".", help="Use this repository root (default: current directory)."
     )
+
+    settings_parser = subparsers.add_parser(
+        "settings",
+        help="Show or change this run's timeout, round cap, and backups",
+    )
+    settings_parser.add_argument(
+        "--repo",
+        default=".",
+        help="Use this repository root (default: current directory).",
+    )
+    settings_sub = settings_parser.add_subparsers(
+        dest="settings_command", required=False
+    )
+    keep_help = (
+        "Also write the value to config.toml, so later runs start with it."
+    )
+    timeout_cmd = settings_sub.add_parser(
+        "timeout", help="Change the per-turn timeout from the next turn"
+    )
+    timeout_cmd.add_argument(
+        "minutes", type=int, help="Minutes; 0 means no limit."
+    )
+    timeout_cmd.add_argument("--keep", action="store_true", help=keep_help)
+    timeout_cmd.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    rounds_cmd = settings_sub.add_parser(
+        "rounds", help="Change the round cap from the next check"
+    )
+    rounds_cmd.add_argument(
+        "rounds", type=int, metavar="N", help="Round cap (1 to 99)."
+    )
+    rounds_cmd.add_argument("--keep", action="store_true", help=keep_help)
+    rounds_cmd.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    backup_cmd = settings_sub.add_parser(
+        "backup",
+        help="Change the backup order from the next time one is needed",
+    )
+    backup_cmd.add_argument(
+        "agents",
+        nargs="*",
+        help="Backup agents in order. Omit them all for no backups.",
+    )
+    backup_cmd.add_argument("--keep", action="store_true", help=keep_help)
+    backup_cmd.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    reset_cmd = settings_sub.add_parser(
+        "reset", help="Drop a live-run change, or every one"
+    )
+    reset_cmd.add_argument(
+        "what",
+        nargs="?",
+        default=None,
+        help="timeout, rounds, or backup (default: all three).",
+    )
+    reset_cmd.add_argument(
+        "--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
     return parser
 
 
@@ -707,6 +769,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(pause_line)
     if models := relay_status.model_lines(root):
         print(models)
+    if line := relay_status.settings_line(root):
+        print(line)
     saved = state.load(root)
     if saved is None:
         if active is None:
@@ -840,6 +904,46 @@ def cmd_roles(args: argparse.Namespace) -> int:
         )
         return EXIT_ERROR
     print(roles.reset(root, args.role))
+    return EXIT_OK
+
+
+def cmd_settings(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    settings = config.load(root)
+    command = args.settings_command
+    if command is None:
+        print(relay_status.settings_listing(root))
+        return EXIT_OK
+    live = running.live(root) is not None
+    keep = bool(getattr(args, "keep", False) or not live)
+    try:
+        if command == "timeout":
+            message = run_settings.set_timeout(
+                root, settings, args.minutes, keep=keep
+            )
+        elif command == "rounds":
+            marker = running.live(root)
+            current_round = marker.round if marker is not None else None
+            message = run_settings.set_rounds(
+                root,
+                settings,
+                args.rounds,
+                keep=keep,
+                current_round=current_round,
+            )
+        elif command == "backup":
+            message = run_settings.set_backup(
+                root, settings, args.agents, keep=keep
+            )
+        else:
+            message = run_settings.reset(root, args.what)
+    except run_settings.RunSettingsError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return EXIT_USAGE
+    if command != "reset" and not live:
+        print(f"{message} Saved for the next run.")
+    else:
+        print(message)
     return EXIT_OK
 
 
@@ -1296,6 +1400,7 @@ def main(argv: list[str] | None = None, prog: str = "whyline-relay") -> int:
             "plan": cmd_plan,
             "chat": cmd_chat,
             "setup": cmd_setup,
+            "settings": cmd_settings,
         }
         try:
             return commands[args.command](args)

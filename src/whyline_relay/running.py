@@ -24,6 +24,10 @@ class Running:
     visit: int = 0
     # The model the turn runs on; "" for the agent CLI's default.
     model: str = ""
+    # Timeout and round cap this turn started with; None on markers from
+    # older relays that did not record them.
+    timeout_minutes: int | None = None
+    max_rounds: int | None = None
 
 
 class AlreadyRunning(RuntimeError):
@@ -53,6 +57,16 @@ def read(root: Path) -> Running | None:
     if not isinstance(marker.role, str) or not isinstance(marker.stage, str):
         return None
     if not isinstance(marker.visit, int) or not isinstance(marker.model, str):
+        return None
+    if marker.timeout_minutes is not None and (
+        isinstance(marker.timeout_minutes, bool)
+        or not isinstance(marker.timeout_minutes, int)
+    ):
+        return None
+    if marker.max_rounds is not None and (
+        isinstance(marker.max_rounds, bool)
+        or not isinstance(marker.max_rounds, int)
+    ):
         return None
     return marker
 
@@ -133,6 +147,8 @@ def start_turn(
     stage: str = "",
     visit: int = 0,
     model: str = "",
+    timeout_minutes: int | None = None,
+    max_rounds: int | None = None,
 ) -> Running:
     """Atomically claim the repository, or update this process's current turn."""
     marker = Running(
@@ -145,6 +161,8 @@ def start_turn(
         stage=stage,
         visit=visit,
         model=model,
+        timeout_minutes=timeout_minutes,
+        max_rounds=max_rounds,
     )
     target = path(root)
     temporary = _temporary(target, marker)

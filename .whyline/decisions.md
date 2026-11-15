@@ -7133,3 +7133,101 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 15689cfae604489397ebdd6e5e50d9d4 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:42:50.644Z"} -->
+
+## 2026-11-15 — Record the turn timeout and round cap on running.json from start_turn
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-3
+
+**Because:** LRS-3 requires those two fields on the turn that started, and start_turn is the only writer of running.json
+
+**Rejected:**
+
+- leave running.py and loop.py untouched — the file would never gain the fields
+
+**Files:** src/whyline_relay/running.py
+
+<!-- whyline-event: 011f5fa34ee240b2bca2cabfea4db229 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:56:44.749Z"} -->
+
+## 2026-11-15 — No-relay settings prints the LRS-1 message plus Saved for the next run
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-3
+
+**Because:** the task says print their message and also that the idle case says Saved for the next run
+
+**Rejected:**
+
+- replace the LRS-1 suffix — that would drop the setter message
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 6ed5cdef627a4836b58fcffe43ceb670 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:56:48.234Z"} -->
+
+## 2026-11-15 — rounds reads current_round from running.live, not a stale marker
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-3
+
+**Because:** only a live turn's round should block a lower cap
+
+**Rejected:**
+
+- running.read — a dead pid's round would refuse a valid cap
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 4c85fd2cc75b442caceb275c14683b0c -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:56:51.618Z"} -->
+
+## 2026-11-15 — status Settings line joins changed values with a semicolon
+
+**Actor:** grok
+**Role:** implementer
+**Task:** LRS-3
+
+**Because:** the task asks for one Settings line with any changed value
+
+**Rejected:**
+
+- one Settings line per field — that is several lines
+
+**Files:** src/whyline_relay/status.py
+
+<!-- whyline-event: be9aadcee5304862bd7457a70f3e5ed3 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T17:56:54.860Z"} -->
+
+## 2026-11-15 — Pass LRS-3: settings command, status line, running.json fields, backup-only model switch
+
+**Actor:** claude
+**Role:** tester
+**Task:** LRS-3
+
+**Because:** uv run pytest -q exited 0 in full; targeted settings/status/roles/running/loop tests pass, including test_backup_only_agent_can_switch_model
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: 13614fe1458a42c2a2a51d9ce7a83afa -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T18:10:03.175Z"} -->
+
+## 2026-11-15 — Approve LRS-3 settings, status, running marker, and backup-model behavior
+
+**Actor:** codex
+**Role:** reviewer
+**Task:** LRS-3
+
+**Because:** The implementation matches all six requirements, preserves old running markers, and the plain full pytest suite plus diff check pass
+
+**Rejected:**
+
+- Request changes — no concrete correctness, coverage, or safety defect was found
+
+**Files:** src/whyline_relay/cli.py
+
+<!-- whyline-event: e66baf98d45a4ce9ace07f4bd65b2498 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T18:24:31.272Z"} -->

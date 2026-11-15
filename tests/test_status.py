@@ -214,3 +214,40 @@ def test_status_command_prints_pausing_under_the_running_line(
 def test_status_command_prints_no_pause_line_when_none(tmp_path: Path, capsys):
     assert cli.main(["status", "--repo", str(tmp_path)]) == cli.EXIT_OK
     assert capsys.readouterr().out == "No relay run in progress.\n"
+
+
+def test_settings_line_is_empty_when_nothing_changed(tmp_path: Path):
+    assert status.settings_line(tmp_path) == ""
+
+
+def test_settings_line_lists_each_changed_value(tmp_path: Path):
+    from whyline_relay import config, run_settings
+
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        "timeout_minutes = 30\nmax_rounds = 3\n", encoding="utf-8"
+    )
+    settings = config.load(tmp_path)
+    run_settings.set_timeout(tmp_path, settings, 45)
+    run_settings.set_rounds(tmp_path, settings, 5)
+    assert status.settings_line(tmp_path) == (
+        "Settings: timeout 45m (was 30m, changed by you); "
+        "rounds 5 (was 3, changed by you)"
+    )
+
+
+def test_status_command_prints_the_settings_line(tmp_path: Path, capsys):
+    from whyline_relay import config, run_settings
+
+    relay = tmp_path / ".whyline" / "relay"
+    relay.mkdir(parents=True)
+    (relay / "config.toml").write_text(
+        "timeout_minutes = 30\n", encoding="utf-8"
+    )
+    run_settings.set_timeout(tmp_path, config.load(tmp_path), 45)
+
+    assert cli.main(["status", "--repo", str(tmp_path)]) == cli.EXIT_OK
+    out = capsys.readouterr().out.splitlines()
+    assert "Settings: timeout 45m (was 30m, changed by you)" in out
+    assert out[-1] == "No relay run in progress."

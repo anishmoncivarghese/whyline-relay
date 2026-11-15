@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from whyline_relay import config, invocation, loop, roles, running, state
+from whyline_relay import config, invocation, loop, roles, run_settings, running, state
 
 NONE = "none"
 PAUSING = "pausing"
@@ -94,6 +94,47 @@ def model_lines(root: Path) -> str:
     except config.ConfigError:
         return ""
     return roles.model_status(root, settings)
+
+
+def _backup_text(chain) -> str:
+    names = tuple(chain) if chain else ()
+    return "none" if not names else ", then ".join(str(name) for name in names)
+
+
+def _setting_fragments(root: Path, *, changed_only: bool) -> list[str]:
+    try:
+        settings = config.load(root)
+    except config.ConfigError:
+        return []
+    got = run_settings.effective(root, settings)
+    specs = (
+        ("timeout_minutes", "timeout", lambda value: f"{int(value)}m"),
+        ("max_rounds", "rounds", lambda value: str(int(value))),
+        ("backup_chain", "backup", _backup_text),
+    )
+    lines = []
+    for field, name, render in specs:
+        if field in got.changed:
+            old, new = got.changed[field]
+            lines.append(
+                f"{name} {render(new)} (was {render(old)}, changed by you)"
+            )
+        elif not changed_only:
+            lines.append(f"{name} {render(getattr(got, field))}")
+    return lines
+
+
+def settings_listing(root: Path) -> str:
+    """The three values, one per line, for `whyline-relay settings`."""
+    return "\n".join(_setting_fragments(root, changed_only=False))
+
+
+def settings_line(root: Path) -> str:
+    """`Settings:` plus any changed value; empty when none or config is unreadable."""
+    parts = _setting_fragments(root, changed_only=True)
+    if not parts:
+        return ""
+    return "Settings: " + "; ".join(parts)
 
 
 def _elapsed(seconds: float) -> str:

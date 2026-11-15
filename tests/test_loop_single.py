@@ -859,6 +859,34 @@ def test_running_turn_keeps_its_timeout(repo: Path, monkeypatch):
     assert seen == [30 * 60, 45 * 60]
 
 
+def test_running_json_records_the_timeout_and_round_cap(repo: Path, monkeypatch):
+    settings = replace(
+        settings_using("review", "approve", repo),
+        timeout_minutes=45,
+        max_rounds=5,
+    )
+    seen: list[tuple[object, object]] = []
+    real_run = loop.agents.run
+
+    def spy(command, prompt, **kwargs):
+        record = json.loads(
+            (repo / ".whyline" / "relay" / "running.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        seen.append((record.get("timeout_minutes"), record.get("max_rounds")))
+        code = real_run(command, prompt, **kwargs)
+        if "approve" in command:
+            commit_for_task(repo)
+        return code
+
+    monkeypatch.setattr(loop.agents, "run", spy)
+    base = loop.gitcheck.head_commit(repo)
+    outcome = loop.run_task(repo, settings, TASK, base_commit=base, echo=False)
+    assert outcome.committed
+    assert seen == [(45, 5), (45, 5)]
+
+
 def test_unreadable_file_changes_nothing(repo: Path, monkeypatch, capsys):
     settings = settings_using("review", "approve", repo)
     target = run_settings.path(repo)

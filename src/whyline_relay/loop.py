@@ -451,6 +451,7 @@ def run_agent(
             "remove it from .whyline/relay/config.toml",
             None,
         )
+    effective = _live_settings(root, settings, echo=echo, live=live)
     running.start_turn(
         root,
         agent,
@@ -460,6 +461,8 @@ def run_agent(
         stage=stage,
         visit=visit,
         model=model,
+        timeout_minutes=effective.timeout_minutes,
+        max_rounds=effective.max_rounds,
     )
     packet = whylinecmd.sync(root, task.task_id)
     prompt = prompts.render(
@@ -495,7 +498,6 @@ def run_agent(
         "implementing" if role == "implementer" else "reviewing"
     )
     revisit = f", visit {visit}" if visit > 1 else ""
-    effective = _live_settings(root, settings, echo=echo, live=live)
     if echo:
         agents.print_status(
             f"==> {agent}: {action} {task.task_id}{revisit} "

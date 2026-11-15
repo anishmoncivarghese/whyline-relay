@@ -82,3 +82,21 @@ def test_start_turn_writes_the_stage_and_visit(tmp_path):
     assert (record["stage"], record["visit"]) == ("draft", 2)
     assert running.read(tmp_path).visit == 2
 
+
+def test_start_turn_records_the_timeout_and_round_cap(tmp_path):
+    running.start_turn(
+        tmp_path, "claude", "T-1", 2, timeout_minutes=45, max_rounds=5
+    )
+    record = json.loads(running.path(tmp_path).read_text(encoding="utf-8"))
+
+    assert (record["timeout_minutes"], record["max_rounds"]) == (45, 5)
+    marker = running.read(tmp_path)
+    assert (marker.timeout_minutes, marker.max_rounds) == (45, 5)
+
+
+def test_a_marker_without_timeout_or_round_cap_still_reads(tmp_path):
+    write_marker(tmp_path, agent="claude", pid=os.getpid())
+    marker = running.read(tmp_path)
+
+    assert (marker.timeout_minutes, marker.max_rounds) == (None, None)
+
