@@ -6869,3 +6869,46 @@ Append-only. Written by whyline; readable without it.
 
 <!-- whyline-event: 2aac9d39eca44cd5a862d27f78198ef5 -->
 <!-- whyline-meta: {"v":1,"ts":"2026-11-15T09:50:19.703Z"} -->
+
+## 2026-11-15 — Preflight checks run through an attempt/add helper inside run; a crash becomes a FAIL line and later checks continue
+
+**Actor:** claude
+**Role:** implementer
+**Task:** PFS-2
+
+**Because:** one broken check must not hide the others or print a traceback; hint uses invocation.command so embedded callers see the right program name
+
+**Rejected:**
+
+- try/except around the whole run — later checks would be lost
+
+**Files:** src/whyline_relay/preflight.py
+
+<!-- whyline-event: 0880cc4f40f045a5b5c6efa1901e7752 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T10:00:40.519Z"} -->
+
+## 2026-11-15 — PFS-2: a crashed check is a FAIL line; remaining checks still run; doctor exits error with no traceback
+
+**Actor:** grok
+**Role:** tester
+**Task:** PFS-2
+
+**Because:** uv run pytest -q exited 0 with 1430 passed. The five new tests pass: OSError in _logins yields FAIL and later checks continue; a raising _relay_setup skips settings-dependent checks; KeyboardInterrupt passes through; the 200-character cap holds; doctor exits EXIT_ERROR with no traceback on stderr. ValueError for a wrong scope or allow_dirty still raises. Every check in run goes through attempt/add.
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 6586a9d3d0464f7d9e8aa4c36b502000 -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T10:10:08.849Z"} -->
+
+## 2026-11-15 — Approve PFS-2: a crashed check is a FAIL line; remaining checks still run; doctor exits error with no traceback
+
+**Actor:** grok
+**Role:** reviewer
+**Task:** PFS-2
+
+**Because:** uv run pytest -q exited 0. Every check in run goes through attempt/add; a non-KeyboardInterrupt/SystemExit exception becomes FAIL '<name> could not run: <ErrorType>: <first 200 chars>' with the doctor hint, and later checks continue. A raising _relay_setup leaves settings None so login/role/stage checks are skipped as when config is missing. The scope and allow_dirty ValueErrors still raise before any check. cmd_doctor is unchanged and the new tests cover the five required cases.
+
+**Files:** src/whyline_relay/preflight.py, tests/test_preflight.py
+
+<!-- whyline-event: 2f6b40fdd5c44229bfe92dd2bd96d11b -->
+<!-- whyline-meta: {"v":1,"ts":"2026-11-15T10:17:16.451Z"} -->

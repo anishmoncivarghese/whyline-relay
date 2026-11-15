@@ -1254,3 +1254,75 @@ def test_preflight_accepts_exactly_1gb_free(ready_repo, monkeypatch):
     monkeypatch.setattr(preflight.shutil, "disk_usage", lambda path: Usage())
     checks = preflight.run(ready_repo, runner=successful_runner())
     assert all("disk has" not in check.message for check in checks)
+
+
+def test_a_broken_check_does_not_stop_the_rest(ready_repo: Path, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("boom")
+
+    monkeypatch.setattr(preflight, "_logins", boom)
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    messages = [check.message for check in checks]
+
+    index = messages.index("login checks could not run: OSError: boom")
+    assert checks[index].status == "FAIL"
+    assert checks[index].hint == "run whyline-relay doctor again; if it repeats, report it"
+    assert "working tree is clean" in messages[index + 1 :]
+    assert "no other relay is running here" in messages[index + 1 :]
+
+
+def test_a_raising_relay_setup_skips_the_settings_dependent_checks(
+    ready_repo: Path, monkeypatch
+):
+    def boom(root):
+        raise RuntimeError("no setup")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("needs settings")
+
+    monkeypatch.setattr(preflight, "_relay_setup", boom)
+    monkeypatch.setattr(preflight, "_logins", unexpected)
+    monkeypatch.setattr(preflight, "_role_checks", unexpected)
+    checks = preflight.run(ready_repo, runner=successful_runner())
+    messages = [check.message for check in checks]
+
+    assert "relay setup check could not run: RuntimeError: no setup" in messages
+    assert not any("could not run" in m for m in messages if "setup" not in m)
+    assert "no other relay is running here" in messages
+
+
+def test_keyboard_interrupt_passes_through_a_check(ready_repo: Path, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(preflight, "_logins", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        preflight.run(ready_repo, runner=successful_runner())
+
+
+def test_a_crash_message_keeps_one_line_of_at_most_200_characters(
+    ready_repo: Path, monkeypatch
+):
+    def boom(*args, **kwargs):
+        raise ValueError("x" * 500 + "\nsecond line")
+
+    monkeypatch.setattr(preflight, "_logins", boom)
+    checks = preflight.run(ready_repo, runner=successful_runner())
+
+    message = next(c.message for c in checks if c.message.startswith("login checks"))
+    assert message == "login checks could not run: ValueError: " + "x" * 200
+
+
+def test_doctor_reports_a_crashed_check_without_a_traceback(
+    ready_repo: Path, monkeypatch, capsys
+):
+    def boom(*args, **kwargs):
+        raise OSError("boom")
+
+    monkeypatch.setattr(preflight, "_programs", boom)
+    code = cli.main(["doctor", "--repo", str(ready_repo), "--allow-dirty"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_ERROR
+    assert "program checks could not run: OSError: boom" in captured.out
+    assert "Traceback" not in captured.err

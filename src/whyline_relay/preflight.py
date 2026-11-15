@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal, TextIO
+from typing import Any, Callable, Literal, TextIO
 
 from whyline_relay import (
     adapters,
@@ -519,108 +519,145 @@ def run(
     if scope == "repository" and allow_dirty:
         raise ValueError("allow_dirty is not valid for preflight scope 'repository'")
     root = root.resolve()
-    results = [
-        _result("ok", "directory is inside a git repository")
-        if _inside_git(root)
-        else _result(
-            "FAIL",
-            "directory is not inside a git repository",
-            "run it inside a git repository",
-        )
-    ]
-    results.append(_whyline(root, runner))
-    setup, settings = _relay_setup(root)
-    results.append(setup)
-    if scope == "full":
-        program_checks, _ = _programs(settings)
-        results.extend(program_checks)
-        if settings is not None:
-            results.extend(_logins(root, settings, runner))
-            results.extend(_role_checks(root, settings))
-            if settings.pipeline is not None:
-                for stage in settings.pipeline.stages.values():
-                    try:
-                        prompts.load(root, stage.prompt)
-                    except prompts.PromptError as error:
-                        results.append(
-                            _result(
-                                "FAIL",
-                                str(error),
-                                f"add .whyline/relay/prompts/{stage.prompt}.md, or name a "
-                                "built-in prompt (implement, review) instead",
-                            )
-                        )
+    results: list[Check] = []
 
-        selected_plan = plan_path
-        if selected_plan is None:
-            selected_plan = root / (
-                settings.plan if settings is not None else config.DEFAULTS["plan"]
+    def attempt(name: str, check: Callable[[], Any]) -> Any:
+        try:
+            return check()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as error:
+            results.append(_crashed(name, error))
+            return None
+
+    def add(name: str, check: Callable[[], list[Check]]) -> None:
+        results.extend(attempt(name, check) or [])
+
+    add(
+        "git check",
+        lambda: [
+            _result("ok", "directory is inside a git repository")
+            if _inside_git(root)
+            else _result(
+                "FAIL",
+                "directory is not inside a git repository",
+                "run it inside a git repository",
             )
-        elif not selected_plan.is_absolute():
-            selected_plan = root / selected_plan
-        results.extend(
-            _plan_checks(
+        ],
+    )
+    add("whyline check", lambda: [_whyline(root, runner)])
+    settings: config.Config | None = None
+    setup_result = attempt("relay setup check", lambda: _relay_setup(root))
+    if setup_result is not None:
+        setup, settings = setup_result
+        results.append(setup)
+    if scope == "full":
+        add("program checks", lambda: _programs(settings)[0])
+        if settings is not None:
+            loaded = settings
+            add("login checks", lambda: _logins(root, loaded, runner))
+            add("role checks", lambda: _role_checks(root, loaded))
+            add("pipeline stage checks", lambda: _stage_checks(root, loaded))
+
+        def plan_checks() -> list[Check]:
+            selected_plan = plan_path
+            if selected_plan is None:
+                selected_plan = root / (
+                    settings.plan if settings is not None else config.DEFAULTS["plan"]
+                )
+            elif not selected_plan.is_absolute():
+                selected_plan = root / selected_plan
+            return _plan_checks(
                 selected_plan,
                 settings.pipeline if settings is not None else None,
                 root=root,
                 settings=settings,
             )
-        )
+
+        add("plan checks", plan_checks)
     elif settings is not None:
-        for agent, (command, _) in _agents_in_use(settings).items():
-            adapter = config.adapter_for(settings, agent)
-            refusal = _bypass_result(agent, adapter.name, command)
-            if refusal is not None:
-                results.append(refusal)
+        loaded = settings
 
-    if scope == "repository":
-        try:
-            paths = gitcheck.blocking_dirty_paths(root)
-        except gitcheck.GitError as error:
-            results.append(_result("FAIL", f"could not check working tree: {error}"))
-        else:
-            results.append(
-                _result(
-                    "FAIL",
-                    "working tree has uncommitted changes: " + ", ".join(paths),
-                    "commit or stash your changes",
-                )
-                if paths
-                else _result("ok", "working tree is clean")
+        def bypass_checks() -> list[Check]:
+            found: list[Check] = []
+            for agent, (command, _) in _agents_in_use(loaded).items():
+                adapter = config.adapter_for(loaded, agent)
+                refusal = _bypass_result(agent, adapter.name, command)
+                if refusal is not None:
+                    found.append(refusal)
+            return found
+
+        add("permission-bypass checks", bypass_checks)
+
+    add("working tree check", lambda: _tree_check(root, scope, allow_dirty))
+
+    def disk_check() -> list[Check]:
+        low_disk = agents.low_disk_message(shutil.disk_usage(root).free)
+        return [] if low_disk is None else [_result("FAIL", low_disk)]
+
+    add("disk space check", disk_check)
+
+    def live_check() -> list[Check]:
+        active = running.live(root)
+        return [
+            _result(
+                "FAIL",
+                f"another relay is running here (pid {active.pid})",
+                f"wait for it, or run: {invocation.command('stop')}",
             )
-    elif allow_dirty:
-        results.append(_result("ok", "working-tree check skipped (--allow-dirty)"))
-    else:
-        try:
-            dirty = bool(gitcheck.blocking_dirty_paths(root))
-        except gitcheck.GitError as error:
-            results.append(_result("FAIL", f"could not check working tree: {error}"))
-        else:
-            results.append(
-                _result(
-                    "FAIL",
-                    "working tree has uncommitted changes",
-                    "commit or stash your changes, or pass --allow-dirty",
-                )
-                if dirty
-                else _result("ok", "working tree is clean")
-            )
+            if active is not None
+            else _result("ok", "no other relay is running here")
+        ]
 
-    low_disk = agents.low_disk_message(shutil.disk_usage(root).free)
-    if low_disk is not None:
-        results.append(_result("FAIL", low_disk))
-
-    active = running.live(root)
-    results.append(
-        _result(
-            "FAIL",
-            f"another relay is running here (pid {active.pid})",
-            f"wait for it, or run: {invocation.command('stop')}",
-        )
-        if active is not None
-        else _result("ok", "no other relay is running here")
-    )
+    add("running relay check", live_check)
     return results
+
+
+def _crashed(name: str, error: Exception) -> Check:
+    lines = str(error).splitlines()
+    first = lines[0][:200] if lines else ""
+    return _result(
+        "FAIL",
+        f"{name} could not run: {type(error).__name__}: {first}",
+        f"run {invocation.command('doctor')} again; if it repeats, report it",
+    )
+
+
+def _stage_checks(root: Path, settings: config.Config) -> list[Check]:
+    found: list[Check] = []
+    if settings.pipeline is None:
+        return found
+    for stage in settings.pipeline.stages.values():
+        try:
+            prompts.load(root, stage.prompt)
+        except prompts.PromptError as error:
+            found.append(
+                _result(
+                    "FAIL",
+                    str(error),
+                    f"add .whyline/relay/prompts/{stage.prompt}.md, or name a "
+                    "built-in prompt (implement, review) instead",
+                )
+            )
+    return found
+
+
+def _tree_check(root: Path, scope: str, allow_dirty: bool) -> list[Check]:
+    if scope != "repository" and allow_dirty:
+        return [_result("ok", "working-tree check skipped (--allow-dirty)")]
+    try:
+        paths = gitcheck.blocking_dirty_paths(root)
+    except gitcheck.GitError as error:
+        return [_result("FAIL", f"could not check working tree: {error}")]
+    if scope == "repository":
+        message = "working tree has uncommitted changes: " + ", ".join(paths)
+        hint = "commit or stash your changes"
+    else:
+        message = "working tree has uncommitted changes"
+        hint = "commit or stash your changes, or pass --allow-dirty"
+    if not paths:
+        return [_result("ok", "working tree is clean")]
+    return [_result("FAIL", message, hint)]
 
 
 def failures(checks: list[Check]) -> int:
